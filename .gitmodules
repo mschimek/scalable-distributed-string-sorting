@@ -1,3 +1,6 @@
 [submodule "tlx"]
 	path = tlx
 	url = https://github.com/tlx/tlx.git
+[submodule "kamping"]
+	path = kamping
+	url = git@github.com:kamping-site/kamping.git

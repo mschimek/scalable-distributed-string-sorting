@@ -29,5 +29,7 @@ message(STATUS "Run: ${MPIEXEC} ${MPIEXEC_NUMPROC_FLAG} ${MPIEXEC_MAX_NUMPROCS} 
 
 add_subdirectory(tlx)
 
+add_subdirectory(kamping)
+
 add_subdirectory(src)
 include_directories(src)
