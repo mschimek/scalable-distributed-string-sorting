@@ -27,6 +27,7 @@ find_package(MPI REQUIRED)
 message(STATUS "Run: ${MPIEXEC} ${MPIEXEC_NUMPROC_FLAG} ${MPIEXEC_MAX_NUMPROCS} ${MPIEXEC_PREFLAGS} EXECUTABLE ${MPIEXEC_POSTFLAGS} ARGS")
 # todo target_link_libraries(MyTarget PUBLIC MPI::MPI_CXX)
 
-add_subdirectory(src)
+add_subdirectory(tlx)
 
+add_subdirectory(src)
 include_directories(src)
