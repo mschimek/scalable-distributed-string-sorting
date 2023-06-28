@@ -1,0 +1,263 @@
+/*******************************************************************************
+ * thrill/common/item_serialization_tools.hpp
+ *
+ * Abstract methods common to many serializer and deserializers: serialize
+ * Varint (7-bit encoding), and Strings by prefixing them with their length.
+ * Included by BlockWriter and BinaryBufferBuilder via CRTP.
+ *
+ * Part of Project Thrill - http://project-thrill.org
+ *
+ * Copyright (C) 2015 Timo Bingmann <tb@panthema.net>
+ *
+ * All rights reserved. Published under the BSD-2 license in the LICENSE file.
+ ******************************************************************************/
+
+#pragma once
+#ifndef THRILL_COMMON_ITEM_SERIALIZATION_TOOLS_HEADER
+#define THRILL_COMMON_ITEM_SERIALIZATION_TOOLS_HEADER
+
+#include <cstdint>
+#include <stdexcept>
+#include <string>
+
+namespace dss_schimek {
+
+/*!
+ * CRTP class to enhance item/memory writer classes with Varint encoding and
+ * String encoding.
+ */
+template <typename Writer>
+class ItemWriterToolsBase {
+public:
+    //! Append a varint to the writer.
+    Writer& PutVarint32(uint32_t v) {
+        Writer& w = *static_cast<Writer*>(this);
+
+        if (v < 128) {
+            w.PutByte(uint8_t(v));
+        } else if (v < 128 * 128) {
+            w.PutByte(uint8_t(((v >> 0) & 0x7F) | 0x80));
+            w.PutByte(uint8_t((v >> 7) & 0x7F));
+        } else if (v < 128 * 128 * 128) {
+            w.PutByte(uint8_t(((v >> 0) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 7) & 0x7F) | 0x80));
+            w.PutByte(uint8_t((v >> 14) & 0x7F));
+        } else if (v < 128 * 128 * 128 * 128) {
+            w.PutByte(uint8_t(((v >> 0) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 7) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 14) & 0x7F) | 0x80));
+            w.PutByte(uint8_t((v >> 21) & 0x7F));
+        } else {
+            w.PutByte(uint8_t(((v >> 0) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 7) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 14) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 21) & 0x7F) | 0x80));
+            w.PutByte(uint8_t((v >> 28) & 0x7F));
+        }
+
+        return w;
+    }
+
+    //! Append a varint to the writer.
+    Writer& PutVarint(uint64_t v) {
+        Writer& w = *static_cast<Writer*>(this);
+
+        if (v < 128) {
+            w.PutByte(uint8_t(v));
+        } else if (v < 128 * 128) {
+            w.PutByte(uint8_t(((v >> 00) & 0x7F) | 0x80));
+            w.PutByte(uint8_t((v >> 07) & 0x7F));
+        } else if (v < 128 * 128 * 128) {
+            w.PutByte(uint8_t(((v >> 00) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 07) & 0x7F) | 0x80));
+            w.PutByte(uint8_t((v >> 14) & 0x7F));
+        } else if (v < 128 * 128 * 128 * 128) {
+            w.PutByte(uint8_t(((v >> 00) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 07) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 14) & 0x7F) | 0x80));
+            w.PutByte(uint8_t((v >> 21) & 0x7F));
+        } else if (v < 128llu * 128 * 128 * 128 * 128) {
+            w.PutByte(uint8_t(((v >> 00) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 07) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 14) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 21) & 0x7F) | 0x80));
+            w.PutByte(uint8_t((v >> 28) & 0x7F));
+        } else if (v < 128llu * 128 * 128 * 128 * 128 * 128) {
+            w.PutByte(uint8_t(((v >> 00) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 07) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 14) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 21) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 28) & 0x7F) | 0x80));
+            w.PutByte(uint8_t((v >> 35) & 0x7F));
+        } else if (v < 128llu * 128 * 128 * 128 * 128 * 128 * 128) {
+            w.PutByte(uint8_t(((v >> 00) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 07) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 14) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 21) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 28) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 35) & 0x7F) | 0x80));
+            w.PutByte(uint8_t((v >> 42) & 0x7F));
+        } else if (v < 128llu * 128 * 128 * 128 * 128 * 128 * 128 * 128) {
+            w.PutByte(uint8_t(((v >> 00) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 07) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 14) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 21) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 28) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 35) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 42) & 0x7F) | 0x80));
+            w.PutByte(uint8_t((v >> 49) & 0x7F));
+        } else if (v < 128llu * 128 * 128 * 128 * 128 * 128 * 128 * 128 * 128) {
+            w.PutByte(uint8_t(((v >> 00) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 07) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 14) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 21) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 28) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 35) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 42) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 49) & 0x7F) | 0x80));
+            w.PutByte(uint8_t((v >> 56) & 0x7F));
+        } else {
+            w.PutByte(uint8_t(((v >> 00) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 07) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 14) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 21) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 28) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 35) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 42) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 49) & 0x7F) | 0x80));
+            w.PutByte(uint8_t(((v >> 56) & 0x7F) | 0x80));
+            w.PutByte(uint8_t((v >> 63) & 0x7F));
+        }
+
+        return w;
+    }
+
+    //! Put a string by saving it's length followed by the data itself.
+    Writer& PutString(char const* data, size_t len) { return PutVarint(len).Append(data, len); }
+
+    //! Put a string by saving it's length followed by the data itself.
+    Writer& PutString(uint8_t const* data, size_t len) { return PutVarint(len).Append(data, len); }
+
+    //! Put a string by saving it's length followed by the data itself.
+    Writer& PutString(std::string const& str) { return PutString(str.data(), str.size()); }
+};
+
+template <typename OutputIterator>
+class Writer : public ItemWriterToolsBase<Writer<OutputIterator>> {
+    OutputIterator data;
+    size_t offset;
+
+public:
+    Writer(OutputIterator data) : data(data), offset(0) {}
+    void PutByte(uint8_t byte) {
+        *(data + offset) = byte;
+        ++offset;
+    }
+    size_t getNumPutBytes() { return offset; }
+};
+
+/*!
+ * CRTP class to enhance item/memory reader classes with Varint decoding and
+ * String decoding.
+ */
+template <typename Reader>
+class ItemReaderToolsBase {
+public:
+    //! Fetch a varint with up to 32-bit from the reader at the cursor.
+    uint32_t GetVarint32() {
+        Reader& r = *static_cast<Reader*>(this);
+
+        uint32_t u, v = r.GetByte();
+        if (!(v & 0x80))
+            return v;
+        v &= 0x7F;
+        u = r.GetByte(), v |= (u & 0x7F) << 7;
+        if (!(u & 0x80))
+            return v;
+        u = r.GetByte(), v |= (u & 0x7F) << 14;
+        if (!(u & 0x80))
+            return v;
+        u = r.GetByte(), v |= (u & 0x7F) << 21;
+        if (!(u & 0x80))
+            return v;
+        u = r.GetByte();
+        if (u & 0xF0)
+            throw std::overflow_error("Overflow during varint decoding.");
+        v |= (u & 0x7F) << 28;
+        return v;
+    }
+
+    //! Fetch a 64-bit varint from the reader at the cursor.
+    uint64_t GetVarint() {
+        Reader& r = *static_cast<Reader*>(this);
+
+        uint64_t u, v = r.GetByte();
+        if (!(v & 0x80))
+            return v;
+        v &= 0x7F;
+        u = r.GetByte(), v |= (u & 0x7F) << 7;
+        if (!(u & 0x80))
+            return v;
+        u = r.GetByte(), v |= (u & 0x7F) << 14;
+        if (!(u & 0x80))
+            return v;
+        u = r.GetByte(), v |= (u & 0x7F) << 21;
+        if (!(u & 0x80))
+            return v;
+        u = r.GetByte(), v |= (u & 0x7F) << 28;
+        if (!(u & 0x80))
+            return v;
+        u = r.GetByte(), v |= (u & 0x7F) << 35;
+        if (!(u & 0x80))
+            return v;
+        u = r.GetByte(), v |= (u & 0x7F) << 42;
+        if (!(u & 0x80))
+            return v;
+        u = r.GetByte(), v |= (u & 0x7F) << 49;
+        if (!(u & 0x80))
+            return v;
+        u = r.GetByte(), v |= (u & 0x7F) << 56;
+        if (!(u & 0x80))
+            return v;
+        u = r.GetByte();
+        if (u & 0xFE)
+            throw std::overflow_error("Overflow during varint64 decoding.");
+        v |= (u & 0x7F) << 63;
+        return v;
+    }
+
+    //! Fetch a string which was Put via Put_string().
+    std::string GetString() {
+        Reader& r = *static_cast<Reader*>(this);
+        return r.Read(GetVarint());
+    }
+};
+
+template <typename InputIterator, typename OutputIterator>
+class Reader : public ItemReaderToolsBase<Reader<InputIterator, OutputIterator>> {
+    InputIterator input;
+    size_t offset;
+    OutputIterator begin;
+    OutputIterator end;
+
+public:
+    Reader(InputIterator input, OutputIterator begin, OutputIterator end)
+        : input(input),
+          offset(0u),
+          begin(begin),
+          end(end) {}
+
+    uint8_t GetByte() { return *(input + offset++); }
+
+    void decode() {
+        for (OutputIterator it = begin; it != end; ++it) {
+            *it = ItemReaderToolsBase<Reader<InputIterator, OutputIterator>>::GetVarint();
+        }
+    }
+    uint64_t getNumReadBytes() { return offset; }
+};
+} // namespace dss_schimek
+
+#endif // !THRILL_COMMON_ITEM_SERIALIZATION_TOOLS_HEADER
+
+/******************************************************************************/

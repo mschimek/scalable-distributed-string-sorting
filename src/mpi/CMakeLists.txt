@@ -1,0 +1,19 @@
+target_sources(dss_base
+    PUBLIC
+        allgather.hpp
+        allreduce.hpp
+        alltoall.hpp
+        big_type.hpp
+        byte_encoder.hpp
+        environment.cpp
+        environment.hpp
+        gather.hpp
+        is_sorted.hpp
+        readInput.hpp
+        scan.hpp
+        shift.hpp
+        synchron.hpp
+        type_mapper.hpp
+        warmup.hpp
+        writeToFile.hpp
+)

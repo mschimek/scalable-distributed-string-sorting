@@ -1,0 +1,9 @@
+target_sources(dss_base
+    PUBLIC
+        bit_stream.hpp
+        delta_stream.hpp
+        golomb_bit_stream.hpp
+        golomb_encoding.hpp
+        integer_compression.hpp
+        thrill_math.hpp
+)

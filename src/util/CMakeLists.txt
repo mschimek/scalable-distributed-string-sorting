@@ -1,0 +1,17 @@
+target_sources(dss_base
+    PUBLIC
+        are_same.hpp
+        draw_from_distribution.hpp
+        drop.hpp
+        leanNonTimer.hpp
+        macros.hpp
+        measuringTool.hpp
+        nonTimer.hpp
+        random_string_generator.hpp
+        string.hpp
+        string_set.cpp
+        string_set.hpp
+        structs.hpp
+        timer.hpp
+        uint_types.hpp
+)
