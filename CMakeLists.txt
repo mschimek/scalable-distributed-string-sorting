@@ -31,6 +31,9 @@ message(STATUS "Run: ${MPIEXEC} ${MPIEXEC_NUMPROC_FLAG} ${MPIEXEC_MAX_NUMPROCS} 
 add_subdirectory(tlx)
 add_subdirectory(kamping)
 
+set(IPS4O_DISABLE_PARALLEL ON)
+add_subdirectory(ips4o)
+
 add_library(dss_base)
 set_target_properties(dss_base PROPERTIES LINKER_LANGUAGE CXX)
 
@@ -38,5 +41,6 @@ target_include_directories(dss_base PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(dss_base PUBLIC kamping)
 target_link_libraries(dss_base PUBLIC tlx)
 target_link_libraries(dss_base PUBLIC MPI::MPI_CXX)
+target_link_libraries(dss_base PRIVATE ips4o)
 
 add_subdirectory(src)

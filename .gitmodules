@@ -4,3 +4,6 @@
 [submodule "kamping"]
 	path = kamping
 	url = git@github.com:kamping-site/kamping.git
+[submodule "ips4o"]
+	path = ips4o
+	url = https://github.com/ips4o/ips4o
