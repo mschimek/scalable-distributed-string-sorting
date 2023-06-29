@@ -9,17 +9,17 @@
 #pragma once
 
 #if defined(__GNUC__) || defined(__clang__)
-    #define DSSS_LIKELY(c)   __builtin_expect((c), 1)
-    #define DSSS_UNLIKELY(c) __builtin_expect((c), 0)
+#define DSSS_LIKELY(c)   __builtin_expect((c), 1)
+#define DSSS_UNLIKELY(c) __builtin_expect((c), 0)
 #else
-    #define DSSS_LIKELY(c)   c
-    #define DSSS_UNLIKELY(c) c
+#define DSSS_LIKELY(c)   c
+#define DSSS_UNLIKELY(c) c
 #endif
 
 #if defined(__GNUC__) || defined(__clang__)
-    #define DSSS_ATTRIBUTE_PACKED __attribute__((packed))
+#define DSSS_ATTRIBUTE_PACKED __attribute__((packed))
 #else
-    #define DSSS_ATTRIBUTE_PACKED
+#define DSSS_ATTRIBUTE_PACKED
 #endif
 
 /******************************************************************************/

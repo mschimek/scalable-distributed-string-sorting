@@ -1,33 +1,37 @@
 #pragma once
 
 #include <cstdint>
-#include <vector>
 #include <utility>
+#include <vector>
+
 #include "mpi/environment.hpp"
 #include "strings/stringcontainer.hpp"
 #include "strings/stringset.hpp"
 
 template <typename StringContainer>
-void sortRanges(StringContainer& indexContainer,
-    const std::vector<std::pair<uint64_t, uint64_t>>& ranges) {
+void sortRanges(
+    StringContainer& indexContainer, std::vector<std::pair<uint64_t, uint64_t>> const& ranges
+) {
     using StringSet = typename StringContainer::StringSet;
     using IndexString = typename StringSet::String;
-    for (auto [begin, end] : ranges) {
-        std::sort(indexContainer.strings() + begin,
+    for (auto [begin, end]: ranges) {
+        std::sort(
+            indexContainer.strings() + begin,
             indexContainer.strings() + end,
-            [&](IndexString a, IndexString b) { return a.index < b.index; });
+            [&](IndexString a, IndexString b) { return a.index < b.index; }
+        );
         ;
     }
 }
 
 template <typename StringLcpPtr>
-std::vector<std::pair<uint64_t, uint64_t>> getDuplicateRanges(
-    StringLcpPtr strptr) {
+std::vector<std::pair<uint64_t, uint64_t>> getDuplicateRanges(StringLcpPtr strptr) {
     using StartEnd = std::pair<uint64_t, uint64_t>;
-    //using String = typename StringLcpPtr::StringSet::String;
+    // using String = typename StringLcpPtr::StringSet::String;
     std::vector<StartEnd> intervals;
 
-    if (strptr.size() == 0) return intervals;
+    if (strptr.size() == 0)
+        return intervals;
 
     dss_schimek::mpi::environment env;
 
@@ -45,8 +49,7 @@ std::vector<std::pair<uint64_t, uint64_t>> getDuplicateRanges(
             if (intervals.back().first + 1 != i) {
                 intervals.back().second = i;
                 intervals.emplace_back(i, i);
-            }
-            else {
+            } else {
                 intervals.back().first = i;
             }
         }

@@ -21,15 +21,9 @@ struct PhaseValue {
     size_t value;
 
     PhaseValue(std::string const& phase, const size_t value) : phase(phase), value(value) {}
-    std::string const& pseudoKey() const {
-        return phase;
-    }
-    void setValue(size_t value_) {
-        value = value_;
-    }
-    size_t getValue() const {
-        return value;
-    }
+    std::string const& pseudoKey() const { return phase; }
+    void setValue(size_t value_) { value = value_; }
+    size_t getValue() const { return value; }
 };
 
 struct PhaseCounterPerPhaseRoundDescriptionTypeRawCommunicationSumUpValue {
@@ -63,29 +57,17 @@ struct PhaseCounterPerPhaseRoundDescriptionTypeRawCommunicationSumUpValue {
           sumUp(sumUp),
           value(value) {}
 
-    std::string const& pseudoKey() const {
-        return phase;
-    }
+    std::string const& pseudoKey() const { return phase; }
 
-    void setPseudoKeyCounter(size_t counter) {
-        counterPerPhase = counter;
-    }
+    void setPseudoKeyCounter(size_t counter) { counterPerPhase = counter; }
 
-    void setType(std::string const& type_) {
-        type = type_;
-    }
+    void setType(std::string const& type_) { type = type_; }
 
-    void setValue(size_t value_) {
-        value = value_;
-    }
+    void setValue(size_t value_) { value = value_; }
 
-    size_t getValue() const {
-        return value;
-    }
+    size_t getValue() const { return value; }
 
-    bool getSumUp() {
-        return sumUp;
-    }
+    bool getSumUp() { return sumUp; }
 
     friend std::ostream& operator<<(
         std::ostream& stream,
@@ -111,9 +93,7 @@ struct PhaseRoundDescription {
           round(round),
           description(description) {}
 
-    std::string const& pseudoKey() const {
-        return phase;
-    }
+    std::string const& pseudoKey() const { return phase; }
 
     bool operator<(PhaseRoundDescription const& rhs) const {
         return std::tie(phase, round, description)
@@ -144,17 +124,11 @@ struct CounterPerPhaseTypeRawCommunicationSumUpValue {
           sumUp(sumUp),
           value(value) {}
 
-    void setPseudoKeyCounter(size_t counter) {
-        counterPerPhase = counter;
-    }
+    void setPseudoKeyCounter(size_t counter) { counterPerPhase = counter; }
 
-    void setType(std::string const& type_) {
-        type = type_;
-    }
+    void setType(std::string const& type_) { type = type_; }
 
-    void setValue(size_t value_) {
-        value = value_;
-    }
+    void setValue(size_t value_) { value = value_; }
 };
 
 class MeasuringTool {
@@ -317,33 +291,19 @@ public:
         for (auto const& data: collect())
             stream << data << std::endl;
     }
-    void disableBarrier(bool value) {
-        timer.setDisableBarrier(value);
-    }
+    void disableBarrier(bool value) { timer.setDisableBarrier(value); }
 
-    void enable() {
-        disabled = false;
-    }
+    void enable() { disabled = false; }
 
-    void disable() {
-        disabled = true;
-    }
+    void disable() { disabled = true; }
 
-    void setVerbose(bool const value) {
-        verbose = value;
-    }
+    void setVerbose(bool const value) { verbose = value; }
 
-    void setPrefix(std::string const& prefix_) {
-        prefix = prefix_;
-    }
+    void setPrefix(std::string const& prefix_) { prefix = prefix_; }
 
-    void setPhase(std::string const& phase) {
-        curPhase = phase;
-    }
+    void setPhase(std::string const& phase) { curPhase = phase; }
 
-    void setRound(size_t round) {
-        curRound = round;
-    }
+    void setRound(size_t round) { curRound = round; }
 
 private:
     bool disabled = false;

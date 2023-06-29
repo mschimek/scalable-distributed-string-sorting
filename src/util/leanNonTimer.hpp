@@ -38,9 +38,7 @@ class LeanNonTimer {
     static const size_t allocationSize = 10000;
 
 public:
-    LeanNonTimer() {
-        records.reserve(allocationSize);
-    }
+    LeanNonTimer() { records.reserve(allocationSize); }
 
     template <typename OutIt>
     void collect(OutIt out) {

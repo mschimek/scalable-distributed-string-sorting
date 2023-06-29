@@ -36,9 +36,7 @@ class NonTimer {
     static const size_t allocationSize = 10000;
 
 public:
-    NonTimer() {
-        records.reserve(allocationSize);
-    }
+    NonTimer() { records.reserve(allocationSize); }
 
     template <typename OutIt>
     void collect(OutIt out) {

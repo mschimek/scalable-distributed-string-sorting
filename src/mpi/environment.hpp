@@ -8,20 +8,21 @@
 
 #pragma once
 
-#include <iostream>
 #include <cstdint>
+#include <iostream>
 #include <limits>
+
+#include <kamping/communicator.hpp>
 #include <mpi.h>
 
 namespace dss_schimek::mpi {
 
 /// \brief Provides an interface for MPI stats (e.g. communicator size/rank).
 class environment {
-
 public:
     environment();
     environment(MPI_Comm communicator);
-    environment(const environment& other);
+    environment(environment const& other);
     environment(environment&& other);
 
     environment& operator=(environment&& other);
@@ -55,8 +56,7 @@ public:
         MPI_Comm_size(communicator_, &world_size_tmp);
         if (world_rank_tmp < 0 || world_size_tmp < 0) {
             std::cout << "rank: " << world_rank_tmp << " or "
-                      << "size: " << world_size_tmp << " is negative!"
-                      << std::endl;
+                      << "size: " << world_size_tmp << " is negative!" << std::endl;
         }
         world_rank_ = static_cast<uint32_t>(world_rank_tmp);
         world_size_ = static_cast<uint32_t>(world_size_tmp);
@@ -72,9 +72,7 @@ public:
 
     /// \return The maximum integer value that MPI can handle as amount of
     /// that must be communicated
-    constexpr std::size_t mpi_max_int() {
-        return std::numeric_limits<std::int32_t>::max();
-    }
+    constexpr std::size_t mpi_max_int() { return std::numeric_limits<std::int32_t>::max(); }
 
     /// \brief Gets the communiator the environment was creasted for.
     /// \return The communicator of the environment.

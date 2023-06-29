@@ -101,9 +101,7 @@ public:
         }
     }
 
-    void setDisableBarrier(bool value) {
-        disableBarrier = value;
-    }
+    void setDisableBarrier(bool value) { disableBarrier = value; }
 
 private:
     bool measurementEnabled = true;

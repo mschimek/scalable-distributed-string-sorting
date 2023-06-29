@@ -66,14 +66,10 @@ public:
     StringPtr(StringSet const& ss) : active_(ss) {}
 
     //! return currently active array
-    StringSet const& active() const {
-        return active_;
-    }
+    StringSet const& active() const { return active_; }
 
     //! return valid length
-    size_t size() const {
-        return active_.size();
-    }
+    size_t size() const { return active_.size(); }
 
     //! Advance (both) pointers by given offset, return sub-array
     StringPtr sub(size_t offset, size_t _size) const {
@@ -97,9 +93,7 @@ public:
     static bool const with_lcp = false;
 
     //! return reference to the i-th lcp
-    LcpType& lcp(size_t /* i */) const {
-        abort();
-    }
+    LcpType& lcp(size_t /* i */) const { abort(); }
 
     //! set the i-th lcp to v and check its value
     void set_lcp(size_t /* i */, LcpType const& /* v */) const {}
@@ -111,9 +105,7 @@ public:
     //! set the i-th distinguishing cache charater to c
 
     //! Return pointer to LCP array
-    LcpType* lcparray() const {
-        abort();
-    }
+    LcpType* lcparray() const { abort(); }
 };
 
 template <typename _StringSet>
@@ -144,14 +136,10 @@ public:
           strings_(ss.begin()) {}
 
     //! return currently active array
-    StringSet const& active() const {
-        return active_;
-    }
+    StringSet const& active() const { return active_; }
 
     ////! return valid length
-    size_t size() const {
-        return active_.size() - offset;
-    }
+    size_t size() const { return active_.size() - offset; }
 
     ////! Advance (both) pointers by given offset, return sub-array
     StringLcpPtrMergeAdapter sub(size_t _offset, size_t _size) const {
@@ -202,26 +190,18 @@ public:
     //   return lcp_;
     // }
 
-    bool empty() const {
-        return (active().size() - offset <= 0);
-    }
+    bool empty() const { return (active().size() - offset <= 0); }
 
     void setFirst(String str, LcpType lcp) {
         *(strings_ + offset) = str;
         *(lcp_ + offset) = lcp;
     }
 
-    String& firstString() const {
-        return *(strings_ + offset);
-    }
+    String& firstString() const { return *(strings_ + offset); }
 
-    CharIt firstStringChars() const {
-        return active().get_chars(*(strings_ + offset), 0);
-    }
+    CharIt firstStringChars() const { return active().get_chars(*(strings_ + offset), 0); }
 
-    LcpType& firstLcp() const {
-        return *(lcp_ + offset);
-    }
+    LcpType& firstLcp() const { return *(lcp_ + offset); }
 
     StringLcpPtrMergeAdapter& operator++() {
         ++offset;
@@ -248,14 +228,10 @@ public:
     StringLcpPtr(StringSet const& ss, LcpType* lcp_begin) : active_(ss), lcp_(lcp_begin) {}
 
     //! return currently active array
-    StringSet const& active() const {
-        return active_;
-    }
+    StringSet const& active() const { return active_; }
 
     //! return valid length
-    size_t size() const {
-        return active_.size();
-    }
+    size_t size() const { return active_.size(); }
 
     //! Advance (both) pointers by given offset, return sub-array
     StringLcpPtr sub(size_t offset, size_t _size) const {
@@ -276,9 +252,7 @@ public:
     }
 
     //! return reference to the i-th lcp
-    LcpType& lcp(size_t i) const {
-        return lcp_[i];
-    }
+    LcpType& lcp(size_t i) const { return lcp_[i]; }
 
     //! set the i-th lcp to v and check its value
     void set_lcp(size_t i, LcpType const& v) const {
@@ -290,13 +264,9 @@ public:
 
     //! Fill whole LCP array with n times the value v, ! excluding the first
     //! LCP[0] position
-    void fill_lcp(LcpType v) {
-        std::fill_n(lcp_ + 1, size() - 1, v);
-    }
+    void fill_lcp(LcpType v) { std::fill_n(lcp_ + 1, size() - 1, v); }
 
-    LcpType* lcp_array() const {
-        return lcp_;
-    }
+    LcpType* lcp_array() const { return lcp_; }
 };
 /******************************************************************************/
 
@@ -323,24 +293,16 @@ public:
           flipped_(flipped) {}
 
     //! true if flipped to back array
-    bool flipped() const {
-        return flipped_;
-    }
+    bool flipped() const { return flipped_; }
 
     //! return currently active array
-    StringSet const& active() const {
-        return active_;
-    }
+    StringSet const& active() const { return active_; }
 
     //! return current shadow array
-    StringSet const& shadow() const {
-        return shadow_;
-    }
+    StringSet const& shadow() const { return shadow_; }
 
     //! return valid length
-    size_t size() const {
-        return active_.size();
-    }
+    size_t size() const { return active_.size(); }
 
     //! Advance (both) pointers by given offset, return sub-array
     StringShadowPtr sub(size_t offset, size_t _size) const {
@@ -365,14 +327,10 @@ public:
 
     //! construct a StringShadowPtr object specifying a sub-array with flipping
     //! to other array.
-    StringShadowPtr flip() const {
-        return StringShadowPtr(shadow_, active_, !flipped_);
-    }
+    StringShadowPtr flip() const { return StringShadowPtr(shadow_, active_, !flipped_); }
 
     //! Return the original for this StringShadowPtr for LCP calculation
-    StringShadowPtr original() const {
-        return flipped_ ? flip() : *this;
-    }
+    StringShadowPtr original() const { return flipped_ ? flip() : *this; }
 
     //! return subarray pointer to n strings in original array, might copy from
     //! shadow before returning.
@@ -386,9 +344,7 @@ public:
     }
 
     //! check sorted order of strings
-    bool check() const {
-        return true;
-    }
+    bool check() const { return true; }
 
     //! Return i-th string pointer from active_
     String& str(size_t i) const {
@@ -437,24 +393,16 @@ public:
           flipped_(flipped) {}
 
     //! true if flipped to back array
-    bool flipped() const {
-        return flipped_;
-    }
+    bool flipped() const { return flipped_; }
 
     //! return currently active array
-    StringSet const& active() const {
-        return active_;
-    }
+    StringSet const& active() const { return active_; }
 
     //! return current shadow array
-    StringSet const& shadow() const {
-        return shadow_;
-    }
+    StringSet const& shadow() const { return shadow_; }
 
     //! return valid length
-    size_t size() const {
-        return active_.size();
-    }
+    size_t size() const { return active_.size(); }
 
     //! Advance (both) pointers by given offset, return sub-array
     StringShadowLcpPtr sub(size_t offset, size_t _size) const {
@@ -486,9 +434,7 @@ public:
     }
 
     //! Return the original for this StringShadowPtr for LCP calculation
-    StringShadowLcpPtr original() const {
-        return flipped_ ? flip() : *this;
-    }
+    StringShadowLcpPtr original() const { return flipped_ ? flip() : *this; }
 
     //! return subarray pointer to n strings in original array, might copy from
     //! shadow before returning.
@@ -502,9 +448,7 @@ public:
     }
 
     //! check sorted order of strings
-    bool check() const {
-        return true;
-    }
+    bool check() const { return true; }
 
     //! Return i-th string pointer from active_
     String& str(size_t i) const {
@@ -513,23 +457,15 @@ public:
     }
 
     //! return reference to the i-th lcp
-    LcpType& lcp(size_t i) const {
-        return lcp_[i];
-    }
+    LcpType& lcp(size_t i) const { return lcp_[i]; }
 
     //! set the i-th lcp to v and check its value
-    void set_lcp(size_t i, LcpType const& v) const {
-        lcp_[i] = v;
-    }
+    void set_lcp(size_t i, LcpType const& v) const { lcp_[i] = v; }
 
     //! Fill whole LCP array with n times the value v, ! excluding the first
     //! LCP[0] position
-    void fill_lcp(LcpType v) {
-        std::fill_n(lcp_ + 1, size() - 1, v);
-    }
-    LcpType* lcp_array() const {
-        return lcp_;
-    }
+    void fill_lcp(LcpType v) { std::fill_n(lcp_ + 1, size() - 1, v); }
+    LcpType* lcp_array() const { return lcp_; }
 };
 } // namespace dss_schimek
 /******************************************************************************/
