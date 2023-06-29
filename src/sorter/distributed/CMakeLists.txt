@@ -1,0 +1,11 @@
+target_sources(dss_base
+    PUBLIC
+        bloomfilter.hpp
+        duplicateSorting.hpp
+        lcp_aware_number_string_splitting.hpp
+        merging.hpp
+        misc.hpp
+        prefix_doubling.hpp
+        samplingStrategies.hpp
+        tracker.hpp
+)

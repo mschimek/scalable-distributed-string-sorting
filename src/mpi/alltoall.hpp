@@ -494,7 +494,7 @@ struct AllToAllStringImpl {
         //    stringsWritten += sendCountsString[interval];
         //}
         setLcpAtStartOfInterval(
-            stringLcpPtr.get_lcp(),
+            stringLcpPtr.lcp(),
             sendCountsString.begin(),
             sendCountsString.end()
         );
@@ -561,7 +561,7 @@ struct AllToAllStringImpl<
         //    *(stringLcpPtr.get_lcp() + stringsWritten) = 0;
         //    stringsWritten += send_counts[interval];
         //}
-        setLcpAtStartOfInterval(stringLcpPtr.get_lcp(), send_counts.begin(), send_counts.end());
+        setLcpAtStartOfInterval(stringLcpPtr.lcp(), send_counts.begin(), send_counts.end());
 
         std::vector<unsigned char> send_buffer(send_data.char_size());
         uint64_t curPos = 0;
@@ -711,7 +711,7 @@ struct AllToAllStringImpl<
         //    stringsWritten += sendCountsString[interval];
         //}
         setLcpAtStartOfInterval(
-            stringLcpPtr.get_lcp(),
+            stringLcpPtr.lcp(),
             sendCountsString.begin(),
             sendCountsString.end()
         );
