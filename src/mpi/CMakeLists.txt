@@ -5,6 +5,7 @@ target_sources(dss_base
         alltoall.hpp
         big_type.hpp
         byte_encoder.hpp
+        communicator.hpp
         environment.cpp
         environment.hpp
         gather.hpp
