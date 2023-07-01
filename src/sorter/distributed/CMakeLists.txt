@@ -5,6 +5,7 @@ target_sources(dss_base
         lcp_aware_number_string_splitting.hpp
         merging.hpp
         misc.hpp
+        partition.hpp
         prefix_doubling.hpp
         samplingStrategies.hpp
         tracker.hpp
