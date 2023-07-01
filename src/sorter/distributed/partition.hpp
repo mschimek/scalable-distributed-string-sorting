@@ -36,13 +36,12 @@ public:
 
         measuring_tool.start("sample_splitters");
         std::vector<unsigned char> raw_splitters =
-            Sampler::sample_splitters(ss, 2 * global_lcp_avg, sampling_factor);
+            Sampler::sample_splitters(ss, 2 * global_lcp_avg, comm.size(), sampling_factor, comm);
         measuring_tool.stop("sample_splitters");
 
         measuring_tool.start("sort_splitter");
-        std::mt19937_64 generator{3469931 + comm.rank()};
-
         Comparator comp;
+        std::mt19937_64 generator{3469931 + comm.rank()};
         RQuick::Data<StringContainer, StringContainer::isIndexed> sample_data;
         sample_data.rawStrings = std::move(raw_splitters); // TODO
         measuring_tool.disable();

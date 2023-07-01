@@ -1,50 +1,71 @@
+// (c) 2019 Matthias Schimek
+// (c) 2023 Pascal Mehnert
+// This code is licensed under BSD 2-Clause License (see LICENSE for details)
+
 #pragma once
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <numeric>
+#include <string_view>
 #include <vector>
 
-#include "mpi/allgather.hpp"
-#include "mpi/environment.hpp"
+#include <kamping/collectives/exscan.hpp>
+#include <kamping/named_parameters.hpp>
+
+#include "mpi/communicator.hpp"
 #include "util/measuringTool.hpp"
 
-namespace dss_schimek {
+namespace dss_mehnert {
 
-uint64_t getNumberSplitter(uint64_t PESize, uint64_t localSetSize, uint64_t overSamplingFactor) {
-    return std::min<uint64_t>(overSamplingFactor * (PESize - 1), localSetSize);
+inline uint64_t
+getNumberSplitter(uint64_t numPartitions, uint64_t localSetSize, uint64_t samplingFactor) {
+    return std::min<uint64_t>(samplingFactor * (numPartitions - 1), localSetSize);
 }
+
+// todo this function is entirely untested
+inline uint64_t getLocalOffset(uint64_t localStringSize, dss_mehnert::Communicator const& comm) {
+    return comm.exscan_single(
+        kamping::send_buf(localStringSize),
+        kamping::op(kamping::ops::plus<>{})
+    );
+}
+
+struct SampleIndices {
+    std::vector<unsigned char> sample;
+    std::vector<uint64_t> indices;
+};
 
 template <typename StringSet>
 class SampleSplittersNumStringsPolicy {
 public:
     static constexpr bool isIndexed = false;
-    static std::string getName() { return "NumStrings"; }
+    static constexpr std::string_view getName() { return "NumStrings"; }
 
     static std::vector<typename StringSet::Char> sample_splitters(
         StringSet const& ss,
         size_t maxLength,
+        uint64_t numPartitions,
         uint64_t samplingFactor,
-        dss_schimek::mpi::environment env = dss_schimek::mpi::environment()
+        [[maybe_unused]] Communicator const& comm
     ) {
-        using measurement::MeasuringTool;
+        using dss_schimek::measurement::MeasuringTool;
         using Char = typename StringSet::Char;
         using String = typename StringSet::String;
         MeasuringTool& measuringTool = MeasuringTool::measuringTool();
 
         const size_t local_num_strings = ss.size();
-        const size_t nr_splitters = getNumberSplitter(env.size(), ss.size(), samplingFactor);
+        const size_t nr_splitters = getNumberSplitter(numPartitions, ss.size(), samplingFactor);
         double const splitter_dist =
             static_cast<double>(local_num_strings) / static_cast<double>(nr_splitters + 1);
         std::vector<Char> raw_splitters;
-        // raw_splitters.reserve(nr_splitters * (maxLength + 1u));
         raw_splitters.reserve(nr_splitters * (100 + 1u));
 
         for (size_t i = 1; i <= nr_splitters; ++i) {
             const String splitter = ss[ss.begin() + static_cast<size_t>(i * splitter_dist)];
             const size_t splitterLength = ss.get_length(splitter);
-            const size_t usedSplitterLength =
-                splitterLength > (maxLength) ? (maxLength) : splitterLength;
+            const size_t usedSplitterLength = std::min(splitterLength, maxLength);
             std::copy_n(
                 ss.get_chars(splitter, 0),
                 usedSplitterLength,
@@ -58,17 +79,18 @@ public:
 
     static std::vector<typename StringSet::Char> sample_splitters(
         StringSet const& ss,
+        uint64_t numPartitions,
         uint64_t samplingFactor,
         std::vector<size_t> const& dist,
-        dss_schimek::mpi::environment env = dss_schimek::mpi::environment()
+        [[maybe_unused]] Communicator const& comm
     ) {
-        using measurement::MeasuringTool;
+        using dss_schimek::measurement::MeasuringTool;
         using Char = typename StringSet::Char;
         using String = typename StringSet::String;
         MeasuringTool& measuringTool = MeasuringTool::measuringTool();
 
         const size_t local_num_strings = ss.size();
-        const size_t nr_splitters = getNumberSplitter(env.size(), ss.size(), samplingFactor);
+        const size_t nr_splitters = getNumberSplitter(numPartitions, ss.size(), samplingFactor);
         double const splitter_dist =
             static_cast<double>(local_num_strings) / static_cast<double>(nr_splitters + 1);
         std::vector<Char> raw_splitters;
@@ -94,41 +116,28 @@ public:
     }
 };
 
-uint64_t getLocalOffset(uint64_t localStringSize) {
-    dss_schimek::mpi::environment env;
-    auto allOffsets = dss_schimek::mpi::allgather(localStringSize);
-    uint64_t localOffset = 0;
-    for (size_t i = 0; i < env.rank(); ++i)
-        localOffset += allOffsets[i];
-    return localOffset;
-}
-
-struct SampleIndices {
-    std::vector<unsigned char> sample;
-    std::vector<uint64_t> indices;
-};
-
 template <typename StringSet>
 class SampleIndexedSplittersNumStringsPolicy {
 public:
     static constexpr bool isIndexed = true;
-    static std::string getName() { return "IndexedNumStrings"; }
+    static constexpr std::string_view getName() { return "IndexedNumStrings"; }
 
     static SampleIndices sample_splitters(
         StringSet const& ss,
         size_t maxLength,
+        uint64_t numPartitions,
         uint64_t samplingFactor,
-        dss_schimek::mpi::environment env = dss_schimek::mpi::environment()
+        Communicator const& comm
     ) {
         using Char = typename StringSet::Char;
         using String = typename StringSet::String;
         SampleIndices sampleIndices;
 
-        uint64_t localOffset = getLocalOffset(ss.size());
+        uint64_t localOffset = getLocalOffset(ss.size(), comm);
 
         const size_t local_num_strings = ss.size();
         const size_t nr_splitters =
-            getNumberSplitter(env.size(), local_num_strings, samplingFactor);
+            getNumberSplitter(numPartitions, local_num_strings, samplingFactor);
         double const splitter_dist =
             static_cast<double>(local_num_strings) / static_cast<double>(nr_splitters + 1);
         std::vector<Char>& raw_splitters = sampleIndices.sample;
@@ -156,19 +165,20 @@ public:
 
     static SampleIndices sample_splitters(
         StringSet const& ss,
+        uint64_t numPartitions,
         uint64_t samplingFactor,
         std::vector<uint64_t> const& dist,
-        dss_schimek::mpi::environment env = dss_schimek::mpi::environment()
+        Communicator const& comm
     ) {
         using Char = typename StringSet::Char;
         using String = typename StringSet::String;
         SampleIndices sampleIndices;
 
-        uint64_t localOffset = getLocalOffset(ss.size());
+        uint64_t localOffset = getLocalOffset(ss.size(), comm);
 
         const size_t local_num_strings = ss.size();
         const size_t nr_splitters =
-            getNumberSplitter(env.size(), local_num_strings, samplingFactor);
+            getNumberSplitter(numPartitions, local_num_strings, samplingFactor);
         double const splitter_dist =
             static_cast<double>(local_num_strings) / static_cast<double>(nr_splitters + 1);
         std::vector<Char>& raw_splitters = sampleIndices.sample;
@@ -200,19 +210,20 @@ template <typename StringSet>
 class SampleIndexedSplittersNumCharsPolicy {
 public:
     static constexpr bool isIndexed = true;
-    static std::string getName() { return "IndexedNumChars"; }
+    static constexpr std::string_view getName() { return "IndexedNumChars"; }
 
     static SampleIndices sample_splitters(
         StringSet const& ss,
         const size_t maxLength,
+        const uint64_t numPartitions,
         const uint64_t samplingFactor,
-        dss_schimek::mpi::environment env = dss_schimek::mpi::environment()
+        Communicator const& comm
     ) {
         using Char = typename StringSet::Char;
         using String = typename StringSet::String;
 
         SampleIndices sampleIndices;
-        uint64_t localOffset = getLocalOffset(ss.size());
+        uint64_t localOffset = getLocalOffset(ss.size(), comm);
         const size_t num_chars = std::accumulate(
             ss.begin(),
             ss.end(),
@@ -222,7 +233,7 @@ public:
 
         const size_t local_num_strings = ss.size();
         const size_t nr_splitters =
-            getNumberSplitter(env.size(), local_num_strings, samplingFactor);
+            getNumberSplitter(numPartitions, local_num_strings, samplingFactor);
         const size_t splitter_dist = num_chars / (nr_splitters + 1);
 
         std::vector<Char>& raw_splitters = sampleIndices.sample;
@@ -259,15 +270,16 @@ public:
 
     static SampleIndices sample_splitters(
         StringSet const& ss,
+        uint64_t numPartitions,
         const uint64_t samplingFactor,
         std::vector<uint64_t> const& dist,
-        dss_schimek::mpi::environment env = dss_schimek::mpi::environment()
+        Communicator const& comm
     ) {
         using Char = typename StringSet::Char;
         using String = typename StringSet::String;
 
         SampleIndices sampleIndices;
-        uint64_t localOffset = getLocalOffset(ss.size());
+        uint64_t localOffset = getLocalOffset(ss.size(), comm);
         // const size_t num_chars =
         //     std::accumulate(ss.begin(), ss.end(), static_cast<size_t>(0u),
         //         [&ss](const size_t& sum, const String& str) {
@@ -278,7 +290,7 @@ public:
 
         const size_t local_num_strings = ss.size();
         const size_t nr_splitters =
-            getNumberSplitter(env.size(), local_num_strings, samplingFactor);
+            getNumberSplitter(numPartitions, local_num_strings, samplingFactor);
         const size_t splitter_dist = num_distPref / (nr_splitters + 1);
 
         std::vector<Char>& raw_splitters = sampleIndices.sample;
@@ -319,13 +331,14 @@ template <typename StringSet>
 class SampleSplittersNumCharsPolicy {
 public:
     static constexpr bool isIndexed = false;
-    static std::string getName() { return "NumChars"; }
+    static constexpr std::string_view getName() { return "NumChars"; }
 
     static std::vector<typename StringSet::Char> sample_splitters(
         StringSet const& ss,
         size_t maxLength,
+        uint64_t numPartitions,
         uint64_t samplingFactor,
-        dss_schimek::mpi::environment env = dss_schimek::mpi::environment()
+        [[maybe_unused]] Communicator const& comm
     ) {
         using Char = typename StringSet::Char;
         using String = typename StringSet::String;
@@ -339,7 +352,7 @@ public:
 
         const size_t local_num_strings = ss.size();
         const size_t nr_splitters =
-            getNumberSplitter(env.size(), local_num_strings, samplingFactor);
+            getNumberSplitter(numPartitions, local_num_strings, samplingFactor);
         const size_t splitter_dist = num_chars / (nr_splitters + 1);
         std::vector<Char> raw_splitters;
         // raw_splitters.reserve(nr_splitters * (maxLength + 1));
@@ -369,9 +382,10 @@ public:
 
     static std::vector<typename StringSet::Char> sample_splitters(
         StringSet const& ss,
+        uint64_t numPartitions,
         uint64_t samplingFactor,
         std::vector<uint64_t> const& dist,
-        dss_schimek::mpi::environment env = dss_schimek::mpi::environment()
+        [[maybe_unused]] Communicator const& comm
     ) {
         using Char = typename StringSet::Char;
         using String = typename StringSet::String;
@@ -385,7 +399,7 @@ public:
 
         const size_t local_num_strings = ss.size();
         const size_t nr_splitters =
-            getNumberSplitter(env.size(), local_num_strings, samplingFactor);
+            getNumberSplitter(numPartitions, local_num_strings, samplingFactor);
         const size_t splitter_dist = num_chars / (nr_splitters + 1);
         std::vector<Char> raw_splitters;
         // raw_splitters.reserve(nr_splitters * (maxLength + 1));
@@ -414,4 +428,5 @@ public:
         return raw_splitters;
     }
 };
-} // namespace dss_schimek
+
+} // namespace dss_mehnert
