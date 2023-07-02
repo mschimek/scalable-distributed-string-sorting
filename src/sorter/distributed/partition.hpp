@@ -2,6 +2,8 @@
 // (c) 2023 Pascal Mehnert
 // This code is licensed under BSD 2-Clause License (see LICENSE for details)
 
+#pragma once
+
 #include <cstddef>
 #include <cstdint>
 #include <numeric>
@@ -13,14 +15,11 @@
 #include "sorter/RQuick/RQuick.hpp"
 #include "sorter/distributed/misc.hpp"
 #include "strings/stringcontainer.hpp"
-#include "tlx/die.hpp"
 #include "util/measuringTool.hpp"
 
 namespace dss_mehnert {
 namespace partition {
 
-
-// todo move this back to misc?!
 template <typename StringPtr, typename Sampler>
 static std::vector<uint64_t> compute_partition(
     StringPtr string_ptr,
@@ -69,67 +68,6 @@ static std::vector<uint64_t> compute_partition(
 
     return interval_sizes;
 }
-
-
-template <typename StringPtr>
-class SingleLevelPartitionPolicy {
-public:
-    static constexpr std::string_view getName() { return "SingleLevel"; }
-
-    // todo respect Sampler::isIndexed
-    template <typename Sampler>
-    static std::vector<uint64_t> partition(
-        StringPtr string_ptr,
-        uint64_t global_lcp_avg,
-        uint64_t sampling_factor,
-        Communicator const& comm
-    ) {
-        using namespace dss_schimek;
-
-        auto interval_sizes = compute_partition<StringPtr, Sampler>(
-            string_ptr,
-            global_lcp_avg,
-            comm.size(),
-            sampling_factor,
-            comm
-        );
-        return interval_sizes;
-    }
-};
-
-
-template <typename StringPtr>
-class MultiLevelPartitionPolicy {
-public:
-    static constexpr std::string_view getName() { return "SingleLevel"; }
-
-    // todo respect Sampler::isIndexed
-    template <typename Sampler>
-    static std::vector<uint64_t> partition(
-        StringPtr string_ptr,
-        uint64_t global_lcp_avg,
-        uint64_t sampling_factor,
-        Communicator const& comm
-    ) {
-        using namespace dss_schimek;
-
-        // todo actually determine the desired group size
-        size_t group_size{std::min(static_cast<size_t>(8), comm.size())};
-        // todo what about rounding (ignore PEs or half full group)
-        size_t num_partitions{comm.size() / group_size};
-
-        auto interval_sizes = compute_partition<StringPtr, Sampler>(
-            string_ptr,
-            global_lcp_avg,
-            num_partitions,
-            sampling_factor,
-            comm
-        );
-
-        die("not yet implemeted");
-        return {};
-    }
-};
 
 } // namespace partition
 } // namespace dss_mehnert

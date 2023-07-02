@@ -15,6 +15,7 @@
 #include "mpi/communicator.hpp"
 #include "sorter/distributed/merging.hpp"
 #include "sorter/distributed/misc.hpp"
+#include "sorter/distributed/partition.hpp"
 #include "strings/stringset.hpp"
 #include "util/measuringTool.hpp"
 
@@ -81,90 +82,104 @@ StringContainer noLcpMerge(StringContainer&& stringContainer, Ranges const& rang
 
 namespace dss_mehnert {
 
-template <
-    typename StringPtr,
-    typename PartitioningPolicy,
-    typename SamplingPolicy,
-    typename AllToAllStringPolicy>
-class DistributedMergeSort : private PartitioningPolicy,
-                             private SamplingPolicy,
-                             private AllToAllStringPolicy {
+template <typename StringPtr, typename AllToAllStringPolicy, typename MergeSortImpl>
+class DistributedMergeSort : protected AllToAllStringPolicy {
 public:
     using StringSet = typename StringPtr::StringSet;
     using StringLcpContainer = dss_schimek::StringLcpContainer<StringSet>;
 
-    StringLcpContainer sort(
-        StringPtr& local_string_ptr,
-        StringLcpContainer&& local_string_container,
-        dss_mehnert::Communicator const& comm
-    ) {
+    StringLcpContainer
+    sort(StringPtr& string_ptr, StringLcpContainer&& container, Communicator const& comm) {
         using namespace dss_schimek;
         using namespace dss_schimek::measurement;
 
-        MeasuringTool& measuring_tool = MeasuringTool::measuringTool();
-        measuring_tool.setPhase("local_sorting");
+        measuring_tool_.setPhase("local_sorting");
 
-        StringSet const& ss = local_string_ptr.active();
-        const size_t lcpSummand = 5u;
+        StringSet const& ss = string_ptr.active();
 
         size_t charactersInSet = 0;
         for (auto const& str: ss) {
             charactersInSet += ss.get_length(str) + 1;
         }
 
-        measuring_tool.add(charactersInSet, "charactersInSet");
+        measuring_tool_.add(charactersInSet, "charactersInSet");
 
-        measuring_tool.start("sort_locally");
-        if constexpr (AllToAllStringPolicy::Lcps) {
-            tlx::sort_strings_detail::radixsort_CI3(local_string_ptr, 0, 0);
-        } else {
-            tlx::sort_strings_detail::radixsort_CI3(local_string_container.make_string_ptr(), 0, 0);
-        }
-        measuring_tool.stop("sort_locally");
+        measuring_tool_.start("sort_locally");
+        tlx::sort_strings_detail::radixsort_CI3(string_ptr, 0, 0);
+        measuring_tool_.stop("sort_locally");
 
         // There is only one PE, hence there is no need for distributed sorting
         if (comm.size() == 1) {
-            return StringLcpContainer(std::move(local_string_container));
+            return StringLcpContainer(std::move(container));
         }
 
-        measuring_tool.setPhase("bucket_computation");
-        measuring_tool.start("avg_lcp");
-        auto globalLcpAvg = getAvgLcp(local_string_ptr) + lcpSummand;
-        measuring_tool.stop("avg_lcp");
+        auto derived = static_cast<MergeSortImpl*>(this);
+        return derived->impl(string_ptr, std::move(container), comm);
+    }
 
-        // todo the dependant template is a bit ugly here
-        auto partition = PartitioningPolicy::template partition<SamplingPolicy>;
-        std::vector<uint64_t> interval_sizes =
-            partition(local_string_ptr, 100 * globalLcpAvg, 2, comm);
+protected:
+    using MeasuringTool = dss_schimek::measurement::MeasuringTool;
+    MeasuringTool measuring_tool_ = MeasuringTool::measuringTool();
+};
 
-        measuring_tool.setPhase("string_exchange");
+
+template <typename StringPtr, typename AllToAllStringPolicy, typename SamplerPolicy>
+class SingleLevelMergeSort
+    : public DistributedMergeSort<
+          StringPtr,
+          AllToAllStringPolicy,
+          SingleLevelMergeSort<StringPtr, AllToAllStringPolicy, SamplerPolicy>> {
+public:
+    using StringSet = typename StringPtr::StringSet;
+    using StringLcpContainer = dss_schimek::StringLcpContainer<StringSet>;
+
+    static constexpr std::string_view getName() { return "SingleLevel"; }
+
+    StringLcpContainer
+    impl(StringPtr& string_ptr, StringLcpContainer&& container, Communicator const& comm) {
+        using namespace dss_schimek;
+
+        this->measuring_tool_.setPhase("bucket_computation");
+        this->measuring_tool_.start("avg_lcp");
+        const size_t lcp_summand = 5u;
+        auto global_lcp_avg = getAvgLcp(string_ptr) + lcp_summand;
+        this->measuring_tool_.stop("avg_lcp");
+
+        constexpr auto compute_partition = partition::compute_partition<StringPtr, SamplerPolicy>;
+        // todo why the *100 here
+        // todo make sampling_factor variable
+        auto interval_sizes =
+            compute_partition(string_ptr, 100 * global_lcp_avg, comm.size(), 2, comm);
+
+        this->measuring_tool_.setPhase("string_exchange");
         comm.barrier();
-        measuring_tool.start("all_to_all_strings");
+
+        this->measuring_tool_.start("all_to_all_strings");
         std::vector<std::size_t> receiving_interval_sizes =
             dss_schimek::mpi::alltoall(interval_sizes);
         StringLcpContainer recv_string_cont =
-            AllToAllStringPolicy::alltoallv(local_string_container, interval_sizes);
-        measuring_tool.stop("all_to_all_strings");
+            AllToAllStringPolicy::alltoallv(container, interval_sizes);
+        this->measuring_tool_.stop("all_to_all_strings");
 
-        measuring_tool.add(
+        this->measuring_tool_.add(
             recv_string_cont.char_size() - recv_string_cont.size(),
             "num_received_chars",
             false
         );
-        measuring_tool.add(recv_string_cont.size(), "num_recv_strings", false);
-        measuring_tool.setPhase("merging");
+        this->measuring_tool_.add(recv_string_cont.size(), "num_recv_strings", false);
+        this->measuring_tool_.setPhase("merging");
 
         assert(num_recv_elems == recv_string_cont.size());
 
-        measuring_tool.start("compute_ranges");
+        this->measuring_tool_.start("compute_ranges");
         std::vector<std::pair<size_t, size_t>> ranges =
             compute_ranges_and_set_lcp_at_start_of_range(
                 recv_string_cont,
                 receiving_interval_sizes
             );
-        measuring_tool.stop("compute_ranges");
+        this->measuring_tool_.stop("compute_ranges");
 
-        measuring_tool.start("merge_ranges");
+        this->measuring_tool_.start("merge_ranges");
         if constexpr (AllToAllStringPolicy::Lcps) {
             size_t num_recv_elems = std::accumulate(
                 receiving_interval_sizes.begin(),
@@ -176,16 +191,17 @@ public:
                 ranges,
                 num_recv_elems
             );
-            measuring_tool.stop("merge_ranges");
-            measuring_tool.setPhase("none");
+            this->measuring_tool_.stop("merge_ranges");
+            this->measuring_tool_.setPhase("none");
             return sorted_container;
         } else {
             auto sorted_container = noLcpMerge(std::move(recv_string_cont), ranges);
-            measuring_tool.stop("merge_ranges");
-            measuring_tool.setPhase("none");
+            this->measuring_tool_.stop("merge_ranges");
+            this->measuring_tool_.setPhase("none");
             return sorted_container;
         }
     }
 };
+
 
 } // namespace dss_mehnert
