@@ -6,79 +6,18 @@
 #include <random>
 #include <type_traits>
 
-#include <kamping/communicator.hpp>
+#include <kamping/collectives/alltoall.hpp>
+#include <kamping/named_parameters.hpp>
 #include <tlx/container/loser_tree.hpp>
 #include <tlx/sort/strings/radix_sort.hpp>
 #include <tlx/sort/strings/string_ptr.hpp>
 
-#include "mpi/alltoall.hpp"
 #include "mpi/communicator.hpp"
 #include "sorter/distributed/merging.hpp"
 #include "sorter/distributed/misc.hpp"
 #include "sorter/distributed/partition.hpp"
-#include "strings/stringset.hpp"
+#include "tlx/die.hpp"
 #include "util/measuringTool.hpp"
-
-namespace dss_schimek {
-
-static constexpr bool debug = false;
-
-struct string_compare {
-    using String = dss_schimek::UCharLengthStringSet::String;
-    bool operator()(String a, String b) {
-        auto charsA = a.string;
-        auto charsB = b.string;
-        while (*charsA == *charsB && *charsA != 0) {
-            ++charsA;
-            ++charsB;
-        }
-        return *charsA < *charsB;
-    }
-};
-
-template <typename StringContainer, typename Ranges>
-StringContainer noLcpMerge(StringContainer&& stringContainer, Ranges const& ranges) {
-    dss_schimek::mpi::environment env;
-    using StringSet = typename StringContainer::StringSet;
-    using String = typename StringSet::String;
-    tlx::LoserTreeCopy<false, String, dss_schimek::string_compare> lt(env.size());
-    std::size_t filled_sources = 0;
-    std::vector<String*> string_it;
-    std::vector<String*> end_it;
-    uint64_t curPos = 0;
-    for (auto [start, size]: ranges) {
-        string_it.push_back(stringContainer.strings() + curPos);
-        end_it.push_back(stringContainer.strings() + curPos + size);
-        curPos += size;
-    }
-    for (std::uint32_t i = 0; i < env.size(); ++i) {
-        if (string_it[i] == end_it[i]) {
-            lt.insert_start(nullptr, i, true);
-        } else {
-            lt.insert_start(&*string_it[i], i, false);
-            ++filled_sources;
-        }
-    }
-    lt.init();
-    std::vector<String> result;
-    result.reserve(stringContainer.size());
-    while (filled_sources) {
-        std::int32_t source = lt.min_source();
-        result.push_back(*string_it[source]);
-        ++string_it[source];
-        if (string_it[source] != end_it[source]) {
-            lt.delete_min_insert(&*string_it[source], false);
-        } else {
-            lt.delete_min_insert(nullptr, true);
-            --filled_sources;
-        }
-    }
-    stringContainer.set(std::move(result));
-    return std::move(stringContainer);
-}
-
-} // namespace dss_schimek
-
 
 namespace dss_mehnert {
 
@@ -88,10 +27,10 @@ public:
     using StringSet = typename StringPtr::StringSet;
     using StringLcpContainer = dss_schimek::StringLcpContainer<StringSet>;
 
-    StringLcpContainer
+    // todo get rid of the option in
+    std::enable_if_t<AllToAllStringPolicy::Lcps, StringLcpContainer>
     sort(StringPtr& string_ptr, StringLcpContainer&& container, Communicator const& comm) {
         using namespace dss_schimek;
-        using namespace dss_schimek::measurement;
 
         measuring_tool_.setPhase("local_sorting");
 
@@ -120,6 +59,14 @@ public:
 protected:
     using MeasuringTool = dss_schimek::measurement::MeasuringTool;
     MeasuringTool measuring_tool_ = MeasuringTool::measuringTool();
+
+    auto get_avg_lcp(StringPtr string_ptr) -> size_t {
+        this->measuring_tool_.start("avg_lcp");
+        const size_t lcp_summand = 5u;
+        auto avg_lcp = getAvgLcp(string_ptr) + lcp_summand;
+        this->measuring_tool_.stop("avg_lcp");
+        return avg_lcp;
+    }
 };
 
 
@@ -138,12 +85,10 @@ public:
     StringLcpContainer
     impl(StringPtr& string_ptr, StringLcpContainer&& container, Communicator const& comm) {
         using namespace dss_schimek;
+        namespace kmp = kamping;
 
         this->measuring_tool_.setPhase("bucket_computation");
-        this->measuring_tool_.start("avg_lcp");
-        const size_t lcp_summand = 5u;
-        auto global_lcp_avg = getAvgLcp(string_ptr) + lcp_summand;
-        this->measuring_tool_.stop("avg_lcp");
+        auto global_lcp_avg = this->get_avg_lcp(string_ptr);
 
         constexpr auto compute_partition = partition::compute_partition<StringPtr, SamplerPolicy>;
         // todo why the *100 here
@@ -156,7 +101,7 @@ public:
 
         this->measuring_tool_.start("all_to_all_strings");
         std::vector<std::size_t> receiving_interval_sizes =
-            dss_schimek::mpi::alltoall(interval_sizes);
+            comm.alltoall(kmp::send_buf(interval_sizes)).exctract_recv_buffer();
         StringLcpContainer recv_string_cont =
             AllToAllStringPolicy::alltoallv(container, interval_sizes);
         this->measuring_tool_.stop("all_to_all_strings");
@@ -180,26 +125,16 @@ public:
         this->measuring_tool_.stop("compute_ranges");
 
         this->measuring_tool_.start("merge_ranges");
-        if constexpr (AllToAllStringPolicy::Lcps) {
-            size_t num_recv_elems = std::accumulate(
-                receiving_interval_sizes.begin(),
-                receiving_interval_sizes.end(),
-                static_cast<size_t>(0u)
-            );
-            auto sorted_container = choose_merge<AllToAllStringPolicy>(
-                std::move(recv_string_cont),
-                ranges,
-                num_recv_elems
-            );
-            this->measuring_tool_.stop("merge_ranges");
-            this->measuring_tool_.setPhase("none");
-            return sorted_container;
-        } else {
-            auto sorted_container = noLcpMerge(std::move(recv_string_cont), ranges);
-            this->measuring_tool_.stop("merge_ranges");
-            this->measuring_tool_.setPhase("none");
-            return sorted_container;
-        }
+        size_t num_recv_elems = std::accumulate(
+            receiving_interval_sizes.begin(),
+            receiving_interval_sizes.end(),
+            static_cast<size_t>(0u)
+        );
+        auto sorted_container =
+            choose_merge<AllToAllStringPolicy>(std::move(recv_string_cont), ranges, num_recv_elems);
+        this->measuring_tool_.stop("merge_ranges");
+        this->measuring_tool_.setPhase("none");
+        return sorted_container;
     }
 };
 
