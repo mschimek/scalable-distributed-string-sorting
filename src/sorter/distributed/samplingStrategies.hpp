@@ -25,7 +25,7 @@ getNumberSplitter(uint64_t numPartitions, uint64_t localSetSize, uint64_t sampli
 }
 
 // todo this function is entirely untested
-inline uint64_t getLocalOffset(uint64_t localStringSize, dss_mehnert::Communicator const& comm) {
+inline uint64_t getLocalOffset(uint64_t localStringSize, Communicator const& comm) {
     return comm.exscan_single(
         kamping::send_buf(localStringSize),
         kamping::op(kamping::ops::plus<>{})

@@ -53,7 +53,7 @@ static std::vector<uint64_t> compute_partition(
     measuring_tool.stop("sort_splitter");
 
     measuring_tool.start("choose_splitters");
-    auto rawChosenSplitters = getSplitters(sortedLocalSample);
+    auto rawChosenSplitters = getSplitters(sortedLocalSample, num_partitions, comm);
     StringContainer chosen_splitters_cont(std::move(rawChosenSplitters));
     measuring_tool.stop("choose_splitters");
 
