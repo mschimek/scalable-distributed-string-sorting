@@ -78,6 +78,7 @@ StringContainer noLcpMerge(StringContainer&& stringContainer, Ranges const& rang
 
 } // namespace dss_schimek
 
+
 namespace dss_mehnert {
 
 template <
@@ -95,7 +96,7 @@ public:
     StringLcpContainer sort(
         StringPtr& local_string_ptr,
         StringLcpContainer&& local_string_container,
-        dss_mehnert::Communicator comm = {}
+        dss_mehnert::Communicator const& comm
     ) {
         using namespace dss_schimek;
         using namespace dss_schimek::measurement;
@@ -132,13 +133,9 @@ public:
         measuring_tool.stop("avg_lcp");
 
         // todo the dependant template is a bit ugly here
+        auto partition = PartitioningPolicy::template partition<SamplingPolicy>;
         std::vector<uint64_t> interval_sizes =
-            PartitioningPolicy::template compute_partition<SamplingPolicy>(
-                local_string_ptr,
-                100 * globalLcpAvg,
-                2,
-                comm
-            );
+            partition(local_string_ptr, 100 * globalLcpAvg, 2, comm);
 
         measuring_tool.setPhase("string_exchange");
         comm.barrier();
