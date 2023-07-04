@@ -21,7 +21,7 @@
 namespace dss_schimek::mpi {
 
 template <typename DataType>
-static inline DataType shift_left(DataType& send_data, environment env = environment()) {
+static inline DataType shift_left(DataType& send_data, environment env) {
     if (env.size() == 1) {
         return send_data;
     }
@@ -55,7 +55,7 @@ static inline DataType shift_left(DataType& send_data, environment env = environ
 }
 
 template <typename DataType>
-static inline DataType shift_right(DataType& send_data, environment env = environment()) {
+static inline DataType shift_right(DataType& send_data, environment env) {
     if (env.size() == 1) {
         return send_data;
     }
@@ -90,7 +90,7 @@ static inline DataType shift_right(DataType& send_data, environment env = enviro
 
 template <typename DataType>
 static inline std::vector<DataType>
-shift_left(DataType* send_data, std::size_t count, environment env = environment()) {
+shift_left(DataType* send_data, std::size_t count, environment env) {
     std::int32_t destination = env.size() - 1;
     if (env.rank() > 0) {
         destination = env.rank() - 1;
@@ -123,7 +123,7 @@ shift_left(DataType* send_data, std::size_t count, environment env = environment
 
 template <typename DataType>
 static inline std::vector<DataType>
-shift_right(DataType* send_data, std::size_t count, environment env = environment()) {
+shift_right(DataType* send_data, std::size_t count, environment env) {
     std::int32_t destination = 0;
     if (env.rank() + 1 < env.size()) {
         destination = env.rank() + 1;
@@ -155,7 +155,7 @@ shift_right(DataType* send_data, std::size_t count, environment env = environmen
 }
 
 static inline std::vector<dss_schimek::char_type>
-shift_string_left(dss_schimek::string send_data, environment env = environment()) {
+shift_string_left(dss_schimek::string send_data, environment env) {
     std::size_t send_length = dss_schimek::string_length(send_data) + 1;
     std::vector<char_type> real_send_data;
     std::copy_n(send_data, send_length, std::back_inserter(real_send_data));
@@ -195,7 +195,7 @@ shift_string_left(dss_schimek::string send_data, environment env = environment()
 }
 
 static inline std::vector<dss_schimek::char_type>
-shift_string_right(dss_schimek::string send_data, environment env = environment()) {
+shift_string_right(dss_schimek::string send_data, environment env) {
     std::size_t send_length = dss_schimek::string_length(send_data) + 1;
     std::vector<char_type> real_send_data;
     std::copy_n(send_data, send_length, std::back_inserter(real_send_data));
@@ -244,7 +244,7 @@ struct ShiftAdress {
     size_t destination;
 };
 
-static inline ShiftAdress get_adress_right_shift(environment env = environment()) {
+static inline ShiftAdress get_adress_right_shift(environment env) {
     ShiftAdress adress;
     adress.destination = 0;
     if (env.rank() + 1 < env.size()) {
@@ -257,7 +257,7 @@ static inline ShiftAdress get_adress_right_shift(environment env = environment()
     return adress;
 }
 
-static inline ShiftAdress get_adress_left_shift(environment env = environment()) {
+static inline ShiftAdress get_adress_left_shift(environment env) {
     ShiftAdress adress;
     adress.destination = env.size() - 1;
     if (env.rank() > 0) {
@@ -277,9 +277,8 @@ struct ShiftCounts {
 };
 
 template <typename DataType, bool is_left_shift>
-static inline ShiftCounts<DataType> get_shift_recv_counts(
-    DataType const& send_data, environment env = environment(), bool is_empty = false
-) {
+static inline ShiftCounts<DataType>
+get_shift_recv_counts(DataType const& send_data, environment env, bool is_empty = false) {
     if (env.size() == 1)
         return {send_data, is_empty};
 
@@ -331,17 +330,9 @@ static inline ShiftCounts<DataType> get_shift_recv_counts(
     return {recv_data, false};
 }
 
-// template <typename DataType>
-// static inline ShiftCounts<DataType> get_shift_left_recv_counts(
-//    const DataType& send_data,
-//      environment env = environment(),
-//      bool is_empty = false) {
-//  return get_shift_recv_counts<DataType, true>(send_data, env, is_empty);
-//}
-
 template <bool is_left_shift>
 static inline std::vector<unsigned char>
-shift_string(unsigned char* send_data, bool isEmpty, environment env = environment()) {
+shift_string(unsigned char* send_data, bool isEmpty, environment env) {
     constexpr bool debug = false;
 
     std::size_t string_length = dss_schimek::string_length(send_data);
@@ -365,9 +356,9 @@ shift_string(unsigned char* send_data, bool isEmpty, environment env = environme
     size_t recv_length = result.recv_counts;
     ShiftAdress adress;
     if (is_left_shift)
-        adress = get_adress_left_shift();
+        adress = get_adress_left_shift(env);
     else
-        adress = get_adress_right_shift();
+        adress = get_adress_right_shift(env);
 
     std::vector<unsigned char> receive_data(recv_length);
     data_type_mapper<unsigned char> dtm;

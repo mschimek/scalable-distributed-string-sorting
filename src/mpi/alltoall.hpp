@@ -32,8 +32,7 @@ namespace dss_schimek::mpi {
 static constexpr bool debug_alltoall = false;
 
 template <typename DataType>
-inline std::vector<DataType>
-alltoall(std::vector<DataType> const& send_data, environment env = environment()) {
+inline std::vector<DataType> alltoall(std::vector<DataType> const& send_data, environment env) {
     using dss_schimek::measurement::MeasuringTool;
     MeasuringTool& measuringTool = MeasuringTool::measuringTool();
     const size_t sentItems = send_data.size();
@@ -55,9 +54,7 @@ alltoall(std::vector<DataType> const& send_data, environment env = environment()
 
 template <typename DataType>
 inline std::vector<DataType> alltoallv_small(
-    std::vector<DataType> const& send_data,
-    std::vector<size_t> const& send_counts,
-    environment env = environment()
+    std::vector<DataType> const& send_data, std::vector<size_t> const& send_counts, environment env
 ) {
     using dss_schimek::measurement::MeasuringTool;
     MeasuringTool& measuringTool = MeasuringTool::measuringTool();
@@ -118,11 +115,8 @@ class AllToAllvSmall {
 public:
     static std::string getName() { return "AlltoAllvSmall"; }
     template <typename DataType>
-    static std::vector<DataType> alltoallv(
-        DataType* const send_data,
-        std::vector<size_t> const& send_counts,
-        environment env = environment()
-    ) {
+    static std::vector<DataType>
+    alltoallv(DataType* const send_data, std::vector<size_t> const& send_counts, environment env) {
         using dss_schimek::measurement::MeasuringTool;
         MeasuringTool& measuringTool = MeasuringTool::measuringTool();
 
@@ -184,11 +178,8 @@ class AllToAllvDirectMessages {
 public:
     static std::string getName() { return "AlltoAllvDirectMessages"; }
     template <typename DataType>
-    static std::vector<DataType> alltoallv(
-        DataType* const send_data,
-        std::vector<size_t> const& send_counts,
-        environment env = environment()
-    ) {
+    static std::vector<DataType>
+    alltoallv(DataType* const send_data, std::vector<size_t> const& send_counts, environment env) {
         using dss_schimek::measurement::MeasuringTool;
         MeasuringTool& measuringTool = MeasuringTool::measuringTool();
 
@@ -253,11 +244,8 @@ class AllToAllvCombined {
 public:
     static std::string getName() { return "AllToAllvCombined"; }
     template <typename DataType>
-    static std::vector<DataType> alltoallv(
-        DataType* const send_data,
-        std::vector<size_t> const& send_counts,
-        environment env = environment()
-    ) {
+    static std::vector<DataType>
+    alltoallv(DataType* const send_data, std::vector<size_t> const& send_counts, environment env) {
         // std::cout << "MPI Routine : combined" << std::endl;
         using dss_schimek::measurement::MeasuringTool;
         MeasuringTool& measuringTool = MeasuringTool::measuringTool();
@@ -326,67 +314,6 @@ public:
     }
 };
 
-// template <typename DataType>
-//  inline std::vector<DataType> alltoallv(std::vector<DataType>& send_data,
-//      const std::vector<size_t>& send_counts, environment env = environment())
-//      {
-
-//    size_t local_send_count = std::accumulate(
-//        send_counts.begin(), send_counts.end(), 0);
-
-//    std::vector<size_t> receive_counts = alltoall(send_counts, env);
-//    size_t local_receive_count = std::accumulate(
-//        receive_counts.begin(), receive_counts.end(), 0);
-
-//    size_t local_max = std::max(local_send_count, local_receive_count);
-//    size_t global_max = allreduce_max(local_max, env);
-
-//    if (global_max < env.mpi_max_int()) {
-//      return alltoallv_small(send_data, send_counts, env);
-//    } else {
-//      std::vector<size_t> send_displacements(env.size(), 0);
-//      for (size_t i = 1; i < send_counts.size(); ++i) {
-//        send_displacements[i] = send_displacements[i - 1] + send_counts[i -
-//        1];
-//      }
-//      std::vector<size_t> receive_displacements(env.size(), 0);
-//      for (size_t i = 1; i < send_counts.size(); ++i) {
-//        receive_displacements[i] =
-//          receive_displacements[i - 1] + receive_counts[i - 1];
-//      }
-
-//      std::vector<MPI_Request> mpi_request(2 * env.size());
-//      std::vector<DataType> receive_data(receive_displacements.back() +
-//          receive_counts.back());
-//      for (int32_t i = 0; i < env.size(); ++i) {
-//        // start with self send/recv
-//        auto source = (env.rank() + (env.size() - i)) % env.size();
-//        auto receive_type = get_big_type<DataType>(receive_counts[source]);
-//        MPI_Irecv(receive_data.data() + receive_displacements[source],
-//            1,
-//            receive_type,
-//            source,
-//            44227,
-//            env.communicator(),
-//            &mpi_request[source]);
-//      }
-//      // dispatch sends
-//      for (int32_t i = 0; i < env.size(); ++i) {
-//        auto target = (env.rank() + i) % env.size();
-//        auto send_type = get_big_type<DataType>(send_counts[target]);
-//        MPI_Isend(send_data.data() + send_displacements[target],
-//            1,
-//            send_type,
-//            target,
-//            44227,
-//            env.communicator(),
-//            &mpi_request[env.size() + target]);
-//      }
-//      MPI_Waitall(2 * env.size(), mpi_request.data(), MPI_STATUSES_IGNORE);
-//      return receive_data;
-//    }
-//  }
-
 template <typename StringSet, typename ByteEncoder>
 static inline std::vector<size_t> computeSendCountsBytes(
     StringSet const& ss, std::vector<size_t> const& intervals, ByteEncoder const& byteEncoder
@@ -431,7 +358,8 @@ template <bool useCompression, typename AllToAllPolicy>
 inline std::vector<uint64_t> sendLcps(
     std::vector<uint64_t>& lcps,
     std::vector<uint64_t> const& sendCounts,
-    std::vector<uint64_t> const& recvCounts
+    std::vector<uint64_t> const& recvCounts,
+    environment env
 ) {
     using namespace dss_schimek;
     if constexpr (useCompression) {
@@ -439,7 +367,7 @@ inline std::vector<uint64_t> sendLcps(
             IntegerCompression::writeRanges(sendCounts.begin(), sendCounts.end(), lcps.data());
 
         std::vector<uint8_t> recvCompressedLcps =
-            AllToAllPolicy::alltoallv(compressedData.integers.data(), compressedData.counts);
+            AllToAllPolicy::alltoallv(compressedData.integers.data(), compressedData.counts, env);
 
         // decode Lcp Compression:
         return IntegerCompression::readRanges(
@@ -448,7 +376,7 @@ inline std::vector<uint64_t> sendLcps(
             recvCompressedLcps.data()
         );
     } else {
-        return AllToAllPolicy::alltoallv(lcps.data(), sendCounts);
+        return AllToAllPolicy::alltoallv(lcps.data(), sendCounts, env);
     }
 }
 
@@ -464,7 +392,7 @@ struct AllToAllStringImpl {
     dss_schimek::StringLcpContainer<StringSet> alltoallv(
         dss_schimek::StringLcpContainer<StringSet>& container,
         std::vector<size_t> const& sendCountsString,
-        environment env = environment()
+        environment env
     ) {
         using namespace dss_schimek;
         using namespace dss_schimek::measurement;
@@ -488,11 +416,6 @@ struct AllToAllStringImpl {
         );
 
         auto stringLcpPtr = container.make_string_lcp_ptr();
-        // for (size_t interval = 0, stringsWritten = 0;
-        //     interval < sendCountsString.size(); ++interval) {
-        //    *(stringLcpPtr.get_lcp() + stringsWritten) = 0;
-        //    stringsWritten += sendCountsString[interval];
-        //}
         setLcpAtStartOfInterval(
             stringLcpPtr.lcp(),
             sendCountsString.begin(),
@@ -535,7 +458,7 @@ struct AllToAllStringImpl<
     dss_schimek::StringLcpContainer<StringSet> alltoallv(
         dss_schimek::StringLcpContainer<StringSet>& send_data,
         std::vector<size_t> const& send_counts,
-        environment env = environment()
+        environment env
     ) {
         using namespace dss_schimek;
         using namespace dss_schimek::measurement;
@@ -585,7 +508,7 @@ struct AllToAllStringImpl<
         measuringTool.start("all_to_all_strings_mpi");
         receive_buffer_char = AllToAllPolicy::alltoallv(send_buffer.data(), send_counts_char, env);
 
-        auto recvNumberStrings = dss_schimek::mpi::alltoall(send_counts);
+        auto recvNumberStrings = dss_schimek::mpi::alltoall(send_counts, env);
 
         auto recvLcpValues = sendLcps<compressLcps, AllToAllPolicy>(
             send_data.lcps(),
@@ -613,7 +536,7 @@ struct AllToAllStringImpl<compressLcps, StringSet, AllToAllPolicy, dss_schimek::
     dss_schimek::StringLcpContainer<StringSet> alltoallv(
         dss_schimek::StringLcpContainer<StringSet>& send_data,
         std::vector<size_t> const& sendCountsString,
-        environment env = environment()
+        environment env
     ) {
         using namespace dss_schimek;
         using namespace dss_schimek::measurement;
@@ -685,7 +608,7 @@ struct AllToAllStringImpl<
     dss_schimek::StringLcpContainer<StringSet> alltoallv(
         dss_schimek::StringLcpContainer<StringSet>& send_data,
         std::vector<size_t> const& sendCountsString,
-        environment env = environment()
+        environment env
     ) {
         using namespace dss_schimek;
         using namespace dss_schimek::measurement;
@@ -736,12 +659,13 @@ struct AllToAllStringImpl<
         measuringTool.start("all_to_all_strings_mpi");
         receive_buffer_char = AllToAllPolicy::alltoallv(buffer.data(), send_counts_char, env);
 
-        auto recvNumberStrings = dss_schimek::mpi::alltoall(sendCountsString);
+        auto recvNumberStrings = dss_schimek::mpi::alltoall(sendCountsString, env);
 
         auto recvLcpValues = sendLcps<compressLcps, AllToAllPolicy>(
             send_data.lcps(),
             sendCountsString,
-            recvNumberStrings
+            recvNumberStrings,
+            env
         );
 
         send_data.deleteAll();
@@ -774,7 +698,7 @@ struct AllToAllStringImpl<
     dss_schimek::StringLcpContainer<StringSet> alltoallv(
         dss_schimek::StringLcpContainer<StringSet>& send_data,
         std::vector<size_t> const& sendCountsString,
-        environment env = environment()
+        environment env
     ) {
         using namespace dss_schimek;
         using namespace dss_schimek::measurement;
@@ -822,12 +746,13 @@ struct AllToAllStringImpl<
         measuringTool.start("all_to_all_strings_mpi");
         receive_buffer_char = AllToAllPolicy::alltoallv(buffer.data(), send_counts_char, env);
 
-        auto recvNumberStrings = dss_schimek::mpi::alltoall(sendCountsString);
+        auto recvNumberStrings = dss_schimek::mpi::alltoall(sendCountsString, env);
 
         auto recvLcpValues = sendLcps<compressLcps, AllToAllPolicy>(
             send_data.lcps(),
             sendCountsString,
-            recvNumberStrings
+            recvNumberStrings,
+            env
         );
         send_data.deleteAll();
         measuringTool.stop("all_to_all_strings_mpi");
@@ -873,7 +798,7 @@ struct AllToAllStringImpl<
     dss_schimek::StringLcpContainer<StringSet> alltoallv(
         dss_schimek::StringLcpContainer<StringSet>& container,
         std::vector<size_t> const& sendCountsString,
-        environment env = environment()
+        environment env
     ) {
         using namespace dss_schimek;
         using namespace dss_schimek::measurement;
@@ -963,7 +888,7 @@ struct AllToAllStringImplPrefixDoubling {
         dss_schimek::StringLcpContainer<StringSet>&& send_data,
         std::vector<size_t> const& sendCountsString,
         std::vector<size_t> const& distinguishingPrefixValues,
-        environment env = environment()
+        environment env
     ) {
         using namespace dss_schimek;
         using namespace dss_schimek::measurement;
@@ -1038,7 +963,7 @@ struct AllToAllStringImplPrefixDoubling {
         measuringTool.start("all_to_all_strings_mpi");
         receive_buffer_char = AllToAllPolicy::alltoallv(buffer.data(), send_counts_char, env);
 
-        std::vector<size_t> recvNumberStrings = dss_schimek::mpi::alltoall(sendCountsString);
+        std::vector<size_t> recvNumberStrings = dss_schimek::mpi::alltoall(sendCountsString, env);
 
         auto recvLcpValues = sendLcps<compressLcps, AllToAllPolicy>(
             send_data.lcps(),
@@ -1057,7 +982,7 @@ struct AllToAllStringImplPrefixDoubling {
             std::back_inserter(offsets)
         );
 
-        std::vector<size_t> recvOffsets = dss_schimek::mpi::alltoall(offsets);
+        std::vector<size_t> recvOffsets = dss_schimek::mpi::alltoall(offsets, env);
         measuringTool.stop("all_to_all_strings_mpi");
         measuringTool.add(
             numCharsToSend + stringLcpPtr.size() * sizeof(size_t),
@@ -1082,12 +1007,8 @@ struct AllToAllStringImplPrefixDoubling {
 // Collect Strings specified by string index and PE index -> should be used for
 // verification (probably not as efficient as it could be)
 template <typename StringSet, typename Iterator>
-dss_schimek::StringLcpContainer<StringSet> getStrings(
-    Iterator requestBegin,
-    Iterator requestEnd,
-    StringSet localSS,
-    dss_schimek::mpi::environment env = dss_schimek::mpi::environment()
-) {
+dss_schimek::StringLcpContainer<StringSet>
+getStrings(Iterator requestBegin, Iterator requestEnd, StringSet localSS, environment env) {
     using String = typename StringSet::String;
     using CharIt = typename StringSet::CharIterator;
     using MPIRoutine = dss_schimek::mpi::AllToAllvCombined<dss_schimek::mpi::AllToAllvSmall>;
@@ -1112,8 +1033,8 @@ dss_schimek::StringLcpContainer<StringSet> getStrings(
     };
 
     // exchange request
-    std::vector<size_t> recvRequestSizes = dss_schimek::mpi::alltoall(requestSizes);
-    std::vector<size_t> recvRequests = MPIRoutine::alltoallv(requests.data(), requestSizes);
+    std::vector<size_t> recvRequestSizes = dss_schimek::mpi::alltoall(requestSizes, env);
+    std::vector<size_t> recvRequests = MPIRoutine::alltoallv(requests.data(), requestSizes, env);
 
     // collect strings to send back
     std::vector<std::vector<unsigned char>> rawStrings(env.size());
@@ -1135,11 +1056,13 @@ dss_schimek::StringLcpContainer<StringSet> getStrings(
     std::vector<unsigned char> rawStringsFlattened = flatten(rawStrings);
 
     std::vector<unsigned char> recvRequestedStrings =
-        MPIRoutine::alltoallv(rawStringsFlattened.data(), rawStringSizes);
+        MPIRoutine::alltoallv(rawStringsFlattened.data(), rawStringSizes, env);
 
     dss_schimek::StringLcpContainer<StringSet> container(std::move(recvRequestedStrings));
 
     return container;
 }
+
 } // namespace dss_schimek::mpi
+
 /******************************************************************************/

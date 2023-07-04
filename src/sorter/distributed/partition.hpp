@@ -63,7 +63,8 @@ static std::vector<uint64_t> compute_partition(
     );
 
     measuring_tool.start("compute_interval_sizes");
-    std::vector<std::size_t> interval_sizes = compute_interval_binary(ss, chosen_splitters_set);
+    std::vector<std::size_t> interval_sizes =
+        compute_interval_binary(ss, chosen_splitters_set, comm);
     measuring_tool.stop("compute_interval_sizes");
 
     return interval_sizes;

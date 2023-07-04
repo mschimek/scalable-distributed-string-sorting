@@ -13,9 +13,7 @@
 #include "mpi/type_mapper.hpp"
 
 template <typename DataType>
-inline std::vector<DataType> allgather_(
-    DataType& send_data, dss_schimek::mpi::environment env = dss_schimek::mpi::environment()
-) {
+inline std::vector<DataType> allgather_(DataType& send_data, dss_schimek::mpi::environment env) {
     dss_schimek::mpi::data_type_mapper<DataType> dtm;
     std::vector<DataType> receive_data(env.size());
     MPI_Allgather(
@@ -72,7 +70,7 @@ private:
         // -> workaround send only values
 
         auto ownValue = record.getValue();
-        auto globalValues = allgather_(ownValue);
+        auto globalValues = allgather_(ownValue, env);
         if (record.getSumUp()) {
             const size_t sum =
                 std::accumulate(globalValues.begin(), globalValues.end(), static_cast<size_t>(0u));

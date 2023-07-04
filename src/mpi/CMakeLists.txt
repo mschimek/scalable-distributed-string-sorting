@@ -11,10 +11,8 @@ target_sources(dss_base
         gather.hpp
         is_sorted.hpp
         readInput.hpp
-        scan.hpp
         shift.hpp
         synchron.hpp
         type_mapper.hpp
         warmup.hpp
-        writeToFile.hpp
 )

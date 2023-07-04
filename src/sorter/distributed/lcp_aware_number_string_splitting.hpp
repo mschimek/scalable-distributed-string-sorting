@@ -59,12 +59,12 @@ public:
 
 protected:
     using MeasuringTool = dss_schimek::measurement::MeasuringTool;
-    MeasuringTool measuring_tool_ = MeasuringTool::measuringTool();
+    MeasuringTool& measuring_tool_ = MeasuringTool::measuringTool();
 
-    size_t get_avg_lcp(StringPtr string_ptr) {
+    size_t get_avg_lcp(StringPtr string_ptr, Communicator const& comm) {
         this->measuring_tool_.start("avg_lcp");
         const size_t lcp_summand = 5u;
-        auto avg_lcp = getAvgLcp(string_ptr) + lcp_summand;
+        auto avg_lcp = getAvgLcp(string_ptr, comm) + lcp_summand;
         this->measuring_tool_.stop("avg_lcp");
         return avg_lcp;
     }
@@ -78,7 +78,7 @@ protected:
         std::vector<size_t> recv_interval_sizes =
             comm.alltoall(kamping::send_buf(interval_sizes)).extract_recv_buffer();
         StringLcpContainer recv_string_container =
-            AllToAllStringPolicy::alltoallv(container, interval_sizes);
+            AllToAllStringPolicy::alltoallv(container, interval_sizes, comm);
         this->measuring_tool_.stop("all_to_all_strings");
 
         auto num_received_chars = recv_string_container.char_size() - recv_string_container.size();
@@ -95,7 +95,7 @@ protected:
     ) {
         this->measuring_tool_.start("compute_ranges");
         std::vector<std::pair<size_t, size_t>> ranges =
-            compute_ranges_and_set_lcp_at_start_of_range(container, interval_sizes);
+            compute_ranges_and_set_lcp_at_start_of_range(container, interval_sizes, comm);
         this->measuring_tool_.stop("compute_ranges");
 
         this->measuring_tool_.start("merge_ranges");
@@ -104,7 +104,7 @@ protected:
         assert(num_recv_elems == recv_string_cont.size());
 
         auto sorted_container =
-            choose_merge<AllToAllStringPolicy>(std::move(container), ranges, num_recv_elems);
+            choose_merge<AllToAllStringPolicy>(std::move(container), ranges, num_recv_elems, comm);
         this->measuring_tool_.stop("merge_ranges");
 
         return sorted_container;
@@ -129,7 +129,7 @@ public:
         using namespace dss_schimek;
 
         this->measuring_tool_.setPhase("bucket_computation");
-        auto global_lcp_avg = this->get_avg_lcp(string_ptr);
+        auto global_lcp_avg = this->get_avg_lcp(string_ptr, comm);
 
         constexpr auto compute_partition = partition::compute_partition<StringPtr, SamplerPolicy>;
         // todo why the *100 here

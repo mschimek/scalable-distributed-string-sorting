@@ -20,15 +20,16 @@
 #include "util/measuringTool.hpp"
 
 namespace dss_schimek::mpi {
+
 template <typename DataType>
-inline DataType broadcast(DataType& send_data, environment env = environment()) {
+inline DataType broadcast(DataType& send_data, environment env) {
     data_type_mapper<DataType> dtm;
     DataType recvElem = send_data;
     MPI_Bcast(&recvElem, 1, dtm.get_mpi_type(), 0, env.communicator());
     return recvElem;
 }
 template <typename DataType>
-inline std::vector<DataType> allgather(DataType& send_data, environment env = environment()) {
+inline std::vector<DataType> allgather(DataType& send_data, environment env) {
     using dss_schimek::measurement::MeasuringTool;
 
     MeasuringTool& measuringTool = MeasuringTool::measuringTool();
@@ -48,65 +49,19 @@ inline std::vector<DataType> allgather(DataType& send_data, environment env = en
     return receive_data;
 }
 
-// template<typename DataType>
-// std::vector<DataType> allgatherv_my(DataType* data, size_t size,
-//                dss_schimek::mpi::environment env = dss_schimek::mpi::environment()) {
-//
-//  std::vector<size_t> sendCounts = dss_schimek::mpi::allgather(size);
-//  std::vector<size_t> offsets;
-//  offsets.reserve(env.size());
-//  offsets.emplace_back(0);
-//  for (size_t i = 1; i < env.size(); ++i) {
-//    offsets.emplace_back(offsets.back() + sendCounts[i -  1]);
-//  }
-//  //if (env.rank() == 0)
-//  //for (size_t i = 0; i < offsets.size(); ++i) {
-//  //  std::cout << i <<  "offset: " << offsets[i] << std::endl;
-//  //}
-//
-//  std::vector<DataType> recvBuffer(offsets.back() + sendCounts.back());
-//  std::copy_n(data, size, recvBuffer.data() + offsets[env.rank()]);
-//
-//  dss_schimek::mpi::data_type_mapper<DataType> dtm;
-//  std::vector<MPI_Request> mpiRequest(2 * (env.size() - 1));
-//  for (size_t i = 1; i < env.size(); ++i) {
-//    int partner = (env.rank() + i) % env.size();
-//    MPI_Isend(data,
-//        size,
-//        dtm.get_mpi_type(),
-//        partner,
-//        42,
-//        env.communicator(),
-//        &mpiRequest[2*(i - 1)]);
-//
-//    MPI_Irecv(
-//        recvBuffer.data() + offsets[partner],
-//        sendCounts[partner],
-//        dtm.get_mpi_type(),
-//        partner,
-//        42,
-//        env.communicator(),
-//        &mpiRequest[2*(i -1) + 1]);
-//  }
-//  MPI_Waitall(2 * env.size() - 2, mpiRequest.data(), MPI_STATUSES_IGNORE);
-//  return recvBuffer;
-//}
-
 template <typename DataType>
 static inline std::vector<DataType>
-allgatherv_small(std::vector<DataType>& send_data, environment env = environment()) {
+allgatherv_small(std::vector<DataType>& send_data, environment env) {
     // measurement in overload that sends
 
     int32_t local_size = send_data.size();
-    std::vector<int32_t> receiving_sizes = allgather(local_size);
+    std::vector<int32_t> receiving_sizes = allgather(local_size, env);
     return allgatherv_small(send_data, receiving_sizes, env);
 }
 
 template <typename DataType>
 static inline std::vector<DataType> allgatherv_small(
-    std::vector<DataType>& send_data,
-    std::vector<int32_t>& receiving_sizes,
-    environment env = environment()
+    std::vector<DataType>& send_data, std::vector<int32_t>& receiving_sizes, environment env
 ) {
     using dss_schimek::measurement::MeasuringTool;
     MeasuringTool& measuringTool = MeasuringTool::measuringTool();
@@ -140,13 +95,12 @@ static inline std::vector<DataType> allgatherv_small(
     return receiving_data;
 }
 template <typename DataType>
-static inline std::vector<DataType>
-allgatherv(std::vector<DataType>& send_data, environment env = environment()) {
+static inline std::vector<DataType> allgatherv(std::vector<DataType>& send_data, environment env) {
     using dss_schimek::measurement::MeasuringTool;
     MeasuringTool& measuringTool = MeasuringTool::measuringTool();
 
     size_t local_size = send_data.size();
-    std::vector<size_t> receiving_sizes = allgather(local_size);
+    std::vector<size_t> receiving_sizes = allgather(local_size, env);
 
     std::vector<size_t> receiving_offsets(env.size(), 0);
     for (size_t i = 1; i < receiving_sizes.size(); ++i) {
@@ -197,17 +151,14 @@ allgatherv(std::vector<DataType>& send_data, environment env = environment()) {
     }
 }
 
-} // namespace dss_schimek::mpi
-
-namespace dss_schimek::mpi {
 template <typename Char>
-static inline std::vector<Char> allgather_strings(
-    std::vector<Char>& raw_string_data,
-    dss_schimek::mpi::environment env = dss_schimek::mpi::environment()
-) {
+static inline std::vector<Char>
+allgather_strings(std::vector<Char>& raw_string_data, environment env) {
     // measure is downward the call stack
     auto receiving_data = dss_schimek::mpi::allgatherv(raw_string_data, env);
     return std::vector(std::move(receiving_data));
 }
+
 } // namespace dss_schimek::mpi
+
 /******************************************************************************/

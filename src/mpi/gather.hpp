@@ -10,14 +10,9 @@
 
 namespace dss_schimek {
 namespace mpi {
-template <typename DataType>
-inline std::vector<DataType> gather(
-    DataType const& send_data,
-    size_t root,
-    dss_schimek::mpi::environment env = dss_schimek::mpi::environment()
-) {
-    using namespace dss_schimek::mpi;
 
+template <typename DataType>
+inline std::vector<DataType> gather(DataType const& send_data, size_t root, environment env) {
     using dss_schimek::measurement::MeasuringTool;
 
     MeasuringTool& measuringTool = MeasuringTool::measuringTool();
@@ -41,19 +36,15 @@ inline std::vector<DataType> gather(
 }
 
 template <typename DataType>
-inline std::vector<DataType> gatherv(
-    std::vector<DataType>& send_data,
-    size_t root,
-    dss_schimek::mpi::environment env = dss_schimek::mpi::environment()
-) {
-    using namespace dss_schimek::mpi;
+inline std::vector<DataType>
+gatherv(std::vector<DataType>& send_data, size_t root, dss_schimek::mpi::environment env) {
     using namespace dss_schimek;
     using dss_schimek::measurement::MeasuringTool;
 
     MeasuringTool& measuringTool = MeasuringTool::measuringTool();
     measuringTool.addRawCommunication(sizeof(DataType), "gatherv");
 
-    std::vector<size_t> receiveCounts = gather(send_data.size(), root);
+    std::vector<size_t> receiveCounts = gather(send_data.size(), root, env);
     std::vector<size_t> offsets;
     offsets.reserve(receiveCounts.size() + 1);
     offsets.push_back(0);

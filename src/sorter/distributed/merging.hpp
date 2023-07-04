@@ -62,9 +62,9 @@ static inline dss_schimek::StringLcpContainer<StringSet> merge(
 template <typename AllToAllStringPolicy, typename StringLcpContainer>
 static inline StringLcpContainer choose_merge(
     StringLcpContainer&& recv_string_cont,
-    std::vector<std::pair<size_t, size_t>> ranges,
+    std::vector<std::pair<size_t, size_t>>& ranges,
     size_t num_recv_elems,
-    dss_schimek::mpi::environment env = dss_schimek::mpi::environment()
+    dss_schimek::mpi::environment env
 ) {
     const size_t nextPow2 = pow2roundup(env.size());
     switch (nextPow2) {

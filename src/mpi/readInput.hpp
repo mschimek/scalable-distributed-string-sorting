@@ -94,7 +94,7 @@ std::vector<unsigned char> distribute_strings(
     }
 
     std::vector<unsigned char> end_of_last_string =
-        dss_schimek::mpi::shift_left(result.data(), first_end + 1);
+        dss_schimek::mpi::shift_left(result.data(), first_end + 1, env);
     // We copy this string, even if it's not the end of the last one on the
     // previous PE, but a new string. This way, we can delete it on the sending
     // PE without checking if it was the end.

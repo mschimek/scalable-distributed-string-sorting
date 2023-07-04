@@ -21,8 +21,7 @@
 namespace dss_schimek::mpi {
 
 template <typename DataType>
-inline std::vector<DataType>
-allgatherForAllReduce(DataType& send_data, environment env = environment()) {
+inline std::vector<DataType> allgatherForAllReduce(DataType& send_data, environment env) {
     data_type_mapper<DataType> dtm;
     std::vector<DataType> receive_data(env.size());
     MPI_Allgather(
@@ -37,7 +36,7 @@ allgatherForAllReduce(DataType& send_data, environment env = environment()) {
     return receive_data;
 }
 
-static inline bool allreduce_and(bool& send_data, environment env = environment()) {
+static inline bool allreduce_and(bool& send_data, environment env) {
     int send_data_ = send_data;
     int receive_data;
     MPI_Allreduce(&send_data_, &receive_data, 1, MPI_INT, MPI_LAND, env.communicator());
@@ -45,7 +44,7 @@ static inline bool allreduce_and(bool& send_data, environment env = environment(
 }
 
 template <typename DataType>
-static inline DataType allreduce_max(DataType& send_data, environment env = environment()) {
+static inline DataType allreduce_max(DataType& send_data, environment env) {
     static_assert(
         std::is_arithmetic<DataType>(),
         "Only arithmetic types are allowed for allreduce_max."
@@ -55,7 +54,7 @@ static inline DataType allreduce_max(DataType& send_data, environment env = envi
 }
 
 template <typename DataType>
-static inline DataType allreduce_min(DataType& send_data, environment env = environment()) {
+static inline DataType allreduce_min(DataType& send_data, environment env) {
     static_assert(
         std::is_arithmetic<DataType>(),
         "Only arithmetic types are allowed for allreduce_min."
@@ -65,7 +64,7 @@ static inline DataType allreduce_min(DataType& send_data, environment env = envi
 }
 
 template <typename DataType>
-static inline DataType allreduce_sum(DataType& send_data, environment env = environment()) {
+static inline DataType allreduce_sum(DataType& send_data, environment env) {
     static_assert(
         std::is_arithmetic<DataType>(),
         "Only arithmetic types are allowed for allreduce_sum."

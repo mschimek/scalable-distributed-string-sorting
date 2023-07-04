@@ -125,40 +125,6 @@ public:
     static std::string getName() { return "SuffixGenerator"; }
 };
 
-// template <typename StringSet>
-// class EmptyRanks : public StringLcpContainer<StringSet> {
-//    using Char = typename StringSet::Char;
-//    using String = typename StringSet::String;
-//
-// public:
-//    std::vector<unsigned char> getRawStrings(size_t numStrings,
-//        size_t desiredStringLength,
-//        dss_schimek::mpi::environment env = dss_schimek::mpi::environment()) {
-//        const unsigned char charA = 65;
-//        const unsigned char charB = 66;
-//
-//        rawStrings.reserve(numStrings * (stringLength + 1) / env.size());
-//        unsigned char charToUse = charA;
-//        if (env.rank() >= env.size() / 2) charToUse = charB;
-//
-//        for (size_t i = 0; i < numStrings / env.size(); ++i) {
-//            for (size_t j = 0; j < stringLength; ++j)
-//                rawStrings.push_back(charToUse);
-//            rawStrings.push_back(0);
-//        }
-//        rawStrings.shrink_to_fit();
-//        return rawStrings;
-//    }
-//
-// public:
-//    EmptyRanks(const size_t size, const size_t stringLength = 40, ) {
-//        std::vector<Char> rawStrings = getRawStrings(size, stringLength);
-//        this->update(std::move(rawStrings));
-//    }
-//
-//    static std::string getName() { return "EmptyRanks"; }
-//};
-
 template <typename StringSet>
 class DNRatioGenerator : public StringLcpContainer<StringSet> {
     using Char = typename StringSet::Char;
@@ -183,7 +149,7 @@ public:
         size_t numStrings,
         size_t desiredStringLength,
         double dToN,
-        dss_schimek::mpi::environment env = dss_schimek::mpi::environment()
+        dss_schimek::mpi::environment env
     ) {
         const size_t minInternChar = 65;
         const size_t maxInternChar = 90;
@@ -197,7 +163,7 @@ public:
         std::vector<unsigned char> rawStrings; //(numStrings * (stringLength + 1), minInternChar);
         rawStrings.reserve(numStrings * (stringLength + 1) / env.size());
 
-        const size_t globalSeed = getSameSeedGlobally();
+        const size_t globalSeed = getSameSeedGlobally(env);
         std::mt19937 randGen(globalSeed);
         const size_t randomChar = minInternChar + (randGen() % numberInternChars);
         std::uniform_int_distribution<size_t> dist(0, env.size() - 1);
@@ -282,23 +248,24 @@ public:
         return make_tuple(rawStrings, numGenStrings, stringLength);
     }
 
-    size_t
-    getSameSeedGlobally(dss_schimek::mpi::environment env = dss_schimek::mpi::environment()) {
+    size_t getSameSeedGlobally(dss_schimek::mpi::environment env) {
         size_t seed = 0;
         if (env.rank() == 0) {
             std::random_device rand_seed;
             seed = rand_seed();
         }
-        return dss_schimek::mpi::broadcast(seed);
+        return dss_schimek::mpi::broadcast(seed, env);
     }
 
 public:
-    DNRatioGenerator(const size_t size, const size_t stringLength = 40, double const dToN = 0.5) {
+    DNRatioGenerator(size_t size, size_t stringLength = 40, double dToN = 0.5) {
+        // todo pass as parameter
+        mpi::environment env;
         size_t genStrings = 0;
         size_t genStringLength = 0;
         std::vector<Char> rawStrings;
         std::tie(rawStrings, genStrings, genStringLength) =
-            getRawStringsTimoStyle(size, stringLength, dToN);
+            getRawStringsTimoStyle(size, stringLength, dToN, env);
         this->update(std::move(rawStrings));
         String* begin = this->strings();
         std::random_device randSeedGenerator;
@@ -348,14 +315,13 @@ class SkewedRandomStringLcpContainer : public StringLcpContainer<StringSet> {
     using Char = typename StringSet::Char;
 
 public:
-    size_t
-    getSameSeedGlobally(dss_schimek::mpi::environment env = dss_schimek::mpi::environment()) {
+    size_t getSameSeedGlobally(dss_schimek::mpi::environment env) {
         size_t seed = 0;
         if (env.rank() == 0) {
             std::random_device rand_seed;
             seed = rand_seed();
         }
-        return dss_schimek::mpi::broadcast(seed);
+        return dss_schimek::mpi::broadcast(seed, env);
     }
     SkewedRandomStringLcpContainer(
         const size_t size, const size_t min_length = 100, const size_t max_length = 200
@@ -377,7 +343,6 @@ public:
         std::size_t curChars = 0;
 
         random_raw_string_data.reserve(size + 1);
-        // dss_schimek::mpi::execute_in_order([&](){
         for (size_t i = 0; i < numLongStrings; ++i) {
             const size_t PEIndex = dist(rand_gen);
             // std::cout << "rank: " << env.rank() << " PEIndex: " << PEIndex <<

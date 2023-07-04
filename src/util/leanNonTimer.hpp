@@ -15,9 +15,7 @@
 namespace dss_schimek {
 
 template <typename DataType>
-inline std::vector<DataType> allgather_(
-    DataType& send_data, dss_schimek::mpi::environment env = dss_schimek::mpi::environment()
-) {
+inline std::vector<DataType> allgather_(DataType& send_data, mpi::environment env) {
     dss_schimek::mpi::data_type_mapper<DataType> dtm;
     std::vector<DataType> receive_data(env.size());
     MPI_Allgather(
@@ -67,7 +65,7 @@ private:
         // -> workaround send only values
 
         auto ownValue = record.getValue();
-        auto globalValues = allgather_(ownValue);
+        auto globalValues = allgather_(ownValue, env);
         const size_t sum =
             std::accumulate(globalValues.begin(), globalValues.end(), static_cast<size_t>(0u));
         record.setValue(sum);

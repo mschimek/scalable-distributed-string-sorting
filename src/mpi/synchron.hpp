@@ -7,9 +7,7 @@
 
 namespace dss_schimek::mpi {
 template <typename Functor>
-void execute_in_order(
-    Functor const& functor, dss_schimek::mpi::environment env = dss_schimek::mpi::environment()
-) {
+void execute_in_order(Functor const& functor, environment env) {
     for (size_t i = 0; i < env.size(); ++i) {
         env.barrier();
         if (env.rank() == i)

@@ -132,18 +132,18 @@ private:
     TimeIntervalDataType
     avgLoss(Key const& key, dss_schimek::mpi::environment env = dss_schimek::mpi::environment()) {
         TimeIntervalDataType localLoss = getLoss(key);
-        TimeIntervalDataType sum = dss_schimek::mpi::allreduce_sum(localLoss);
+        TimeIntervalDataType sum = dss_schimek::mpi::allreduce_sum(localLoss, {});
         return sum / env.size();
     }
 
     TimeIntervalDataType maxLoss(Key const& key) {
         TimeIntervalDataType localLoss = getLoss(key);
-        return dss_schimek::mpi::allreduce_max(localLoss);
+        return dss_schimek::mpi::allreduce_max(localLoss, {});
     }
 
     TimeIntervalDataType minLoss(Key const& key) {
         TimeIntervalDataType localLoss = getLoss(key);
-        return dss_schimek::mpi::allreduce_min(localLoss);
+        return dss_schimek::mpi::allreduce_min(localLoss, {});
     }
 
     TimeIntervalDataType avgTime(Key const& key) {
@@ -152,7 +152,7 @@ private:
             std::cout << "Key " << key << "not present" << std::endl;
             std::abort();
         }
-        TimeIntervalDataType sum = dss_schimek::mpi::allreduce_sum((*itKeyTime).second);
+        TimeIntervalDataType sum = dss_schimek::mpi::allreduce_sum((*itKeyTime).second, {});
         return sum / env.size();
     }
 
@@ -163,7 +163,7 @@ private:
             std::cout << "Key " << key << " not present" << std::endl;
             std::abort();
         }
-        return dss_schimek::mpi::allreduce_max((*itKeyTime).second);
+        return dss_schimek::mpi::allreduce_max((*itKeyTime).second, {});
     }
 
     TimeIntervalDataType minTime(Key const& key) {
@@ -173,7 +173,7 @@ private:
             std::cout << "Key " << key << " not present" << std::endl;
             std::abort();
         }
-        return dss_schimek::mpi::allreduce_min((*itKeyTime).second);
+        return dss_schimek::mpi::allreduce_min((*itKeyTime).second, {});
     }
 
     std::map<Key, Value> keyToValue;

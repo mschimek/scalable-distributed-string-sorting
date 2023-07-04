@@ -67,18 +67,6 @@ void reorder(StringSet ss, Iterator begin, Iterator end) {
         std::back_inserter(startIndexInStringSet)
     );
 
-    // dss_schimek::mpi::execute_in_order([&]() {
-    //     std::cout << "rank " << dss_schimek::mpi::environment().rank() << std::endl;
-    //     for(Iterator curIt = begin; curIt != end; ++curIt) {
-    //     const auto& indices = *curIt;
-    //     const size_t stringOffset = startIndexInStringSet[indices.PEIndex];
-    //     String str = ss[ss.begin() + stringOffset + indices.stringIndex -
-    //     smallestIndexInPermutation[indices.PEIndex]]; std::cout << *curIt << std::endl; std::cout
-    //     << "stringOffset: " << stringOffset << " smallestIndexInPermutation " <<
-    //     smallestIndexInPermutation[indices.PEIndex] << std::endl; std::cout << ss.get_chars(str,
-    //     0) << std::endl; reorderedStrings.push_back(str);
-    //     }
-    //     });
     for (Iterator curIt = begin; curIt != end; ++curIt) {
         auto const& indices = *curIt;
         const size_t stringOffset = startIndexInStringSet[indices.PEIndex];

@@ -42,7 +42,7 @@ std::vector<size_t> computeResultsWithChecks(StringPtr local_string_ptr) {
             sum += *chars;
     }
 
-    std::vector<size_t> total_sum = dss_schimek::mpi::allgather(sum);
+    std::vector<size_t> total_sum = dss_schimek::mpi::allgather(sum, env);
     std::cout << "TotalSum: "
               << std::accumulate(total_sum.begin(), total_sum.end(), static_cast<size_t>(0u))
               << std::endl;
@@ -80,38 +80,41 @@ std::vector<size_t> computeResultsWithChecks(StringPtr local_string_ptr) {
         tracker.startIteration(i);
         results_tracker = tracker.getResultsOf(env.rank());
         candidates_tracker = tracker.getCandidatesOf(env.rank());
-        dss_schimek::mpi::execute_in_order([&]() {
-            sort(candidates.begin(), candidates.end());
-            sort(candidates_tracker.begin(), candidates_tracker.end());
-            if (candidates != candidates_tracker) {
-                size_t smallerSize = std::min(candidates.size(), candidates_tracker.size());
-                std::cout << "rank: " << env.rank() << std::endl;
-                for (size_t i = 0; i < smallerSize; ++i) {
-                    std::cout << i << " candidate: " << candidates[i]
-                              << " candidates_tracker: " << candidates_tracker[i] << std::endl;
-                    if (candidates[i] != candidates_tracker[i]) {
-                        tracker.printDuplicateWitness(candidates_tracker[i], env.rank());
-                        std::abort();
+        dss_schimek::mpi::execute_in_order(
+            [&]() {
+                sort(candidates.begin(), candidates.end());
+                sort(candidates_tracker.begin(), candidates_tracker.end());
+                if (candidates != candidates_tracker) {
+                    size_t smallerSize = std::min(candidates.size(), candidates_tracker.size());
+                    std::cout << "rank: " << env.rank() << std::endl;
+                    for (size_t i = 0; i < smallerSize; ++i) {
+                        std::cout << i << " candidate: " << candidates[i]
+                                  << " candidates_tracker: " << candidates_tracker[i] << std::endl;
+                        if (candidates[i] != candidates_tracker[i]) {
+                            tracker.printDuplicateWitness(candidates_tracker[i], env.rank());
+                            std::abort();
+                        }
+                    }
+                    std::cout << "candidates sets differ!" << std::endl;
+                    std::abort();
+                }
+                if (results != results_tracker) {
+                    std::cout << "rank: " << env.rank() << std::endl;
+                    for (size_t i = 0; i < results.size(); ++i) {
+                        std::cout << i << " results " << results[i] << " results_tracker "
+                                  << results_tracker[i] << std::endl;
+                        if (results[i] != results_tracker[i])
+                            std::abort();
                     }
                 }
-                std::cout << "candidates sets differ!" << std::endl;
-                std::abort();
-            }
-            if (results != results_tracker) {
-                std::cout << "rank: " << env.rank() << std::endl;
-                for (size_t i = 0; i < results.size(); ++i) {
-                    std::cout << i << " results " << results[i] << " results_tracker "
-                              << results_tracker[i] << std::endl;
-                    if (results[i] != results_tracker[i])
-                        std::abort();
-                }
-            }
-        });
+            },
+            env
+        );
 
         bool noMoreCandidates = candidates.empty();
         std::cout << i << " rank: " << env.rank() << " candiates " << candidates.size()
                   << " noMoreCandiates: " << noMoreCandidates << std::endl;
-        bool allEmpty = dss_schimek::mpi::allreduce_and(noMoreCandidates);
+        bool allEmpty = dss_schimek::mpi::allreduce_and(noMoreCandidates, env);
         std::cout << "allEmpty?: " << allEmpty << std::endl;
         if (allEmpty)
             break;
@@ -175,7 +178,7 @@ std::vector<size_t> computeDistinguishingPrefixes(StringPtr local_string_ptr) {
         measuringTool.add(candidates.size(), std::string("bloomfilter_numberCandidates"), false);
         measuringTool.start(std::string("bloomfilter_allreduce"));
         bool noMoreCandidates = candidates.empty();
-        bool allEmpty = dss_schimek::mpi::allreduce_and(noMoreCandidates);
+        bool allEmpty = dss_schimek::mpi::allreduce_and(noMoreCandidates, env);
         measuringTool.stop(std::string("bloomfilter_allreduce"));
         if (allEmpty)
             break;
@@ -198,7 +201,7 @@ public:
     std::vector<StringIndexPEIndex> sort(
         dss_schimek::StringLcpContainer<typename StringPtr::StringSet>&& container,
         StringPtr& local_string_ptr,
-        dss_schimek::mpi::environment env = dss_schimek::mpi::environment()
+        dss_schimek::mpi::environment env
     ) {
         // constexpr bool debug = false;
         using dss_schimek::measurement::MeasuringTool;
@@ -268,7 +271,8 @@ public:
         std::vector<std::pair<size_t, size_t>> ranges =
             compute_ranges_and_set_lcp_at_start_of_range(
                 recv_string_cont,
-                receiving_interval_sizes
+                receiving_interval_sizes,
+                env
             );
         measuringTool.stop("compute_ranges");
 
