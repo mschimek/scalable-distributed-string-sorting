@@ -15,7 +15,8 @@
 #include <kamping/communicator.hpp>
 #include <mpi.h>
 
-namespace dss_schimek::mpi {
+namespace dss_schimek {
+namespace mpi {
 
 /// \brief Provides an interface for MPI stats (e.g. communicator size/rank).
 class environment {
@@ -24,6 +25,10 @@ public:
     environment(MPI_Comm communicator);
     environment(environment const& other);
     environment(environment&& other);
+
+    template <template <typename...> typename Container, template <typename> typename... Plugins>
+    environment(kamping::Communicator<Container, Plugins...> comm)
+        : environment(comm.mpi_communicator()) {}
 
     environment& operator=(environment&& other);
 
@@ -85,8 +90,9 @@ private:
     MPI_Comm communicator_;
     std::uint32_t world_rank_;
     std::uint32_t world_size_;
-}; // class environment
+};
 
-} // namespace dss_schimek::mpi
+} // namespace mpi
+} // namespace dss_schimek
 
 /******************************************************************************/
