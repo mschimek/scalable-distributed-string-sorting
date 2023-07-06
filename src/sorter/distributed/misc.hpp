@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <iterator>
+#include <numeric>
 #include <random>
 
 #include <kamping/collectives/allgather.hpp>
@@ -31,8 +32,6 @@ struct StringComparator {
         unsigned char const* lhsChars = lhs.string;
         unsigned char const* rhsChars = rhs.string;
         size_t counter = 0;
-        // std::cout << "lhs: " << lhsChars << " rhs: " << rhsChars <<
-        // std::endl;
         while (*lhsChars == *rhsChars && *lhsChars != 0) {
             ++lhsChars;
             ++rhsChars;
@@ -48,8 +47,6 @@ struct IndexStringComparator {
         unsigned char const* lhsChars = lhs.string;
         unsigned char const* rhsChars = rhs.string;
         size_t counter = 0;
-        // std::cout << "lhs: " << lhsChars << " rhs: " << rhsChars <<
-        // std::endl;
         while (*lhsChars == *rhsChars && *lhsChars != 0) {
             ++lhsChars;
             ++rhsChars;
@@ -62,14 +59,14 @@ struct IndexStringComparator {
 };
 
 template <typename Generator, typename Comparator, typename Data>
-typename Data::StringContainer splitterSort(Data&& data, Generator& generator, Comparator& comp) {
-    dss_schimek::mpi::environment env;
-
+typename Data::StringContainer
+splitterSort(Data&& data, Generator& gen, Comparator& comp, dss_mehnert::Communicator const& comm) {
     bool const isRobust = true;
     int tag = 11111;
-    MPI_Comm comm = env.communicator();
-    return RQuick::sort(generator, std::forward<Data>(data), MPI_BYTE, tag, comm, comp, isRobust);
+    auto comm_mpi = comm.mpi_communicator();
+    return RQuick::sort(gen, std::forward<Data>(data), MPI_BYTE, tag, comm_mpi, comp, isRobust);
 }
+
 template <typename StringLcpPtr>
 size_t getAvgLcp(const StringLcpPtr string_lcp_ptr, dss_mehnert::Communicator const& comm) {
     using namespace kamping;
@@ -162,12 +159,6 @@ getSplittersIndexed(StringContainer& sortedLocalSample) {
             splitterSize += length;
         }
     }
-    // std::cout << "rank: " << env.rank() << " localSample: " << ss.size()
-    //          << " splitterSize: " << splitterSize
-    //          << " nr_splitters: " << nr_splitters
-    //          << " splitter_dist: " << splitter_dist
-    //          << " localPrefix:" << localPrefix << " totalSize: " << totalSize
-    //          << std::endl;
 
     std::vector<unsigned char> chosenSplitters(splitterSize);
     std::vector<uint64_t> chosenSplitterIndices;
@@ -195,8 +186,7 @@ IndexStringLcpContainer<StringSet> choose_splitters(
     using Char = typename StringSet::Char;
     using String = typename StringSet::String;
 
-    tlx::sort_strings_detail::StringLcpPtr all_splitters_strptr =
-        indexContainer.make_string_lcp_ptr();
+    auto all_splitters_strptr = indexContainer.make_string_lcp_ptr();
     StringSet const& all_splitters_set = all_splitters_strptr.active();
 
     tlx::sort_strings_detail::radixsort_CI3(all_splitters_strptr, 0, 0);
@@ -273,8 +263,8 @@ template <typename StringSet>
 inline std::vector<size_t> compute_interval_sizes(
     StringSet const& ss, StringSet const& splitters, dss_schimek::mpi::environment env
 ) {
-    std::vector<size_t> interval_sizes;
-    interval_sizes.reserve(splitters.size());
+    std::vector<size_t> intervals;
+    intervals.reserve(splitters.size());
 
     size_t nr_splitters = std::min<size_t>(env.size() - 1, ss.size());
     size_t splitter_dist = ss.size() / (nr_splitters + 1);
@@ -299,13 +289,11 @@ inline std::vector<size_t> compute_interval_sizes(
             ++element_pos;
         }
 
-        interval_sizes.emplace_back(element_pos);
+        intervals.emplace_back(element_pos);
     }
-    interval_sizes.emplace_back(ss.size());
-    for (std::size_t i = interval_sizes.size() - 1; i > 0; --i) {
-        interval_sizes[i] -= interval_sizes[i - 1];
-    }
-    return interval_sizes;
+    intervals.emplace_back(ss.size());
+    std::adjacent_difference(intervals.begin(), intervals.end(), intervals.begin());
+    return intervals;
 }
 
 template <typename StringSet>
@@ -330,7 +318,7 @@ static inline int binarySearch(StringSet const& ss, typename StringSet::CharIter
     return left - ss.begin();
 }
 
-int indexStringCompare(
+inline int indexStringCompare(
     unsigned char const* lhs,
     const uint64_t indexLhs,
     unsigned char const* rhs,
@@ -380,46 +368,38 @@ static inline int binarySearchIndexed(
     return left - ss.begin();
 }
 
-template <typename StringSet> // TODO
-inline std::vector<size_t> compute_interval_binary(
-    StringSet const& ss, StringSet const& splitters, dss_schimek::mpi::environment env
-) {
+template <typename StringSet>
+inline std::vector<size_t>
+compute_interval_binary(StringSet const& ss, StringSet const& splitters) {
     using CharIt = typename StringSet::CharIterator;
-    std::vector<size_t> interval_sizes;
-    interval_sizes.reserve(splitters.size() + 1);
+    std::vector<size_t> intervals;
+    intervals.reserve(splitters.size() + 1);
 
     for (std::size_t i = 0; i < splitters.size(); ++i) {
         CharIt splitter = splitters.get_chars(splitters[splitters.begin() + i], 0);
         size_t pos = binarySearch(ss, splitter);
-        interval_sizes.emplace_back(pos);
+        intervals.emplace_back(pos);
     }
-    interval_sizes.emplace_back(ss.size());
-    for (std::size_t i = interval_sizes.size() - 1; i > 0; --i) {
-        interval_sizes[i] -= interval_sizes[i - 1];
-    }
-    return interval_sizes;
+    intervals.emplace_back(ss.size());
+    std::adjacent_difference(intervals.begin(), intervals.end(), intervals.begin());
+    return intervals;
 }
 
 template <typename StringSet> // TODO
 inline std::vector<size_t> compute_interval_binary_index(
-    StringSet const& ss,
-    UCharLengthIndexStringSet const& splitters,
-    const uint64_t localOffset,
-    dss_schimek::mpi::environment env
+    StringSet const& ss, UCharLengthIndexStringSet const& splitters, const uint64_t localOffset
 ) {
     // using CharIt = typename StringSet::CharIterator;
-    std::vector<size_t> interval_sizes;
-    interval_sizes.reserve(splitters.size() + 1);
+    std::vector<size_t> intervals;
+    intervals.reserve(splitters.size() + 1);
 
     for (std::size_t i = 0; i < splitters.size(); ++i) {
         size_t pos = binarySearchIndexed(ss, splitters, i, localOffset);
-        interval_sizes.emplace_back(pos);
+        intervals.emplace_back(pos);
     }
-    interval_sizes.emplace_back(ss.size());
-    for (std::size_t i = interval_sizes.size() - 1; i > 0; --i) {
-        interval_sizes[i] -= interval_sizes[i - 1];
-    }
-    return interval_sizes;
+    intervals.emplace_back(ss.size());
+    std::adjacent_difference(intervals.begin(), intervals.end(), intervals.begin());
+    return intervals;
 }
 
 static inline void print_interval_sizes(
@@ -539,7 +519,10 @@ static inline std::vector<std::pair<size_t, size_t>> compute_ranges_and_set_lcp_
 // todo migrate to partition.hpp
 template <typename Sampler, typename StringPtr>
 typename std::enable_if<Sampler::isIndexed, std::vector<uint64_t>>::type computePartition(
-    StringPtr stringptr, uint64_t globalLcpAvg, uint64_t samplingFactor, mpi::environment env
+    StringPtr stringptr,
+    uint64_t globalLcpAvg,
+    uint64_t samplingFactor,
+    dss_mehnert::Communicator comm
 ) {
     using IndexStringContainer = dss_schimek::IndexStringContainer<UCharLengthIndexStringSet>;
     using Comparator = dss_schimek::IndexStringComparator;
@@ -558,13 +541,14 @@ typename std::enable_if<Sampler::isIndexed, std::vector<uint64_t>>::type compute
     measuringTool.start("sort_splitter");
     Comparator comp;
     std::mt19937_64 generator;
-    int data_seed = 3469931 + env.rank();
+    int data_seed = 3469931 + comm.rank();
     generator.seed(data_seed);
     RQuick::Data<IndexStringContainer, IndexStringContainer::isIndexed> sampleData;
     sampleData.rawStrings = std::move(sampleIndices.sample); // TODO
     sampleData.indices = std::move(sampleIndices.indices);   // TODO better way?
     // measuringTool.disable();
-    IndexStringContainer sortedLocalSample = splitterSort(std::move(sampleData), generator, comp);
+    IndexStringContainer sortedLocalSample =
+        splitterSort(std::move(sampleData), generator, comp, comm);
     // measuringTool.enable();
     measuringTool.stop("sort_splitter");
 
@@ -599,7 +583,7 @@ typename std::enable_if<Sampler::isIndexed, std::vector<uint64_t>>::type compute
     StringPtr stringptr,
     uint64_t samplingFactor,
     std::vector<uint64_t> const& dist,
-    mpi::environment env
+    dss_mehnert::Communicator comm
 ) {
     using IndexStringContainer = dss_schimek::IndexStringContainer<UCharLengthIndexStringSet>;
     using Comparator = dss_schimek::IndexStringComparator;
@@ -617,13 +601,14 @@ typename std::enable_if<Sampler::isIndexed, std::vector<uint64_t>>::type compute
     measuringTool.start("sort_splitter");
     Comparator comp;
     std::mt19937_64 generator;
-    int data_seed = 3469931 + env.rank();
+    int data_seed = 3469931 + comm.rank();
     generator.seed(data_seed);
     RQuick::Data<IndexStringContainer, IndexStringContainer::isIndexed> sampleData;
     sampleData.rawStrings = std::move(sampleIndices.sample); // TODO
     sampleData.indices = std::move(sampleIndices.indices);   // TODO better way?
     // measuringTool.disable();
-    IndexStringContainer sortedLocalSample = splitterSort(std::move(sampleData), generator, comp);
+    IndexStringContainer sortedLocalSample =
+        splitterSort(std::move(sampleData), generator, comp, comm);
     // measuringTool.enable();
     measuringTool.stop("sort_splitter");
 
@@ -647,7 +632,7 @@ typename std::enable_if<Sampler::isIndexed, std::vector<uint64_t>>::type compute
         ss,
         chosen_splitters_cont.make_string_set(),
         getLocalOffset(ss.size()),
-        env
+        comm
     );
     measuringTool.stop("compute_interval_sizes");
     return interval_sizes;
