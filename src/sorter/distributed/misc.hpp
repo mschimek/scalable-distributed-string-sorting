@@ -9,11 +9,13 @@
 #include <random>
 
 #include <kamping/collectives/allgather.hpp>
+#include <kamping/collectives/allreduce.hpp>
 #include <kamping/named_parameters.hpp>
 #include <tlx/sort/strings/radix_sort.hpp>
 
 #include "merge/stringtools.hpp"
 #include "mpi/allgather.hpp"
+#include "mpi/communicator.hpp"
 #include "mpi/environment.hpp"
 #include "sorter/RQuick/RQuick.hpp"
 #include "sorter/distributed/duplicateSorting.hpp"
@@ -69,25 +71,26 @@ typename Data::StringContainer splitterSort(Data&& data, Generator& generator, C
     return RQuick::sort(generator, std::forward<Data>(data), MPI_BYTE, tag, comm, comp, isRobust);
 }
 template <typename StringLcpPtr>
-size_t getAvgLcp(const StringLcpPtr stringLcpPtr, mpi::environment env) {
-    auto lcps = stringLcpPtr.lcp();
-    struct LcpSumNumStrings {
+size_t getAvgLcp(const StringLcpPtr string_lcp_ptr, dss_mehnert::Communicator const& comm) {
+    using namespace kamping;
+
+    struct Result {
         size_t lcpSum;
         size_t numStrings;
-    };
-    size_t localL =
-        std::accumulate(lcps, lcps + stringLcpPtr.active().size(), static_cast<size_t>(0u));
-    LcpSumNumStrings lcpSumNumStrings{localL, stringLcpPtr.active().size()};
 
-    std::vector<LcpSumNumStrings> lcpSumsNumStrings =
-        dss_schimek::mpi::allgather(lcpSumNumStrings, env);
-    size_t totalL = 0;
-    size_t totalNumString = 0;
-    for (auto const& elem: lcpSumsNumStrings) {
-        totalL += elem.lcpSum;
-        totalNumString += elem.numStrings;
-    }
-    return totalL / totalNumString;
+        Result operator+(Result const& rhs) const {
+            return {lcpSum + rhs.lcpSum, numStrings + rhs.numStrings};
+        }
+    };
+
+    auto lcps = string_lcp_ptr.lcp();
+    auto size = string_lcp_ptr.size();
+    size_t local_lcp_sum = std::accumulate(lcps, lcps + size, 0);
+    Result local_result{local_lcp_sum, size};
+
+    auto global_result = comm.allreduce(send_buf(local_result), op(ops::plus<>{}, ops::commutative))
+                             .extract_recv_buffer()[0];
+    return global_result.lcpSum / global_result.numStrings;
 }
 
 template <typename StringContainer>
