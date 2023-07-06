@@ -1,9 +1,6 @@
 target_sources(dss_base
     PUBLIC
-        draw_from_distribution.hpp
-        drop.hpp
         leanNonTimer.hpp
-        macros.hpp
         measuringTool.hpp
         nonTimer.hpp
         random_string_generator.hpp
@@ -12,5 +9,4 @@ target_sources(dss_base
         string_set.hpp
         structs.hpp
         timer.hpp
-        uint_types.hpp
 )

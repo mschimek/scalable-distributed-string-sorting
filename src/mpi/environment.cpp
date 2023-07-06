@@ -10,21 +10,21 @@
 
 #include <iostream>
 
-#include "util/macros.hpp"
+#include <tlx/define/likely.hpp>
 
 namespace dss_schimek::mpi {
 
 environment::environment() : environment(MPI_COMM_WORLD) {}
 
 environment::environment(MPI_Comm communicator) : communicator_(communicator) {
-    if (DSSS_UNLIKELY(!environment::initialized())) {
+    if (TLX_UNLIKELY(!environment::initialized())) {
         MPI_Init(nullptr, nullptr);
     }
     int32_t world_rank_tmp;
     int32_t world_size_tmp;
     MPI_Comm_rank(communicator_, &world_rank_tmp);
     MPI_Comm_size(communicator_, &world_size_tmp);
-    if (DSSS_UNLIKELY(world_rank_tmp < 0 || world_size_tmp < 0)) {
+    if (TLX_UNLIKELY(world_rank_tmp < 0 || world_size_tmp < 0)) {
         std::cout << "rank: " << world_rank_tmp << " or "
                   << "size: " << world_size_tmp << " is negative!" << std::endl;
     }
