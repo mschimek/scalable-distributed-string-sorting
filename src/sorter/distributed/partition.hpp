@@ -4,11 +4,10 @@
 
 #pragma once
 
-#include <cstddef>
 #include <cstdint>
 #include <numeric>
 #include <random>
-#include <string_view>
+#include <type_traits>
 #include <vector>
 
 #include "mpi/communicator.hpp"
@@ -21,7 +20,7 @@ namespace dss_mehnert {
 namespace partition {
 
 template <typename StringPtr, typename Sampler>
-static std::vector<uint64_t> compute_partition(
+std::enable_if_t<!Sampler::isIndexed, std::vector<uint64_t>> compute_partition(
     StringPtr string_ptr,
     uint64_t global_lcp_avg,
     uint64_t num_partitions,
@@ -30,41 +29,81 @@ static std::vector<uint64_t> compute_partition(
 ) {
     using namespace dss_schimek;
 
-    using Comparator = dss_schimek::StringComparator;
-    using StringContainer = dss_schimek::StringContainer<UCharLengthStringSet>;
-    using StringSet = typename StringPtr::StringSet;
+    using Comparator = StringComparator;
+    using StringContainer = StringContainer<UCharLengthStringSet>;
+    using RQuickData = RQuick::Data<StringContainer, StringContainer::isIndexed>;
 
-    auto measuring_tool = measurement::MeasuringTool::measuringTool();
+    auto& measuring_tool = measurement::MeasuringTool::measuringTool();
     auto ss = string_ptr.active();
 
     measuring_tool.start("sample_splitters");
-    std::vector<unsigned char> raw_splitters =
+    auto samples =
         Sampler::sample_splitters(ss, 2 * global_lcp_avg, num_partitions, sampling_factor, comm);
     measuring_tool.stop("sample_splitters");
 
     measuring_tool.start("sort_splitter");
     Comparator comp;
-    std::mt19937_64 generator{3469931 + comm.rank()};
-    RQuick::Data<StringContainer, StringContainer::isIndexed> sample_data;
-    sample_data.rawStrings = std::move(raw_splitters); // TODO
-    measuring_tool.disable();
-    StringContainer sortedLocalSample = splitterSort(std::move(sample_data), generator, comp);
+    std::mt19937_64 gen{3469931 + comm.rank()};
+    RQuickData sample_data{std::move(samples), {}};
+    measuring_tool.disable(); // todo can these be removed?
+    StringContainer sorted_sample = splitterSort(std::move(sample_data), gen, comp, comm);
     measuring_tool.enable();
     measuring_tool.stop("sort_splitter");
 
     measuring_tool.start("choose_splitters");
-    auto rawChosenSplitters = getSplitters(sortedLocalSample, num_partitions, comm);
-    StringContainer chosen_splitters_cont(std::move(rawChosenSplitters));
+    auto chosen_splitters = getSplitters(sorted_sample, num_partitions, comm);
+    StringContainer chosen_splitters_cont{std::move(chosen_splitters)};
     measuring_tool.stop("choose_splitters");
 
-    const StringSet chosen_splitters_set(
-        chosen_splitters_cont.strings(),
-        chosen_splitters_cont.strings() + chosen_splitters_cont.size()
-    );
+    measuring_tool.start("compute_interval_sizes");
+    auto splitter_set = chosen_splitters_cont.make_string_set();
+    auto interval_sizes = compute_interval_binary(ss, splitter_set);
+    measuring_tool.stop("compute_interval_sizes");
+
+    return interval_sizes;
+}
+
+template <typename Sampler, typename StringPtr>
+std::enable_if_t<Sampler::isIndexed, std::vector<uint64_t>> computePartition(
+    StringPtr string_ptr,
+    uint64_t global_lcp_avg,
+    uint64_t num_partitions,
+    uint64_t sampling_factor,
+    Communicator const& comm
+) {
+    using namespace dss_schimek;
+
+    using Comparator = IndexStringComparator;
+    using StringContainer = IndexStringContainer<UCharLengthIndexStringSet>;
+    using RQuickData = RQuick::Data<StringContainer, StringContainer::isIndexed>;
+
+    auto& measuring_tool = measurement::MeasuringTool::measuringTool();
+    auto ss = string_ptr.active();
+
+    measuring_tool.start("sample_splitters");
+    auto samples =
+        Sampler::sample_splitters(ss, 2 * global_lcp_avg, num_partitions, sampling_factor);
+    measuring_tool.stop("sample_splitters");
+    measuring_tool.add(samples.sample.size(), "allgather_splitters_bytes_sent");
+
+    measuring_tool.start("sort_splitter");
+    Comparator comp;
+    std::mt19937_64 gen{3469931 + comm.rank()};
+    RQuickData sample_data{std::move(samples.sample), std::move(samples.indices)};
+    measuring_tool.disable(); // todo can these be removed?
+    StringContainer sorted_sample = splitterSort(std::move(sample_data), gen, comp, comm);
+    measuring_tool.enable();
+    measuring_tool.stop("sort_splitter");
+
+    measuring_tool.start("choose_splitters");
+    auto [chosen_splitters, splitter_idxs] = getSplittersIndexed(sorted_sample);
+    StringContainer chosen_splitters_cont{std::move(chosen_splitters), splitter_idxs};
+    measuring_tool.stop("choose_splitters");
 
     measuring_tool.start("compute_interval_sizes");
-    std::vector<std::size_t> interval_sizes =
-        compute_interval_binary(ss, chosen_splitters_set, comm);
+    auto splitter_set = chosen_splitters_cont.make_string_set();
+    auto local_offset = getLocalOffset(ss.size());
+    auto interval_sizes = compute_interval_binary_index(ss, splitter_set, local_offset);
     measuring_tool.stop("compute_interval_sizes");
 
     return interval_sizes;

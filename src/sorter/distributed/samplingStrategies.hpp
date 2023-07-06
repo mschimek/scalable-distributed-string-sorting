@@ -24,7 +24,6 @@ getNumberSplitter(uint64_t numPartitions, uint64_t localSetSize, uint64_t sampli
     return std::min<uint64_t>(samplingFactor * (numPartitions - 1), localSetSize);
 }
 
-// todo this function is entirely untested
 inline uint64_t getLocalOffset(uint64_t localStringSize, Communicator const& comm) {
     return comm.exscan_single(
         kamping::send_buf(localStringSize),

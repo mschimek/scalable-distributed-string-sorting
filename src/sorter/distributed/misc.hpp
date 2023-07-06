@@ -520,67 +520,6 @@ static inline std::vector<std::pair<size_t, size_t>> compute_ranges_and_set_lcp_
 template <typename Sampler, typename StringPtr>
 typename std::enable_if<Sampler::isIndexed, std::vector<uint64_t>>::type computePartition(
     StringPtr stringptr,
-    uint64_t globalLcpAvg,
-    uint64_t samplingFactor,
-    dss_mehnert::Communicator comm
-) {
-    using IndexStringContainer = dss_schimek::IndexStringContainer<UCharLengthIndexStringSet>;
-    using Comparator = dss_schimek::IndexStringComparator;
-    using namespace dss_schimek;
-    using namespace measurement;
-    // using IndexStringSet = UCharLengthIndexStringSet;
-    MeasuringTool& measuringTool = MeasuringTool::measuringTool();
-
-    auto ss = stringptr.active();
-    measuringTool.start("sample_splitters");
-    auto sampleIndices =
-        Sampler::sample_splitters(stringptr.active(), 2 * globalLcpAvg, samplingFactor);
-    measuringTool.stop("sample_splitters");
-    measuringTool.add(sampleIndices.sample.size(), "allgather_splitters_bytes_sent");
-
-    measuringTool.start("sort_splitter");
-    Comparator comp;
-    std::mt19937_64 generator;
-    int data_seed = 3469931 + comm.rank();
-    generator.seed(data_seed);
-    RQuick::Data<IndexStringContainer, IndexStringContainer::isIndexed> sampleData;
-    sampleData.rawStrings = std::move(sampleIndices.sample); // TODO
-    sampleData.indices = std::move(sampleIndices.indices);   // TODO better way?
-    // measuringTool.disable();
-    IndexStringContainer sortedLocalSample =
-        splitterSort(std::move(sampleData), generator, comp, comm);
-    // measuringTool.enable();
-    measuringTool.stop("sort_splitter");
-
-    measuringTool.start("choose_splitters");
-    auto [rawChosenSplitters, splitterIndices] = getSplittersIndexed(sortedLocalSample);
-    IndexStringContainer chosen_splitters_cont(std::move(rawChosenSplitters), splitterIndices);
-    measuringTool.stop("choose_splitters");
-
-    // measuringTool.start("allgather_splitters");
-    // auto recvSample = mpi::allgatherv(sampleIndices.sample);
-    // auto recvIndices = mpi::allgatherv(sampleIndices.indices);
-    // measuringTool.stop("allgather_splitters");
-
-    // measuringTool.start("choose_splitters");
-    // IndexStringLcpContainer<IndexStringSet> indexContainer(
-    //    std::move(recvSample), recvIndices);
-    // indexContainer = choose_splitters(indexContainer);
-    // measuringTool.stop("choose_splitters");
-    measuringTool.start("compute_interval_sizes");
-    auto interval_sizes = compute_interval_binary_index(
-        ss,
-        chosen_splitters_cont.make_string_set(),
-        getLocalOffset(ss.size())
-    );
-    measuringTool.stop("compute_interval_sizes");
-    return interval_sizes;
-}
-
-// todo migrate to partition.hpp
-template <typename Sampler, typename StringPtr>
-typename std::enable_if<Sampler::isIndexed, std::vector<uint64_t>>::type computePartition(
-    StringPtr stringptr,
     uint64_t samplingFactor,
     std::vector<uint64_t> const& dist,
     dss_mehnert::Communicator comm
