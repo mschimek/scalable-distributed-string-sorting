@@ -2,7 +2,7 @@ target_sources(dss_base
     PUBLIC
         bloomfilter.hpp
         duplicateSorting.hpp
-        lcp_aware_number_string_splitting.hpp
+        merge_sort.hpp
         merging.hpp
         misc.hpp
         partition.hpp

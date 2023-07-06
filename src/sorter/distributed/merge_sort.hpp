@@ -2,10 +2,14 @@
 // (c) 2023 Pascal Mehnert
 // This code is licensed under BSD 2-Clause License (see LICENSE for details)
 
+#pragma once
+
 #include <algorithm>
+#include <array>
 #include <iterator>
 #include <random>
 #include <string_view>
+#include <vector>
 
 #include <kamping/collectives/alltoall.hpp>
 #include <kamping/communicator.hpp>
@@ -21,6 +25,7 @@
 #include "util/measuringTool.hpp"
 
 namespace dss_mehnert {
+namespace sorter {
 
 // todo remove defaulted environments (dss_schimek::mpi::environment env;)
 // todo investigate wheter RQuick is working correctly (in particular power oft two issue)
@@ -33,10 +38,13 @@ public:
     // todo get rid of NoLcps in AllToAll
     // todo need to consider AllToAllStringPolicy::PrefixCompression?
     // todo why pass both string_ptr and container?
-    StringLcpContainer
-    sort(StringPtr& string_ptr, StringLcpContainer&& container_, Communicator const& comm) {
-        using namespace dss_schimek;
-
+    template <typename Levels>
+    StringLcpContainer sort(
+        StringPtr& string_ptr,
+        StringLcpContainer&& container_,
+        Levels&& intermediate_levels,
+        Communicator const& comm
+    ) {
         measuring_tool_.setPhase("local_sorting");
 
         StringSet const& ss = string_ptr.active();
@@ -60,7 +68,7 @@ public:
         // todo address imbalance in partitions
         size_t round{0};
         Communicator comm_group{comm};
-        std::vector<size_t> intermediate_levels = {2, 2};
+        // std::vector<size_t> intermediate_levels = {2, 2};
         StringLcpContainer container = std::move(container_);
 
         for (auto num_groups: intermediate_levels) {
@@ -199,4 +207,5 @@ private:
     }
 };
 
+} // namespace sorter
 } // namespace dss_mehnert
