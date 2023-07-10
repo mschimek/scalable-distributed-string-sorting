@@ -1,5 +1,6 @@
 build/
 .cache/
+target/
 
 # Gitignore for the following technologies: C++, CMake
 

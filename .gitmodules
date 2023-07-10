@@ -1,9 +1,9 @@
 [submodule "tlx"]
 	path = external/tlx
 	url = https://github.com/tlx/tlx.git
-[submodule "kamping"]
-	path = external/kamping
-	url = git@github.com:kamping-site/kamping.git
 [submodule "ips4o"]
 	path = external/ips4o
 	url = https://github.com/ips4o/ips4o
+[submodule "external/kamping"]
+	path = external/kamping
+	url = git@github.com:kamping-site/kamping.git
