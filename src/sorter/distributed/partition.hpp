@@ -19,6 +19,8 @@
 namespace dss_mehnert {
 namespace partition {
 
+// struct
+
 template <typename StringPtr, typename Sampler>
 std::enable_if_t<!Sampler::isIndexed, std::vector<uint64_t>> compute_partition(
     StringPtr string_ptr,
@@ -63,8 +65,8 @@ std::enable_if_t<!Sampler::isIndexed, std::vector<uint64_t>> compute_partition(
     return interval_sizes;
 }
 
-template <typename Sampler, typename StringPtr>
-std::enable_if_t<Sampler::isIndexed, std::vector<uint64_t>> computePartition(
+template <typename StringPtr, typename Sampler>
+std::enable_if_t<Sampler::isIndexed, std::vector<uint64_t>> compute_partition(
     StringPtr string_ptr,
     uint64_t global_lcp_avg,
     uint64_t num_partitions,
@@ -82,7 +84,7 @@ std::enable_if_t<Sampler::isIndexed, std::vector<uint64_t>> computePartition(
 
     measuring_tool.start("sample_splitters");
     auto samples =
-        Sampler::sample_splitters(ss, 2 * global_lcp_avg, num_partitions, sampling_factor);
+        Sampler::sample_splitters(ss, 2 * global_lcp_avg, num_partitions, sampling_factor, comm);
     measuring_tool.stop("sample_splitters");
     measuring_tool.add(samples.sample.size(), "allgather_splitters_bytes_sent");
 
@@ -96,13 +98,14 @@ std::enable_if_t<Sampler::isIndexed, std::vector<uint64_t>> computePartition(
     measuring_tool.stop("sort_splitter");
 
     measuring_tool.start("choose_splitters");
-    auto [chosen_splitters, splitter_idxs] = getSplittersIndexed(sorted_sample);
+    auto [chosen_splitters, splitter_idxs] =
+        getSplittersIndexed(sorted_sample, num_partitions, comm);
     StringContainer chosen_splitters_cont{std::move(chosen_splitters), splitter_idxs};
     measuring_tool.stop("choose_splitters");
 
     measuring_tool.start("compute_interval_sizes");
     auto splitter_set = chosen_splitters_cont.make_string_set();
-    auto local_offset = getLocalOffset(ss.size());
+    auto local_offset = getLocalOffset(ss.size(), comm);
     auto interval_sizes = compute_interval_binary_index(ss, splitter_set, local_offset);
     measuring_tool.stop("compute_interval_sizes");
 

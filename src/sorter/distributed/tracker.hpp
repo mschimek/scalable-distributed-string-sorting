@@ -9,19 +9,9 @@
 #include <tlx/sort/strings/radix_sort.hpp>
 #include <tlx/sort/strings/string_ptr.hpp>
 
-#include "encoding/golomb_encoding.hpp"
-#include "merge/bingmann-lcp_losertree.hpp"
-#include "merge/stringtools.hpp"
 #include "mpi/allgather.hpp"
-#include "mpi/alltoall.hpp"
-#include "mpi/byte_encoder.hpp"
-#include "mpi/is_sorted.hpp"
-#include "mpi/synchron.hpp"
 #include "sorter/distributed/bloomfilter.hpp"
-#include "strings/stringptr.hpp"
 #include "strings/stringset.hpp"
-#include "strings/stringtools.hpp"
-#include "util/timer.hpp"
 
 namespace dss_schimek {
 
@@ -282,7 +272,7 @@ private:
         }
     }
 
-    void allgatherStrings(StringLcpPtr strptr) {
+    void allgatherStrings(StringLcpPtr strptr, mpi::environment env) {
         StringSet ss = strptr.active();
         std::vector<unsigned char> send_buffer;
 
@@ -293,24 +283,25 @@ private:
         }
 
         size_t numStrings = ss.size();
-        std::vector<size_t> recvCounts = dss_schimek::mpi::allgather(numStrings);
-        std::vector<unsigned char> recvBuffer = dss_schimek::mpi::allgatherv(send_buffer);
+        std::vector<size_t> recvCounts = dss_schimek::mpi::allgather(numStrings, env);
+        std::vector<unsigned char> recvBuffer = dss_schimek::mpi::allgatherv(send_buffer, env);
         container.update(std::move(recvBuffer));
         splitContainer(recvCounts);
     }
 
-    void allgatherCandidates(std::vector<size_t>& candidates) {
+    void allgatherCandidates(std::vector<size_t>& candidates, mpi::environment env) {
         size_t candidatesSize = candidates.size();
-        std::vector<size_t> recvCounts = dss_schimek::mpi::allgather(candidatesSize);
-        std::vector<size_t> recvCandidates = dss_schimek::mpi::allgatherv(candidates);
+        std::vector<size_t> recvCounts = dss_schimek::mpi::allgather(candidatesSize, env);
+        std::vector<size_t> recvCandidates = dss_schimek::mpi::allgatherv(candidates, env);
         splitCandidates(recvCounts, recvCandidates);
     }
 
-    void allgatherResults(std::vector<size_t>& results) {
+    void allgatherResults(std::vector<size_t>& results, mpi::environment env) {
         size_t resultsSize = results.size();
-        std::vector<size_t> recvCounts = dss_schimek::mpi::allgather(resultsSize);
-        std::vector<size_t> recvResults = dss_schimek::mpi::allgatherv(results);
+        std::vector<size_t> recvCounts = dss_schimek::mpi::allgather(resultsSize, env);
+        std::vector<size_t> recvResults = dss_schimek::mpi::allgatherv(results, env);
         splitResults(recvCounts, recvResults);
     }
 };
+
 } // namespace dss_schimek
