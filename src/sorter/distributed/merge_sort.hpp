@@ -21,6 +21,7 @@
 #include "mpi/communicator.hpp"
 #include "sorter/distributed/merging.hpp"
 #include "sorter/distributed/partition.hpp"
+#include "sorter/distributed/sample.hpp"
 #include "strings/stringtools.hpp"
 #include "util/measuringTool.hpp"
 
@@ -103,16 +104,11 @@ private:
         measuring_tool_.setPhase("bucket_computation");
         auto global_lcp_avg = get_avg_lcp(string_ptr, comm);
 
-        // constexpr auto compute_partition = partition::compute_partition<StringPtr, SamplePolicy>;
         // todo why the *100 here
         // todo make sampling_factor variable
-        auto interval_sizes = partition::compute_partition<StringPtr, SamplePolicy>(
-            string_ptr,
-            100 * global_lcp_avg,
-            num_groups,
-            2,
-            comm
-        );
+        constexpr auto compute_partition = partition::compute_partition<StringPtr, SamplePolicy>;
+        sample::SampleParams params{.num_partitions = num_groups, .sampling_factor = 2};
+        auto interval_sizes = compute_partition(string_ptr, 100 * global_lcp_avg, params, comm);
 
         auto group_offset{comm.rank() / num_groups};
         std::vector<uint64_t> send_counts(comm.size());
@@ -143,16 +139,11 @@ private:
         measuring_tool_.setPhase("bucket_computation");
         auto global_lcp_avg = get_avg_lcp(string_ptr, comm);
 
-        // constexpr auto compute_partition = partition::compute_partition<StringPtr, SamplePolicy>;
         // todo why the *100 here
         // todo make sampling_factor variable
-        auto interval_sizes = partition::compute_partition<StringPtr, SamplePolicy>(
-            string_ptr,
-            100 * global_lcp_avg,
-            comm.size(),
-            2,
-            comm
-        );
+        constexpr auto compute_partition = partition::compute_partition<StringPtr, SamplePolicy>;
+        sample::SampleParams params{.num_partitions = comm.size(), .sampling_factor = 2};
+        auto interval_sizes = compute_partition(string_ptr, 100 * global_lcp_avg, params, comm);
 
         comm.barrier();
         measuring_tool_.setPhase("string_exchange");

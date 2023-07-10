@@ -18,11 +18,16 @@
 #include "util/measuringTool.hpp"
 
 namespace dss_mehnert {
+namespace sample {
 
-inline uint64_t
-getNumberSplitter(uint64_t numPartitions, uint64_t localSetSize, uint64_t samplingFactor) {
-    return std::min<uint64_t>(samplingFactor * (numPartitions - 1), localSetSize);
-}
+struct SampleParams {
+    uint64_t num_partitions;
+    uint64_t sampling_factor;
+
+    constexpr uint64_t get_number_splitters(uint64_t local_size) const noexcept {
+        return std::min(sampling_factor * (num_partitions - 1), local_size);
+    }
+};
 
 inline uint64_t getLocalOffset(uint64_t localStringSize, Communicator const& comm) {
     return comm.exscan_single(
@@ -45,8 +50,7 @@ public:
     static std::vector<typename StringSet::Char> sample_splitters(
         StringSet const& ss,
         size_t maxLength,
-        uint64_t numPartitions,
-        uint64_t samplingFactor,
+        SampleParams const& params,
         [[maybe_unused]] Communicator const& comm
     ) {
         using dss_schimek::measurement::MeasuringTool;
@@ -55,7 +59,7 @@ public:
         MeasuringTool& measuringTool = MeasuringTool::measuringTool();
 
         const size_t local_num_strings = ss.size();
-        const size_t nr_splitters = getNumberSplitter(numPartitions, ss.size(), samplingFactor);
+        const size_t nr_splitters = params.get_number_splitters(ss.size());
         double const splitter_dist =
             static_cast<double>(local_num_strings) / static_cast<double>(nr_splitters + 1);
         std::vector<Char> raw_splitters;
@@ -78,8 +82,7 @@ public:
 
     static std::vector<typename StringSet::Char> sample_splitters(
         StringSet const& ss,
-        uint64_t numPartitions,
-        uint64_t samplingFactor,
+        SampleParams const& params,
         std::vector<size_t> const& dist,
         [[maybe_unused]] Communicator const& comm
     ) {
@@ -89,7 +92,7 @@ public:
         MeasuringTool& measuringTool = MeasuringTool::measuringTool();
 
         const size_t local_num_strings = ss.size();
-        const size_t nr_splitters = getNumberSplitter(numPartitions, ss.size(), samplingFactor);
+        const size_t nr_splitters = params.get_number_splitters(ss.size());
         double const splitter_dist =
             static_cast<double>(local_num_strings) / static_cast<double>(nr_splitters + 1);
         std::vector<Char> raw_splitters;
@@ -122,11 +125,7 @@ public:
     static constexpr std::string_view getName() { return "IndexedNumStrings"; }
 
     static SampleIndices sample_splitters(
-        StringSet const& ss,
-        size_t maxLength,
-        uint64_t numPartitions,
-        uint64_t samplingFactor,
-        Communicator const& comm
+        StringSet const& ss, size_t maxLength, SampleParams const& params, Communicator const& comm
     ) {
         using Char = typename StringSet::Char;
         using String = typename StringSet::String;
@@ -135,8 +134,7 @@ public:
         uint64_t localOffset = getLocalOffset(ss.size(), comm);
 
         const size_t local_num_strings = ss.size();
-        const size_t nr_splitters =
-            getNumberSplitter(numPartitions, local_num_strings, samplingFactor);
+        const size_t nr_splitters = params.get_number_splitters(local_num_strings);
         double const splitter_dist =
             static_cast<double>(local_num_strings) / static_cast<double>(nr_splitters + 1);
         std::vector<Char>& raw_splitters = sampleIndices.sample;
@@ -164,8 +162,7 @@ public:
 
     static SampleIndices sample_splitters(
         StringSet const& ss,
-        uint64_t numPartitions,
-        uint64_t samplingFactor,
+        SampleParams const& params,
         std::vector<uint64_t> const& dist,
         Communicator const& comm
     ) {
@@ -176,8 +173,7 @@ public:
         uint64_t localOffset = getLocalOffset(ss.size(), comm);
 
         const size_t local_num_strings = ss.size();
-        const size_t nr_splitters =
-            getNumberSplitter(numPartitions, local_num_strings, samplingFactor);
+        const size_t nr_splitters = params.get_number_splitters(local_num_strings);
         double const splitter_dist =
             static_cast<double>(local_num_strings) / static_cast<double>(nr_splitters + 1);
         std::vector<Char>& raw_splitters = sampleIndices.sample;
@@ -214,8 +210,7 @@ public:
     static SampleIndices sample_splitters(
         StringSet const& ss,
         const size_t maxLength,
-        const uint64_t numPartitions,
-        const uint64_t samplingFactor,
+        SampleParams const& params,
         Communicator const& comm
     ) {
         using Char = typename StringSet::Char;
@@ -231,8 +226,7 @@ public:
         );
 
         const size_t local_num_strings = ss.size();
-        const size_t nr_splitters =
-            getNumberSplitter(numPartitions, local_num_strings, samplingFactor);
+        const size_t nr_splitters = params.get_number_splitters(local_num_strings);
         const size_t splitter_dist = num_chars / (nr_splitters + 1);
 
         std::vector<Char>& raw_splitters = sampleIndices.sample;
@@ -269,8 +263,7 @@ public:
 
     static SampleIndices sample_splitters(
         StringSet const& ss,
-        uint64_t numPartitions,
-        const uint64_t samplingFactor,
+        SampleParams const& params,
         std::vector<uint64_t> const& dist,
         Communicator const& comm
     ) {
@@ -288,8 +281,7 @@ public:
             std::accumulate(dist.begin(), dist.end(), static_cast<size_t>(0u));
 
         const size_t local_num_strings = ss.size();
-        const size_t nr_splitters =
-            getNumberSplitter(numPartitions, local_num_strings, samplingFactor);
+        const size_t nr_splitters = params.get_number_splitters(local_num_strings);
         const size_t splitter_dist = num_distPref / (nr_splitters + 1);
 
         std::vector<Char>& raw_splitters = sampleIndices.sample;
@@ -335,8 +327,7 @@ public:
     static std::vector<typename StringSet::Char> sample_splitters(
         StringSet const& ss,
         size_t maxLength,
-        uint64_t numPartitions,
-        uint64_t samplingFactor,
+        SampleParams const& params,
         [[maybe_unused]] Communicator const& comm
     ) {
         using Char = typename StringSet::Char;
@@ -350,8 +341,7 @@ public:
         );
 
         const size_t local_num_strings = ss.size();
-        const size_t nr_splitters =
-            getNumberSplitter(numPartitions, local_num_strings, samplingFactor);
+        const size_t nr_splitters = params.get_number_splitters(local_num_strings);
         const size_t splitter_dist = num_chars / (nr_splitters + 1);
         std::vector<Char> raw_splitters;
         // raw_splitters.reserve(nr_splitters * (maxLength + 1));
@@ -381,8 +371,7 @@ public:
 
     static std::vector<typename StringSet::Char> sample_splitters(
         StringSet const& ss,
-        uint64_t numPartitions,
-        uint64_t samplingFactor,
+        SampleParams const& params,
         std::vector<uint64_t> const& dist,
         [[maybe_unused]] Communicator const& comm
     ) {
@@ -397,8 +386,7 @@ public:
         );
 
         const size_t local_num_strings = ss.size();
-        const size_t nr_splitters =
-            getNumberSplitter(numPartitions, local_num_strings, samplingFactor);
+        const size_t nr_splitters = params.get_number_splitters(local_num_strings);
         const size_t splitter_dist = num_chars / (nr_splitters + 1);
         std::vector<Char> raw_splitters;
         // raw_splitters.reserve(nr_splitters * (maxLength + 1));
@@ -428,4 +416,5 @@ public:
     }
 };
 
+} // namespace sample
 } // namespace dss_mehnert

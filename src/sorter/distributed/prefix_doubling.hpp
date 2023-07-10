@@ -17,7 +17,7 @@
 #include "sorter/distributed/bloomfilter.hpp"
 #include "sorter/distributed/merging.hpp"
 #include "sorter/distributed/misc.hpp"
-#include "sorter/distributed/samplingStrategies.hpp"
+#include "sorter/distributed/sample.hpp"
 #include "sorter/distributed/tracker.hpp"
 #include "strings/stringptr.hpp"
 #include "strings/stringset.hpp"

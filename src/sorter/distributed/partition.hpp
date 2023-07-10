@@ -19,14 +19,11 @@
 namespace dss_mehnert {
 namespace partition {
 
-// struct
-
 template <typename StringPtr, typename Sampler>
 std::enable_if_t<!Sampler::isIndexed, std::vector<uint64_t>> compute_partition(
     StringPtr string_ptr,
-    uint64_t global_lcp_avg,
-    uint64_t num_partitions,
-    uint64_t sampling_factor,
+    size_t global_lcp_avg,
+    sample::SampleParams const& params,
     Communicator const& comm
 ) {
     using namespace dss_schimek;
@@ -39,8 +36,7 @@ std::enable_if_t<!Sampler::isIndexed, std::vector<uint64_t>> compute_partition(
     auto ss = string_ptr.active();
 
     measuring_tool.start("sample_splitters");
-    auto samples =
-        Sampler::sample_splitters(ss, 2 * global_lcp_avg, num_partitions, sampling_factor, comm);
+    auto samples = Sampler::sample_splitters(ss, 2 * global_lcp_avg, params, comm);
     measuring_tool.stop("sample_splitters");
 
     measuring_tool.start("sort_splitter");
@@ -53,7 +49,7 @@ std::enable_if_t<!Sampler::isIndexed, std::vector<uint64_t>> compute_partition(
     measuring_tool.stop("sort_splitter");
 
     measuring_tool.start("choose_splitters");
-    auto chosen_splitters = getSplitters(sorted_sample, num_partitions, comm);
+    auto chosen_splitters = getSplitters(sorted_sample, params.num_partitions, comm);
     StringContainer chosen_splitters_cont{std::move(chosen_splitters)};
     measuring_tool.stop("choose_splitters");
 
@@ -68,9 +64,8 @@ std::enable_if_t<!Sampler::isIndexed, std::vector<uint64_t>> compute_partition(
 template <typename StringPtr, typename Sampler>
 std::enable_if_t<Sampler::isIndexed, std::vector<uint64_t>> compute_partition(
     StringPtr string_ptr,
-    uint64_t global_lcp_avg,
-    uint64_t num_partitions,
-    uint64_t sampling_factor,
+    size_t global_lcp_avg,
+    sample::SampleParams const& params,
     Communicator const& comm
 ) {
     using namespace dss_schimek;
@@ -83,8 +78,7 @@ std::enable_if_t<Sampler::isIndexed, std::vector<uint64_t>> compute_partition(
     auto ss = string_ptr.active();
 
     measuring_tool.start("sample_splitters");
-    auto samples =
-        Sampler::sample_splitters(ss, 2 * global_lcp_avg, num_partitions, sampling_factor, comm);
+    auto samples = Sampler::sample_splitters(ss, 2 * global_lcp_avg, params, comm);
     measuring_tool.stop("sample_splitters");
     measuring_tool.add(samples.sample.size(), "allgather_splitters_bytes_sent");
 
@@ -99,13 +93,13 @@ std::enable_if_t<Sampler::isIndexed, std::vector<uint64_t>> compute_partition(
 
     measuring_tool.start("choose_splitters");
     auto [chosen_splitters, splitter_idxs] =
-        getSplittersIndexed(sorted_sample, num_partitions, comm);
+        getSplittersIndexed(sorted_sample, params.num_partitions, comm);
     StringContainer chosen_splitters_cont{std::move(chosen_splitters), splitter_idxs};
     measuring_tool.stop("choose_splitters");
 
     measuring_tool.start("compute_interval_sizes");
     auto splitter_set = chosen_splitters_cont.make_string_set();
-    auto local_offset = getLocalOffset(ss.size(), comm);
+    auto local_offset = sample::getLocalOffset(ss.size(), comm);
     auto interval_sizes = compute_interval_binary_index(ss, splitter_set, local_offset);
     measuring_tool.stop("compute_interval_sizes");
 

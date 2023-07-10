@@ -7,6 +7,6 @@ target_sources(dss_base
         misc.hpp
         partition.hpp
         prefix_doubling.hpp
-        samplingStrategies.hpp
+        sample.hpp
         tracker.hpp
 )

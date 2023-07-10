@@ -20,7 +20,7 @@
 #include "mpi/environment.hpp"
 #include "sorter/RQuick/RQuick.hpp"
 #include "sorter/distributed/duplicateSorting.hpp"
-#include "sorter/distributed/samplingStrategies.hpp"
+#include "sorter/distributed/sample.hpp"
 #include "strings/stringcontainer.hpp"
 #include "strings/stringtools.hpp"
 
@@ -575,7 +575,7 @@ static inline std::vector<std::pair<size_t, size_t>> compute_ranges_and_set_lcp_
 //     auto interval_sizes = compute_interval_binary_index(
 //         ss,
 //         chosen_splitters_cont.make_string_set(),
-//         getLocalOffset(ss.size()),
+//         dss_mehnert::sample::getLocalOffset(ss.size()),
 //         comm
 //     );
 //     measuringTool.stop("compute_interval_sizes");
@@ -585,7 +585,10 @@ static inline std::vector<std::pair<size_t, size_t>> compute_ranges_and_set_lcp_
 template <typename Sampler, typename StringPtr>
 typename std::enable_if<!Sampler::isIndexed, std::vector<uint64_t>>::type
 computePartitionSequentialSort(
-    StringPtr stringptr, uint64_t globalLcpAvg, uint64_t samplingFactor, mpi::environment env
+    StringPtr stringptr,
+    uint64_t globalLcpAvg,
+    dss_mehnert::sample::SampleParams const& params,
+    mpi::environment env
 ) {
     using StringSet = typename StringPtr::StringSet;
     using namespace dss_schimek;
@@ -594,8 +597,7 @@ computePartitionSequentialSort(
     auto ss = stringptr.active();
     MeasuringTool& measuringTool = MeasuringTool::measuringTool();
     measuringTool.start("sample_splitters");
-    std::vector<unsigned char> raw_splitters =
-        Sampler::sample_splitters(ss, globalLcpAvg, samplingFactor);
+    std::vector<unsigned char> raw_splitters = Sampler::sample_splitters(ss, globalLcpAvg, params);
     measuringTool.stop("sample_splitters");
 
     measuringTool.add(raw_splitters.size(), "allgather_splitters_bytes_sent");
@@ -622,7 +624,7 @@ template <typename Sampler, typename StringPtr>
 typename std::enable_if<!Sampler::isIndexed, std::vector<uint64_t>>::type
 computePartitionSequentialSort(
     StringPtr stringptr,
-    uint64_t samplingFactor,
+    dss_mehnert::sample::SampleParams const& params,
     std::vector<uint64_t> const& dist,
     mpi::environment env
 ) {
@@ -633,7 +635,7 @@ computePartitionSequentialSort(
     auto ss = stringptr.active();
     MeasuringTool& measuringTool = MeasuringTool::measuringTool();
     measuringTool.start("sample_splitters");
-    std::vector<unsigned char> raw_splitters = Sampler::sample_splitters(ss, samplingFactor, dist);
+    std::vector<unsigned char> raw_splitters = Sampler::sample_splitters(ss, params, dist);
     measuringTool.stop("sample_splitters");
 
     measuringTool.add(raw_splitters.size(), "allgather_splitters_bytes_sent");
@@ -659,7 +661,10 @@ computePartitionSequentialSort(
 template <typename Sampler, typename StringPtr>
 typename std::enable_if<Sampler::isIndexed, std::vector<uint64_t>>::type
 computePartitionSequentialSort(
-    StringPtr stringptr, uint64_t globalLcpAvg, uint64_t samplingFactor, mpi::environment env
+    StringPtr stringptr,
+    size_t globalLcpAvg,
+    dss_mehnert::sample::SampleParams const& params,
+    mpi::environment env
 ) {
     using namespace dss_schimek;
     using namespace measurement;
@@ -668,8 +673,7 @@ computePartitionSequentialSort(
 
     auto ss = stringptr.active();
     measuringTool.start("sample_splitters");
-    auto sampleIndices =
-        Sampler::sample_splitters(stringptr.active(), 2 * globalLcpAvg, samplingFactor);
+    auto sampleIndices = Sampler::sample_splitters(stringptr.active(), 2 * globalLcpAvg, params);
     measuringTool.stop("sample_splitters");
     measuringTool.add(sampleIndices.sample.size(), "allgather_splitters_bytes_sent");
     measuringTool.start("allgather_splitters");
@@ -685,7 +689,7 @@ computePartitionSequentialSort(
     auto interval_sizes = compute_interval_binary_index(
         ss,
         indexContainer.make_string_set(),
-        getLocalOffset(ss.size()),
+        dss_mehnert::sample::getLocalOffset(ss.size()),
         env
     );
     measuringTool.stop("compute_interval_sizes");
@@ -696,7 +700,7 @@ template <typename Sampler, typename StringPtr>
 typename std::enable_if<Sampler::isIndexed, std::vector<uint64_t>>::type
 computePartitionSequentialSort(
     StringPtr stringptr,
-    uint64_t samplingFactor,
+    dss_mehnert::sample::SampleParams const& params,
     std::vector<uint64_t> const& dist,
     mpi::environment env
 ) {
@@ -707,7 +711,7 @@ computePartitionSequentialSort(
 
     auto ss = stringptr.active();
     measuringTool.start("sample_splitters");
-    auto sampleIndices = Sampler::sample_splitters(stringptr.active(), samplingFactor, dist);
+    auto sampleIndices = Sampler::sample_splitters(stringptr.active(), params, dist);
     measuringTool.stop("sample_splitters");
     measuringTool.add(sampleIndices.sample.size(), "allgather_splitters_bytes_sent");
     measuringTool.start("allgather_splitters");
@@ -723,7 +727,7 @@ computePartitionSequentialSort(
     auto interval_sizes = compute_interval_binary_index(
         ss,
         indexContainer.make_string_set(),
-        getLocalOffset(ss.size()),
+        dss_mehnert::sample::getLocalOffset(ss.size()),
         env
     );
     measuringTool.stop("compute_interval_sizes");
