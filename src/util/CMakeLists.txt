@@ -1,8 +1,9 @@
 target_sources(dss_base
     PUBLIC
-        leanNonTimer.hpp
+        lean_non_timer.hpp
         measuringTool.hpp
-        nonTimer.hpp
+        non_timer.hpp
+        measurements.hpp
         random_string_generator.hpp
         string.hpp
         string_set.cpp

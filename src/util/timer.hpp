@@ -1,11 +1,12 @@
 // (c) 2019 Matthias Schimek
+// (c) 2023 Pascal Mehnert
 // This code is licensed under BSD 2-Clause License (see LICENSE for details)
 
 #pragma once
 
 #include <algorithm>
 #include <chrono>
-#include <iomanip>
+#include <cstdint>
 #include <iostream>
 #include <map>
 #include <numeric>
@@ -14,45 +15,59 @@
 #include <tuple>
 #include <vector>
 
-#include "mpi/allreduce.hpp"
+#include <kamping/collectives/allreduce.hpp>
+#include <kamping/mpi_ops.hpp>
+#include <kamping/named_parameters.hpp>
+#include <tlx/die.hpp>
 
-namespace dss_schimek {
+#include "mpi/communicator.hpp"
+#include "util/measurements.hpp"
+
+namespace dss_mehnert {
+namespace measurement {
+
 
 template <typename Key, typename Value>
 class Timer {
-    using Clock = std::chrono::high_resolution_clock;
-    using PointInTime = std::chrono::time_point<Clock>;
-    using TimeUnit = std::chrono::nanoseconds;
-    using TimeIntervalDataType = size_t;
-    using PseudoKey = typename Key::PseudoKey;
-
 public:
+    struct OutputFormat {
+        Key key;
+        Value value;
+        uint64_t min_time, max_time, avg_time;
+        uint64_t min_loss, max_loss, avg_loss;
+
+        friend std::ostream& operator<<(std::ostream& stream, OutputFormat const& output) {
+            return stream << Result << output.key << " " << Result << output.value
+                          << " min_time=" << output.min_time << " max_time=" << output.max_time
+                          << " avg_time=" << output.avg_time << " min_loss=" << output.min_loss
+                          << " max_loss=" << output.max_loss << " avg_loss=" << output.avg_loss;
+        }
+    };
+
     Timer() = default;
 
     void start(Key const& key, Value const& value) {
         if (!measurementEnabled)
             return;
-        if (keyToValue.find(key) != keyToValue.end()) {
+        if (keyToValue.contains(key)) {
+            std::cout << keyToValue.find(key)->first;
             std::cout << "Key: " << key << " already added" << std::endl;
             std::abort();
         }
         auto const& itToValue = keyToValue.emplace(key, value);
         itToValue.first->second.setPseudoKeyCounter(incrementCounterPerPseudoKey(key));
-        auto const& [itToStart, blabla] = keyToStart.emplace(key, PointInTime());
+        auto const& [itToStart, _] = keyToStart.emplace(key, PointInTime());
 
         // Start measurement
-        const PointInTime start = Clock::now();
-        itToStart->second = start;
+        itToStart->second = Clock::now();
     }
 
     void stop(Key const& key) {
-        if (!measurementEnabled)
+        if (!measurementEnabled) {
             return;
+        }
 
         const PointInTime endPoint = Clock::now();
-        // if (!disableBarrier)
-        // env.barrier();
-        const PointInTime endPointAfterBarrier = Clock::now();
         // measurement stopped
 
         // check whether key is present
@@ -64,49 +79,50 @@ public:
         const PointInTime startPoint = it->second;
 
         TimeIntervalDataType elapsedActiveTime =
-            std::chrono::duration_cast<std::chrono::nanoseconds>(endPoint - startPoint).count();
+            std::chrono::duration_cast<TimeUnit>(endPoint - startPoint).count();
         TimeIntervalDataType elapsedTotalTime =
-            std::chrono::duration_cast<TimeUnit>(endPointAfterBarrier - startPoint).count();
+            std::chrono::duration_cast<TimeUnit>(endPoint - startPoint).count();
 
         keyToActiveTime.emplace(key, elapsedActiveTime);
         keyToTotalTime.emplace(key, elapsedTotalTime);
     }
 
-    template <typename OutputIterator>
-    void collect(OutputIterator out) {
+    std::vector<OutputFormat> collect(Communicator const& comm) {
+        using namespace kamping;
+
+        std::vector<OutputFormat> output;
+        output.reserve(keyToValue.size());
         for (auto& [key, value]: keyToValue) {
-            value.setType("avgTime");
-            value.setValue(avgTime(key));
-            out = std::make_pair(key, value);
+            auto time = expect_key(keyToActiveTime, key)->second;
+            // todo loss is currently alwas 0
+            auto loss = getLoss(key);
+            auto size = comm.size();
 
-            value.setType("maxTime");
-            value.setValue(maxTime(key));
-            out = std::make_pair(key, value);
-
-            value.setType("minTime");
-            value.setValue(minTime(key));
-            out = std::make_pair(key, value);
-
-            value.setType("avgLoss");
-            value.setValue(avgLoss(key));
-            out = std::make_pair(key, value);
-
-            value.setType("maxLoss");
-            value.setValue(maxLoss(key));
-            out = std::make_pair(key, value);
-
-            value.setType("minLoss");
-            value.setValue(minLoss(key));
-            out = std::make_pair(key, value);
+            output.push_back({
+                .key = key,
+                .value = value,
+                .min_time = comm.allreduce_single(send_buf(time), op(ops::min<>{})),
+                .max_time = comm.allreduce_single(send_buf(time), op(ops::max<>{})),
+                .avg_time = comm.allreduce_single(send_buf(time), op(ops::plus<>{})) / size,
+                .min_loss = comm.allreduce_single(send_buf(loss), op(ops::min<>{})),
+                .max_loss = comm.allreduce_single(send_buf(loss), op(ops::max<>{})),
+                .avg_loss = comm.allreduce_single(send_buf(loss), op(ops::plus<>{})) / size,
+            });
         }
+        return output;
     }
 
     void setDisableBarrier(bool value) { disableBarrier = value; }
 
 private:
+    using Clock = std::chrono::high_resolution_clock;
+    using PointInTime = std::chrono::time_point<Clock>;
+    using TimeUnit = std::chrono::nanoseconds;
+    using TimeIntervalDataType = uint64_t;
+    using PseudoKey = typename Key::PseudoKey;
+
     bool measurementEnabled = true;
     bool disableBarrier = false;
-    dss_schimek::mpi::environment env;
 
     size_t incrementCounterPerPseudoKey(Key const& key) {
         auto itCounter = pseudoKeyToCounter.find(key.pseudoKey());
@@ -119,61 +135,19 @@ private:
     }
 
     TimeIntervalDataType getLoss(Key const& key) {
-        auto itKeyActiveTime = keyToActiveTime.find(key);
-        auto itKeyTotalTime = keyToTotalTime.find(key);
-        if (itKeyActiveTime == keyToActiveTime.end() || itKeyTotalTime == keyToTotalTime.end()) {
-            std::cout << key << std::endl;
+        auto active_time = expect_key(keyToActiveTime, key);
+        auto total_time = expect_key(keyToTotalTime, key);
+        return total_time->second - active_time->second;
+    }
+
+    auto expect_key(auto const& map, auto const& key) {
+        auto iter = map.find(key);
+        if (iter == std::end(map)) {
+            // todo get kassert to work
             std::cout << "Key " << key << " not present" << std::endl;
             std::abort();
         }
-        return (*itKeyTotalTime).second - (*itKeyActiveTime).second;
-    }
-
-    TimeIntervalDataType
-    avgLoss(Key const& key, dss_schimek::mpi::environment env = dss_schimek::mpi::environment()) {
-        TimeIntervalDataType localLoss = getLoss(key);
-        TimeIntervalDataType sum = dss_schimek::mpi::allreduce_sum(localLoss, {});
-        return sum / env.size();
-    }
-
-    TimeIntervalDataType maxLoss(Key const& key) {
-        TimeIntervalDataType localLoss = getLoss(key);
-        return dss_schimek::mpi::allreduce_max(localLoss, {});
-    }
-
-    TimeIntervalDataType minLoss(Key const& key) {
-        TimeIntervalDataType localLoss = getLoss(key);
-        return dss_schimek::mpi::allreduce_min(localLoss, {});
-    }
-
-    TimeIntervalDataType avgTime(Key const& key) {
-        auto itKeyTime = keyToActiveTime.find(key);
-        if (itKeyTime == keyToActiveTime.end()) {
-            std::cout << "Key " << key << "not present" << std::endl;
-            std::abort();
-        }
-        TimeIntervalDataType sum = dss_schimek::mpi::allreduce_sum((*itKeyTime).second, {});
-        return sum / env.size();
-    }
-
-    TimeIntervalDataType maxTime(Key const& key) {
-        auto itKeyTime = keyToActiveTime.find(key);
-        if (itKeyTime == keyToActiveTime.end()) {
-            std::cout << key << std::endl;
-            std::cout << "Key " << key << " not present" << std::endl;
-            std::abort();
-        }
-        return dss_schimek::mpi::allreduce_max((*itKeyTime).second, {});
-    }
-
-    TimeIntervalDataType minTime(Key const& key) {
-        auto itKeyTime = keyToActiveTime.find(key);
-        if (itKeyTime == keyToActiveTime.end()) {
-            std::cout << key << std::endl;
-            std::cout << "Key " << key << " not present" << std::endl;
-            std::abort();
-        }
-        return dss_schimek::mpi::allreduce_min((*itKeyTime).second, {});
+        return iter;
     }
 
     std::map<Key, Value> keyToValue;
@@ -183,4 +157,5 @@ private:
     std::map<Key, TimeIntervalDataType> keyToTotalTime;
 };
 
-} // namespace dss_schimek
+} // namespace measurement
+} // namespace dss_mehnert

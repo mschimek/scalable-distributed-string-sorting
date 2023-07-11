@@ -1,4 +1,5 @@
 // (c) 2019 Matthias Schimek
+// (c) 2023 Pascal Mehnert
 // This code is licensed under BSD 2-Clause License (see LICENSE for details)
 
 #pragma once
@@ -6,130 +7,14 @@
 #include <ostream>
 #include <vector>
 
-#include "mpi/environment.hpp"
-#include "util/leanNonTimer.hpp"
-#include "util/nonTimer.hpp"
+#include "mpi/communicator.hpp"
+#include "util/lean_non_timer.hpp"
+#include "util/measurements.hpp"
+#include "util/non_timer.hpp"
 #include "util/timer.hpp"
 
-namespace dss_schimek {
+namespace dss_mehnert {
 namespace measurement {
-
-struct PhaseValue {
-    using PseudoKey = std::string;
-
-    std::string phase;
-    size_t value;
-
-    PhaseValue(std::string const& phase, const size_t value) : phase(phase), value(value) {}
-    std::string const& pseudoKey() const { return phase; }
-    void setValue(size_t value_) { value = value_; }
-    size_t getValue() const { return value; }
-};
-
-struct PhaseCounterPerPhaseRoundDescriptionTypeRawCommunicationSumUpValue {
-    using PseudoKey = std::string;
-
-    std::string phase;
-    size_t counterPerPhase;
-    size_t round;
-    std::string description;
-    std::string type;
-    bool rawCommunication;
-    bool sumUp;
-    size_t value;
-
-    PhaseCounterPerPhaseRoundDescriptionTypeRawCommunicationSumUpValue(
-        std::string const& phase,
-        const size_t counterPerPhase,
-        const size_t round,
-        std::string const& description,
-        std::string const& type,
-        bool const rawCommunication,
-        bool const sumUp,
-        const size_t value
-    )
-        : phase(phase),
-          counterPerPhase(counterPerPhase),
-          round(round),
-          description(description),
-          type(type),
-          rawCommunication(rawCommunication),
-          sumUp(sumUp),
-          value(value) {}
-
-    std::string const& pseudoKey() const { return phase; }
-
-    void setPseudoKeyCounter(size_t counter) { counterPerPhase = counter; }
-
-    void setType(std::string const& type_) { type = type_; }
-
-    void setValue(size_t value_) { value = value_; }
-
-    size_t getValue() const { return value; }
-
-    bool getSumUp() { return sumUp; }
-
-    friend std::ostream& operator<<(
-        std::ostream& stream,
-        PhaseCounterPerPhaseRoundDescriptionTypeRawCommunicationSumUpValue& elem
-    ) {
-        return stream << "[" << elem.phase << ", " << elem.counterPerPhase << ", " << elem.round
-                      << ", " << elem.description << ", " << elem.rawCommunication << ", "
-                      << elem.sumUp << elem.value << "]";
-    }
-};
-
-struct PhaseRoundDescription {
-    using PseudoKey = std::string;
-
-    std::string phase;
-    size_t round;
-    std::string description;
-
-    PhaseRoundDescription(
-        std::string const& phase, const size_t round, std::string const& description
-    )
-        : phase(phase),
-          round(round),
-          description(description) {}
-
-    std::string const& pseudoKey() const { return phase; }
-
-    bool operator<(PhaseRoundDescription const& rhs) const {
-        return std::tie(phase, round, description)
-               < std::tie(rhs.phase, rhs.round, rhs.description);
-    }
-
-    friend std::ostream& operator<<(std::ostream& stream, PhaseRoundDescription const& elem) {
-        return stream << "[" << elem.phase << ", " << elem.round << ", " << elem.description << "]";
-    }
-};
-
-struct CounterPerPhaseTypeRawCommunicationSumUpValue {
-    size_t counterPerPhase;
-    std::string type;
-    bool rawCommunication;
-    bool sumUp;
-    size_t value;
-    CounterPerPhaseTypeRawCommunicationSumUpValue(
-        const size_t counterPerPhase,
-        std::string const& type,
-        bool const rawCommunication,
-        bool const sumUp,
-        const size_t value
-    )
-        : counterPerPhase(counterPerPhase),
-          type(type),
-          rawCommunication(rawCommunication),
-          sumUp(sumUp),
-          value(value) {}
-
-    void setPseudoKeyCounter(size_t counter) { counterPerPhase = counter; }
-
-    void setType(std::string const& type_) { type = type_; }
-
-    void setValue(size_t value_) { value = value_; }
-};
 
 class MeasuringTool {
     // Columns:
@@ -141,37 +26,13 @@ class MeasuringTool {
     // Timer: Key = (Phase, Round, Description) Value = (CounterPerPhase, Type,
     // RawCommunication, SumUp, Value)
 
-    using NonTimerRecord = PhaseCounterPerPhaseRoundDescriptionTypeRawCommunicationSumUpValue;
     // NonTimerRecord must contain type PseudoKey and functions pseudoKey() and
     // setPseudoKeyCounter, setValue(), getValue()
-    using TimerKey = PhaseRoundDescription;
+    using NonTimerRecord = PhaseCounterRoundDescription;
     // TimerKey must contain type PseudoKey and function pseudoKey()
-    using TimerValue = CounterPerPhaseTypeRawCommunicationSumUpValue;
-    // TimerValue must contain functions setType() and setPseudoKeyCounter
-    //
-    dss_schimek::mpi::environment env;
-
-    struct OutputFormat {
-        std::string prefix;
-        std::string phase;
-        size_t counterPerPhase;
-        size_t round;
-        std::string description;
-        std::string type;
-        bool rawCommunication;
-        bool sumUp;
-        size_t value;
-
-        friend std::ostream& operator<<(std::ostream& stream, OutputFormat const& outputFormat) {
-            return stream << outputFormat.prefix << " phase=" << outputFormat.phase
-                          << " counterPerPhase=" << outputFormat.counterPerPhase
-                          << " round=" << outputFormat.round
-                          << " operation=" << outputFormat.description
-                          << " type=" << outputFormat.type
-                          << " rawCommunication=" << outputFormat.rawCommunication
-                          << " sumUp=" << outputFormat.sumUp << " value=" << outputFormat.value;
-        }
-    };
+    using TimerKey = PhaseRoundDescription;
+    // TimerValue must contain functions setPseudoKeyCounter()
+    using TimerValue = CounterPerPhase;
 
 public:
     static MeasuringTool& measuringTool() {
@@ -179,141 +40,104 @@ public:
         return measuringTool;
     }
 
-    void reset() {
-        timer = Timer<TimerKey, TimerValue>();
-        nonTimer = NonTimer<NonTimerRecord>();
-        leanNonTimer = LeanNonTimer<PhaseValue>();
-        disabled = false;
-        verbose = false;
-        prefix = "";
-        curPhase = "none";
-        curRound = 0;
-    }
+    void reset() { state = {}; }
 
     void add(size_t value) {
-        // if (disabled) return;
-        // add(value, "unkown");
+        if (state.disabled)
+            return;
+        add(value, "unkown");
     }
 
-    void add(size_t value, std::string const& description, bool const sumUp = true) {
-        // if (disabled) return;
-        // if (verbose && env.rank() == 0) std::cout << description << std::endl;
-        // nonTimer.add(NonTimerRecord(curPhase, 0u, curRound, description,
-        //     "number", false, sumUp, value));
+    // todo add back option to print value on every PE
+    void add(size_t value, std::string const& description, bool collect = true) {
+        if (state.disabled)
+            return;
+        if (state.verbose && comm.is_root())
+            std::cout << description << std::endl;
+        state.nonTimer.add({state.curPhase, 0u, state.curRound, description}, value, collect);
     }
 
     void addRawCommunication(size_t value, std::string const& description) {
-        // if (disabled) return;
-        if (verbose && env.rank() == 0)
+        if (state.disabled)
+            return;
+        if (state.verbose && comm.is_root())
             std::cout << description << std::endl;
-        leanNonTimer.add(PhaseValue(curPhase, value));
+
+        state.communicationVolume.add({state.curPhase, value});
     }
 
     void start(std::string const& description) {
-        if (disabled)
+        if (state.disabled)
             return;
-        if (verbose && env.rank() == 0)
+        if (state.verbose && comm.is_root())
             std::cout << description << std::endl;
-        timer.start(
-            TimerKey(curPhase, curRound, description),
-            TimerValue(0u, "", false, false, 0u)
-        );
+
+        state.timer.start({state.curPhase, state.curRound, description}, {});
     }
 
     void stop(std::string const& description) {
-        if (disabled)
+        if (state.disabled)
             return;
-        if (verbose && env.rank() == 0)
+        if (state.verbose && comm.is_root())
             std::cout << description << std::endl;
-        timer.stop(TimerKey(curPhase, curRound, description));
-    }
 
-    std::vector<OutputFormat> collect() {
-        disable();
-        const size_t numMeasurements = 1000;
-
-        std::vector<OutputFormat> data;
-        data.reserve(10 * numMeasurements);
-        std::vector<NonTimerRecord> nonTimerRecords;
-        std::vector<PhaseValue> leanNonTimerRecords;
-        std::vector<std::pair<TimerKey, TimerValue>> timerRecords;
-        nonTimerRecords.reserve(numMeasurements);
-        leanNonTimerRecords.reserve(numMeasurements);
-        timerRecords.reserve(6 * numMeasurements);
-
-        nonTimer.collect(std::back_inserter(nonTimerRecords));
-        leanNonTimer.collect(std::back_inserter(leanNonTimerRecords));
-        timer.collect(std::back_inserter(timerRecords));
-
-        for (auto const& nonTimerRecord: nonTimerRecords)
-            data.push_back(
-                {prefix,
-                 nonTimerRecord.phase,
-                 nonTimerRecord.counterPerPhase,
-                 nonTimerRecord.round,
-                 nonTimerRecord.description,
-                 nonTimerRecord.type,
-                 nonTimerRecord.rawCommunication,
-                 nonTimerRecord.sumUp,
-                 nonTimerRecord.value}
-            );
-
-        for (auto const& leanNonTimerRecord: leanNonTimerRecords)
-            data.push_back(
-                {prefix,
-                 leanNonTimerRecord.phase,
-                 0,
-                 0,
-                 "commVolume",
-                 "number",
-                 true,
-                 false,
-                 leanNonTimerRecord.value}
-            );
-
-        for (auto const& [timerKey, timerValue]: timerRecords)
-            data.push_back(
-                {prefix,
-                 timerKey.phase,
-                 timerValue.counterPerPhase,
-                 timerKey.round,
-                 timerKey.description,
-                 timerValue.type,
-                 timerValue.rawCommunication,
-                 timerValue.sumUp,
-                 timerValue.value}
-            );
-        enable();
-        return data;
+        state.timer.stop({state.curPhase, state.curRound, description});
     }
 
     void writeToStream(std::ostream& stream) {
-        for (auto const& data: collect())
-            stream << data << std::endl;
+        disable();
+        auto records = state.nonTimer.collect(comm);
+        write_records(stream, records.first);
+        write_records(stream, records.second);
+        write_records(stream, state.communicationVolume.collect(comm));
+        write_records(stream, state.timer.collect(comm));
+        enable();
     }
-    void disableBarrier(bool value) { timer.setDisableBarrier(value); }
 
-    void enable() { disabled = false; }
+    void disableBarrier(bool value) { state.timer.setDisableBarrier(value); }
 
-    void disable() { disabled = true; }
+    void enable() { state.disabled = false; }
 
-    void setVerbose(bool const value) { verbose = value; }
+    void disable() { state.disabled = true; }
 
-    void setPrefix(std::string const& prefix_) { prefix = prefix_; }
+    void setVerbose(bool const value) { state.verbose = value; }
 
-    void setPhase(std::string const& phase) { curPhase = phase; }
+    void setPrefix(std::string const& prefix_) { state.prefix = prefix_; }
 
-    void setRound(size_t round) { curRound = round; }
+    void setPhase(std::string const& phase) { state.curPhase = phase; }
+
+    void setRound(size_t round) { state.curRound = round; }
 
 private:
-    bool disabled = false;
-    bool verbose = false;
-    std::string prefix = "";
-    std::string curPhase = "none";
-    size_t curRound = 0;
-    NonTimer<NonTimerRecord> nonTimer;
-    LeanNonTimer<PhaseValue> leanNonTimer;
-    Timer<TimerKey, TimerValue> timer;
+    struct State {
+        bool disabled = false;
+        bool verbose = false;
+        std::string prefix = "";
+        std::string curPhase = "none";
+        size_t curRound = 0;
+        NonTimer<NonTimerRecord, size_t> nonTimer;
+        LeanNonTimer<PhaseValue> communicationVolume = {"comm_volume"};
+        Timer<TimerKey, TimerValue> timer;
+    };
+
+    Communicator comm;
+    State state;
+
+    void write_records(std::ostream& stream, auto const& records) {
+        for (auto const& record: records) {
+            stream << state.prefix << " " << record << "\n";
+        }
+    }
 };
+
+} // namespace measurement
+} // namespace dss_mehnert
+
+namespace dss_schimek {
+namespace measurement {
+
+using dss_mehnert::measurement::MeasuringTool;
+
+
 } // namespace measurement
 } // namespace dss_schimek
