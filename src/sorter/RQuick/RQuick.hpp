@@ -21,16 +21,20 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstddef>
+#include <iostream>
 #include <memory>
 #include <numeric>
+#include <ostream>
 #include <random>
 #include <tuple>
 #include <utility>
 #include <vector>
 
 #include <ips4o.hpp>
+#include <mpi.h>
 #include <tlx/sort/strings/radix_sort.hpp>
 
 #include "./BinTreeMedianSelection.hpp"
@@ -49,6 +53,7 @@ public:
 };
 
 } // namespace Tools
+
 namespace RQuick {
 
 template <class StringContainer_, bool isIndexed>
@@ -99,50 +104,45 @@ struct Data {
             MPI_Waitall(2, requests, MPI_STATUSES_IGNORE);
             return returnData;
         } else {
-            int32_t tagIndices = tag + 1;
+            int32_t tag_idx = tag + 1;
             MPI_Request requests[4];
-            measuringTool.addRawCommunication(rawStrings.size(), "");
-            MPI_Isend(rawStrings.data(), rawStrings.size(), MPI_BYTE, target, tag, comm, requests);
-            measuringTool.addRawCommunication(indices.size() * sizeof(uint64_t), "");
+
+            int rank;
+            MPI_Comm_rank(comm, &rank);
+
+            int send_size_strs = rawStrings.size();
+            int send_size_idxs = indices.size() * sizeof(uint64_t);
+
+            measuringTool.addRawCommunication(send_size_strs, "");
+            measuringTool.addRawCommunication(send_size_idxs, "");
+            MPI_Isend(rawStrings.data(), send_size_strs, MPI_BYTE, target, tag, comm, requests);
             MPI_Isend(
                 indices.data(),
-                indices.size() * sizeof(uint64_t),
+                send_size_idxs,
                 MPI_BYTE,
                 target,
-                tagIndices,
+                tag_idx,
                 comm,
                 requests + 1
             );
 
-            int recv_size = 0;
-            int recv_indices_size = 0;
-            MPI_Status status[2];
-            MPI_Probe(target, tag, comm, status);
-            MPI_Get_count(status, MPI_BYTE, &recv_size);
-            MPI_Probe(target, tagIndices, comm, status + 1);
-            MPI_Get_count(status + 1, MPI_BYTE, &recv_indices_size);
-
             Data returnData;
-            returnData.rawStrings.resize(recv_size);
-            returnData.indices.resize(recv_indices_size);
-            MPI_Irecv(
-                returnData.rawStrings.data(),
-                recv_size,
-                MPI_BYTE,
-                target,
-                tag,
-                comm,
-                requests + 2
-            );
-            MPI_Irecv(
-                returnData.indices.data(),
-                recv_indices_size,
-                MPI_BYTE,
-                target,
-                tagIndices,
-                comm,
-                requests + 3
-            );
+            MPI_Status status[2];
+
+            int recv_size_strs = 0;
+            MPI_Probe(target, tag, comm, status);
+            MPI_Get_count(status, MPI_BYTE, &recv_size_strs);
+            returnData.rawStrings.resize(recv_size_strs);
+            auto recv_buf_strs = returnData.rawStrings.data();
+            MPI_Irecv(recv_buf_strs, recv_size_strs, MPI_BYTE, target, tag, comm, requests + 2);
+
+            int recv_size_idxs = 0;
+            MPI_Probe(target, tag_idx, comm, status + 1);
+            MPI_Get_count(status + 1, MPI_BYTE, &recv_size_idxs);
+            returnData.indices.resize(recv_size_idxs);
+            auto recv_buf_idxs = returnData.indices.data();
+            MPI_Irecv(recv_buf_idxs, recv_size_idxs, MPI_BYTE, target, tag_idx, comm, requests + 3);
+
             MPI_Waitall(4, requests, MPI_STATUSES_IGNORE);
             return returnData;
         }
@@ -295,7 +295,6 @@ namespace _internal {
 constexpr bool debugQuicksort = false;
 constexpr bool barrierActive = false;
 
-uint64_t initialSize = 0;
 template <class Communicator>
 inline void split(Communicator& comm, Communicator* subcomm) {
     int32_t myrank, nprocs;
@@ -304,16 +303,6 @@ inline void split(Communicator& comm, Communicator* subcomm) {
 
     bool is_left_group = myrank < (nprocs / 2);
     int32_t colour = is_left_group;
-
-    // int first = 0, last = 0;
-    // if (is_left_group) {
-    //    first = 0;
-    //    last = nprocs / 2 - 1;
-    //}
-    // else {
-    //    first = nprocs / 2;
-    //    last = nprocs - 1;
-    //}
 
     MPI_Comm_split(comm, colour, myrank, subcomm);
 }
@@ -505,16 +494,6 @@ StringContainer sortRec(
     using StringSet = typename StringContainer::StringSet;
     using String = typename StringSet::String;
     using dss_schimek::measurement::MeasuringTool;
-    static uint64_t iteration = 0;
-    ++iteration;
-    // MeasuringTool& measuringTool = MeasuringTool::measuringTool();
-    // measuringTool.setRound(iteration);
-    // if constexpr (barrierActive) {
-    //    measuringTool.start("Splitter_median_select_Barrier");
-    //    MPI_Barrier(comm);
-    //    measuringTool.stop("Splitter_median_select_Barrier");
-    //}
-    // measuringTool.start("Splitter_median_select");
     tracker.median_select_t.start(comm);
 
     int32_t nprocs;
@@ -553,11 +532,6 @@ StringContainer sortRec(
 
     // Partition data into small elements and large elements.
 
-    // if constexpr (barrierActive) {
-    //    measuringTool.start("Splitter_partition_Barrier");
-    //    MPI_Barrier(comm);
-    //    measuringTool.stop("Splitter_partition_Barrier");
-    //}
     // measuringTool.start("Splitter_partition");
     tracker.partition_t.start(comm);
 
@@ -621,11 +595,6 @@ StringContainer sortRec(
 
     // Move elements to partner and receive elements for own group.
     tracker.exchange_t.start(comm);
-    // if constexpr (barrierActive) {
-    //    measuringTool.start("Splitter_exchange_Barrier");
-    //    MPI_Barrier(comm);
-    //    measuringTool.stop("Splitter_exchange_Barrier");
-    //}
     // measuringTool.start("Splitter_exchange");
 
     auto const partner = (myrank + (nprocs / 2)) % nprocs;
@@ -641,12 +610,8 @@ StringContainer sortRec(
     // measuringTool.stop("Splitter_exchange");
     // Merge received elements with own elements.
     tracker.merge_t.start(comm);
-    // if constexpr (barrierActive) {
-    //    measuringTool.start("Splitter_merge_Barrier");
-    //    MPI_Barrier(comm);
-    //    measuringTool.stop("Splitter_merge_Barrier");
-    //}
     // measuringTool.start("Splitter_merge");
+
 
     auto const num_elements = recvStrings.size() + (own_end - own_begin);
     std::vector<String> mergedStrings(num_elements);
@@ -680,7 +645,7 @@ StringContainer sortRec(
     } else {
         stringContainer.update(std::move(mergedRawStrings));
     }
-    // measuringTool.stop("Splitter_merge");
+
     if constexpr (debugQuicksort) {
         if (!stringContainer.isConsistent()) {
             std::cout << "merged string cont not consistent " << std::endl;
@@ -694,19 +659,12 @@ StringContainer sortRec(
 
     if (nprocs >= 4) {
         // Split communicator and solve subproblems.
-        // if constexpr (barrierActive) {
-        //    measuringTool.start("Splitter_split_Barrier");
-        //    MPI_Barrier(comm);
-        //    measuringTool.stop("Splitter_split_Barrier");
-        //}
-        // measuringTool.start("Splitter_split");
         tracker.comm_split_t.start(comm);
 
         MPI_Comm subcomm;
         split(comm, &subcomm);
 
         tracker.comm_split_t.stop();
-        // measuringTool.stop("Splitter_split");
 
         auto res = sortRec<StringContainer::isIndexed>(
             gen,
@@ -719,12 +677,8 @@ StringContainer sortRec(
             tag,
             subcomm
         );
-        // measuringTool.disableBarrier(false);
-        // measuringTool.setRound(0);
         return res;
     }
-    // measuringTool.disableBarrier(false);
-    // measuringTool.setRound(0);
 
     return std::move(stringContainer);
 }
@@ -983,16 +937,10 @@ typename Data::StringContainer sort(
     bool is_robust
 ) {
     using StringContainer = typename Data::StringContainer;
-    // using StringSet = typename StringContainer::StringSet;
     using dss_schimek::measurement::MeasuringTool;
 
     // MeasuringTool& measuringTool = MeasuringTool::measuringTool();
     // measuringTool.disableBarrier(true);
-    // if constexpr (barrierActive) {
-    //    measuringTool.start("Splitter_baseCase_Barrier");
-    //    MPI_Barrier(comm);
-    //    measuringTool.stop("Splitter_baseCase_Barrier");
-    //}
     // measuringTool.start("Splitter_baseCase");
     int32_t nprocs;
     int32_t myrank;
@@ -1002,19 +950,12 @@ typename Data::StringContainer sort(
     if (nprocs == 1) {
         StringContainer container = data.moveToContainer();
         tracker.local_sort_t.start(comm);
-
         sortLocally(container);
         tracker.local_sort_t.stop();
-        // measuringTool.stop("Splitter_baseCase");
+
         return container;
     }
-    // measuringTool.stop("Splitter_baseCase");
 
-    if constexpr (barrierActive) {
-        // measuringTool.start("Splitter_move_to_pow_of_two_t_Barrier");
-        // MPI_Barrier(comm);
-        // measuringTool.stop("Splitter_move_to_pow_of_two_t_Barrier");
-    }
     // measuringTool.start("Splitter_move_to_pow_of_two_t");
     tracker.move_to_pow_of_two_t.start(comm);
 
@@ -1049,59 +990,6 @@ typename Data::StringContainer sort(
         comm = sub_comm;
         // measuringTool.stop("Splitter_move_to_pow_of_two_t");
 
-        // if constexpr (barrierActive) {
-        ////measuringTool.start("splitter_shuffle_Barrier");
-        // measuringTool.stop("splitter_shuffle_Barrier");
-        //}
-        // measuringTool.start("Splitter_shuffle");
-        // measuringTool.stop("Splitter_shuffle");
-        // if constexpr (barrierActive) {
-        // measuringTool.start("Splitter_sortLocally_Barrier");
-        // measuringTool.stop("Splitter_sortLocally_Barrier");
-        //}
-        // measuringTool.start("Splitter_sortLocally");
-        // measuringTool.stop("Splitter_sortLocally");
-        // uint64_t numberOfRounds = static_cast<uint64_t>(std::log2(nprocs));
-        // for (size_t i = 0; i < numberOfRounds; ++i) {
-
-        // measuringTool.setRound(i);
-        // if constexpr (barrierActive) {
-        // measuringTool.start("Splitter_median_select_Barrier");
-        // measuringTool.stop("Splitter_median_select_Barrier");
-        //}
-        // measuringTool.start("Splitter_median_select");
-        // measuringTool.stop("Splitter_median_select");
-        // if constexpr (barrierActive) {
-        // measuringTool.start("Splitter_partition_Barrier");
-        // measuringTool.stop("Splitter_partition_Barrier");
-        //}
-        // measuringTool.start("Splitter_partition");
-        // measuringTool.stop("Splitter_partition");
-        // if constexpr (barrierActive) {
-        // measuringTool.start("Splitter_exchange_Barrier");
-        // measuringTool.stop("Splitter_exchange_Barrier");
-        //}
-        // measuringTool.start("Splitter_exchange");
-        // measuringTool.stop("Splitter_exchange");
-        // if constexpr (barrierActive) {
-        // measuringTool.start("Splitter_merge_Barrier");
-        // measuringTool.stop("Splitter_merge_Barrier");
-        //}
-        // measuringTool.start("Splitter_merge");
-        // measuringTool.stop("Splitter_merge");
-        // if (i + 1 < numberOfRounds) {
-        // if constexpr (barrierActive) {
-        // measuringTool.start("Splitter_split_Barrier");
-        // measuringTool.stop("Splitter_split_Barrier");
-        //}
-        // measuringTool.start("Splitter_split");
-        // measuringTool.stop("Splitter_split");
-        //}
-
-        //}
-        // measuringTool.setRound(0);
-        // measuringTool.disableBarrier(false);
-
         return StringContainer();
     } else if (pow != nprocs) {
         // Not a power of two but we are part of the smaller hypercube
@@ -1127,11 +1015,6 @@ typename Data::StringContainer sort(
 
     assert(tlx::is_power_of_two(nprocs));
 
-    // if constexpr (barrierActive) {
-    //    measuringTool.start("splitter_shuffle_Barrier");
-    //    MPI_Barrier(comm);
-    //    measuringTool.stop("splitter_shuffle_Barrier");
-    //}
     tracker.parallel_shuffle_t.start(comm);
     // measuringTool.start("Splitter_shuffle");
 
@@ -1210,11 +1093,6 @@ typename Data::StringContainer sort(
     // measuringTool.stop("Splitter_shuffle");
     tracker.parallel_shuffle_t.stop();
 
-    // if constexpr (barrierActive) {
-    //    measuringTool.start("Splitter_sortLocally_Barrier");
-    //    MPI_Barrier(comm);
-    //    measuringTool.stop("Splitter_sortLocally_Barrier");
-    //}
     // measuringTool.start("Splitter_sortLocally");
     tracker.local_sort_t.start(comm);
     sortLocally(container);
@@ -1280,4 +1158,5 @@ typename Data::StringContainer sort(
         is_robust
     );
 }
+
 } // namespace RQuick
