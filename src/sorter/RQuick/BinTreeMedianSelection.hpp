@@ -174,15 +174,13 @@ Data select(
 ) {
     using StringContainer = typename Data::StringContainer;
     using namespace dss_schimek::measurement;
-    MeasuringTool& measuringTool = MeasuringTool::measuringTool();
-    // using StringSet = typename StringContainer::StringSet;
+    auto& measuringTool = MeasuringTool::measuringTool();
 
     int32_t myrank, nprocs;
     MPI_Comm_rank(comm, &myrank);
     MPI_Comm_size(comm, &nprocs);
 
     // assert(static_cast<size_t>(end - begin) <= n);
-
     // assert(std::is_sorted(begin, end, std::forward<Comp>(comp)));
 
     auto const tailing_zeros = static_cast<unsigned>(tlx::ffs(myrank)) - 1;
@@ -210,14 +208,15 @@ Data select(
 
         auto requestedRawString = container.getRawString(medianIndex);
         int32_t size = requestedRawString.size();
-        measuringTool.addRawCommunication(sizeof(MPI_INT), "");
+        measuringTool.addRawCommunication(sizeof(int), "");
         MPI_Bcast(&size, 1, MPI_INT, 0, comm);
         measuringTool.addRawCommunication(size, "");
         MPI_Bcast(requestedRawString.data(), size, MPI_BYTE, 0, comm);
-        Data returnData;
-        returnData.rawStrings = requestedRawString;
+        Data returnData{.rawStrings = requestedRawString, .indices = {}};
+
         if constexpr (StringContainer::isIndexed) {
-            auto stringIndex = container.strings()[medianIndex].index;
+            auto stringIndex = medianIndex < 0 ? 0 : container.strings()[medianIndex].index;
+
             measuringTool.addRawCommunication(sizeof(stringIndex), "");
             MPI_Bcast(&stringIndex, sizeof(stringIndex), MPI_BYTE, 0, comm);
             returnData.indices.push_back(stringIndex);
@@ -229,12 +228,13 @@ Data select(
         data.Send(comm, target, tag);
 
         int32_t medianSize;
-        measuringTool.addRawCommunication(sizeof(MPI_INT), "");
+        measuringTool.addRawCommunication(sizeof(int), "");
         MPI_Bcast(&medianSize, 1, MPI_INT, 0, comm);
         Data returnData;
         returnData.rawStrings.resize(medianSize);
         measuringTool.addRawCommunication(medianSize, "");
         MPI_Bcast(returnData.rawStrings.data(), medianSize, MPI_BYTE, 0, comm);
+
         if constexpr (StringContainer::isIndexed) {
             returnData.indices.resize(1);
             measuringTool.addRawCommunication(sizeof(uint64_t), "");
