@@ -55,14 +55,22 @@ add_subdirectory(external/kamping)
 set(IPS4O_DISABLE_PARALLEL ON)
 add_subdirectory(external/ips4o)
 
+# Create a library containing all implementation, to be linked against by executables
 add_library(dss_base)
 set_target_properties(dss_base PROPERTIES LINKER_LANGUAGE CXX)
 target_compile_options(dss_base PRIVATE ${DSS_MEHNERT_WARNING_FLAGS})
 
 target_include_directories(dss_base PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(dss_base PUBLIC kamping)
+target_link_libraries(dss_base PRIVATE kamping)
 target_link_libraries(dss_base PUBLIC tlx)
 target_link_libraries(dss_base PRIVATE MPI::MPI_CXX)
 target_link_libraries(dss_base INTERFACE ips4o)
 
 add_subdirectory(src)
+
+add_executable(distributed_sorter src/executables/distributed_sorter.cpp src/executables/variant_selection.hpp)
+target_compile_options(distributed_sorter PRIVATE ${DSS_MEHNERT_WARNING_FLAGS})
+target_link_libraries(distributed_sorter kamping)
+target_link_libraries(distributed_sorter dss_base)
+target_link_libraries(distributed_sorter tlx)
+
