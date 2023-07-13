@@ -14,7 +14,6 @@
 #include <kamping/named_parameters.hpp>
 #include <tlx/sort/strings/radix_sort.hpp>
 
-#include "merge/stringtools.hpp"
 #include "mpi/allgather.hpp"
 #include "mpi/communicator.hpp"
 #include "mpi/environment.hpp"
@@ -31,11 +30,9 @@ struct StringComparator {
     bool operator()(String lhs, String rhs) {
         unsigned char const* lhsChars = lhs.string;
         unsigned char const* rhsChars = rhs.string;
-        size_t counter = 0;
         while (*lhsChars == *rhsChars && *lhsChars != 0) {
             ++lhsChars;
             ++rhsChars;
-            counter++;
         }
         return *lhsChars < *rhsChars;
     }
@@ -46,11 +43,9 @@ struct IndexStringComparator {
     bool operator()(String lhs, String rhs) {
         unsigned char const* lhsChars = lhs.string;
         unsigned char const* rhsChars = rhs.string;
-        size_t counter = 0;
         while (*lhsChars == *rhsChars && *lhsChars != 0) {
             ++lhsChars;
             ++rhsChars;
-            counter++;
         }
         if (*lhsChars == 0 && *rhsChars == 0)
             return lhs.index < rhs.index;

@@ -5,14 +5,18 @@
 #pragma once
 
 #include <algorithm>
-#include <array>
+#include <format>
+#include <iostream>
 #include <iterator>
 #include <random>
+#include <string>
 #include <string_view>
 #include <vector>
 
 #include <kamping/collectives/alltoall.hpp>
+#include <kamping/collectives/reduce.hpp>
 #include <kamping/communicator.hpp>
+#include <kamping/mpi_ops.hpp>
 #include <kamping/named_parameters.hpp>
 #include <tlx/die.hpp>
 #include <tlx/sort/strings/radix_sort.hpp>
@@ -29,13 +33,16 @@ namespace dss_mehnert {
 namespace sorter {
 
 // todo remove defaulted environments (dss_schimek::mpi::environment env;)
-// todo investigate wheter RQuick is working correctly (in particular power oft two issue)
 template <typename StringPtr, typename AllToAllStringPolicy, typename SamplePolicy>
 class DistributedMergeSort : private AllToAllStringPolicy, private SamplePolicy {
 public:
+    static constexpr bool debug = true;
+    static constexpr bool barrier = true;
+
     using StringSet = typename StringPtr::StringSet;
     using StringLcpContainer = dss_schimek::StringLcpContainer<StringSet>;
 
+    // todo not sure about the usage of StringLcpContainer&& here
     // todo get rid of NoLcps in AllToAll
     // todo need to consider AllToAllStringPolicy::PrefixCompression?
     // todo why pass both string_ptr and container?
@@ -46,16 +53,19 @@ public:
         Levels&& intermediate_levels,
         Communicator const& comm
     ) {
+        using namespace kamping;
         measuring_tool_.setPhase("local_sorting");
 
         StringSet const& ss = string_ptr.active();
 
-        size_t charactersInSet = 0;
-        for (auto const& str: ss) {
-            charactersInSet += ss.get_length(str) + 1;
+        if constexpr (debug) {
+            size_t charactersInSet = 0;
+            for (auto const& str: ss) {
+                charactersInSet += ss.get_length(str) + 1;
+            }
+            measuring_tool_.add(charactersInSet, "charactersInSet");
+            assert_equal(charactersInSet, container_.char_size());
         }
-
-        measuring_tool_.add(charactersInSet, "charactersInSet");
 
         measuring_tool_.start("sort_locally");
         tlx::sort_strings_detail::radixsort_CI3(string_ptr, 0, 0);
@@ -69,20 +79,50 @@ public:
         // todo address imbalance in partitions
         size_t round{0};
         Communicator comm_group{comm};
-        // std::vector<size_t> intermediate_levels = {2, 2};
-        StringLcpContainer container = std::move(container_);
+        StringLcpContainer container{std::move(container_)};
 
         for (auto num_groups: intermediate_levels) {
             tlx_die_unless(1 < num_groups && num_groups < comm_group.size());
 
+            measuring_tool_.setPhase("sort_globally");
+            measuring_tool_.start("partial_sorting");
             auto [color, sorted_container] =
                 sort_partial(std::move(container), num_groups, comm_group);
             container = std::move(sorted_container);
+            measuring_tool_.setPhase("sort_globally");
+            measuring_tool_.stop("partial_sorting");
+
+            // todo use create_subcommunicators here
+            measuring_tool_.start("split_communicator");
             comm_group = comm_group.split(color);
+            measuring_tool_.stop("split_communicator");
+
+            if constexpr (debug) {
+                size_t size_strings = container.size();
+                size_t size_chars = container.char_size();
+                auto group_strings = comm_group.reduce(send_buf(size_strings), op(ops::plus<>{}));
+                auto group_chars = comm_group.reduce(send_buf(size_chars), op(ops::plus<>{}));
+                if (comm_group.is_root()) {
+                    auto color_world = comm.rank() / comm_group.size();
+                    std::cout << "iter=" << round << " group_world=" << color_world
+                              << " group=" << color
+                              << " group_strings=" << group_strings.extract_recv_buffer()[0]
+                              << " group_chars=" << group_chars.extract_recv_buffer()[0] << "\n";
+                }
+            }
+            if constexpr (barrier) {
+                comm.barrier();
+            }
+
             measuring_tool_.setRound(++round);
         }
 
+
+        measuring_tool_.setPhase("sort_globally");
+        measuring_tool_.start("final_sorting");
         auto sorted_container = sort_exhaustive(std::move(container), comm_group);
+        measuring_tool_.setPhase("sort_globally");
+        measuring_tool_.stop("final_sorting");
 
         // todo this is a horrible bodge, pls remove
         measuring_tool_.setRound(0);
@@ -91,24 +131,27 @@ public:
     }
 
 private:
-    using MeasuringTool = dss_schimek::measurement::MeasuringTool;
+    using MeasuringTool = measurement::MeasuringTool;
     MeasuringTool& measuring_tool_ = MeasuringTool::measuringTool();
 
     std::pair<int, StringLcpContainer>
     sort_partial(StringLcpContainer&& container, size_t num_groups, Communicator const& comm) {
         tlx_die_unless(comm.size() % num_groups == 0);
 
-        auto string_ptr = container.make_string_lcp_ptr();
+        auto string_ptr{container.make_string_lcp_ptr()};
         auto group_size{comm.size() / num_groups};
 
+        measuring_tool_.add(num_groups, "num_groups");
+        measuring_tool_.add(group_size, "group_size");
+
         measuring_tool_.setPhase("bucket_computation");
-        auto global_lcp_avg = get_avg_lcp(string_ptr, comm);
+        auto global_lcp_avg{get_avg_lcp(string_ptr, comm)};
 
         // todo why the *100 here
         // todo make sampling_factor variable
         constexpr auto compute_partition = partition::compute_partition<StringPtr, SamplePolicy>;
         sample::SampleParams params{.num_partitions = num_groups, .sampling_factor = 2};
-        auto interval_sizes = compute_partition(string_ptr, 100 * global_lcp_avg, params, comm);
+        auto interval_sizes{compute_partition(string_ptr, 100 * global_lcp_avg, params, comm)};
 
         auto group_offset{comm.rank() / num_groups};
         std::vector<uint64_t> send_counts(comm.size());
@@ -120,7 +163,6 @@ private:
             dst_iter += group_size;
         }
 
-        comm.barrier(); // todo maybe remove this barrier
         measuring_tool_.setPhase("string_exchange");
         auto [recv_container, recv_intervals] =
             string_exchange(std::move(container), send_counts, comm);
@@ -135,6 +177,8 @@ private:
 
     StringLcpContainer sort_exhaustive(StringLcpContainer&& container, Communicator const& comm) {
         auto string_ptr = container.make_string_lcp_ptr();
+
+        measuring_tool_.add(container.size(), "num_strings");
 
         measuring_tool_.setPhase("bucket_computation");
         auto global_lcp_avg = get_avg_lcp(string_ptr, comm);
@@ -179,7 +223,7 @@ private:
         measuring_tool_.stop("all_to_all_strings");
 
         auto num_received_chars = recv_string_container.char_size() - recv_string_container.size();
-        measuring_tool_.add(num_received_chars, "num_received_chars", false);
+        measuring_tool_.add(num_received_chars, "num_recv_chars", false);
         measuring_tool_.add(recv_string_container.size(), "num_recv_strings", false);
 
         return {std::move(recv_string_container), std::move(recv_interval_sizes)};

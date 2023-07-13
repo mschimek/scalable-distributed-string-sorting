@@ -43,7 +43,7 @@ std::enable_if_t<!Sampler::isIndexed, std::vector<uint64_t>> compute_partition(
     Comparator comp;
     std::mt19937_64 gen{3469931 + comm.rank()};
     RQuickData sample_data{std::move(samples), {}};
-    measuring_tool.disable(); // todo can these be removed?
+    measuring_tool.disable();
     StringContainer sorted_sample = splitterSort(std::move(sample_data), gen, comp, comm);
     measuring_tool.enable();
     measuring_tool.stop("sort_splitter");
@@ -86,7 +86,7 @@ std::enable_if_t<Sampler::isIndexed, std::vector<uint64_t>> compute_partition(
     Comparator comp;
     std::mt19937_64 gen{3469931 + comm.rank()};
     RQuickData sample_data{std::move(samples.sample), std::move(samples.indices)};
-    measuring_tool.disable(); // todo can these be removed?
+    measuring_tool.disable();
     StringContainer sorted_sample = splitterSort(std::move(sample_data), gen, comp, comm);
     measuring_tool.enable();
     measuring_tool.stop("sort_splitter");
