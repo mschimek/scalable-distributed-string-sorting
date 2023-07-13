@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+#include <utility>
 #include <vector>
 
 #include "merge/bingmann-lcp_losertree.hpp"
@@ -23,10 +25,9 @@ template <typename AllToAllStringPolicy, size_t K, typename StringSet>
 static inline dss_schimek::StringLcpContainer<StringSet> merge(
     dss_schimek::StringLcpContainer<StringSet>&& recv_string_cont,
     std::vector<std::pair<size_t, size_t>>& ranges,
-    const size_t num_recv_elems
+    const size_t num_recv_elems,
+    dss_schimek::mpi::environment env
 ) {
-    dss_schimek::mpi::environment env;
-
     if (recv_string_cont.size() == 0u)
         return dss_schimek::StringLcpContainer<StringSet>();
 
@@ -66,98 +67,46 @@ static inline StringLcpContainer choose_merge(
     size_t num_recv_elems,
     dss_schimek::mpi::environment env
 ) {
+    auto merge_k = [=, &ranges]<size_t K>(auto&& container) {
+        return merge<AllToAllStringPolicy, K>(
+            std::forward<StringLcpContainer>(container),
+            ranges,
+            num_recv_elems,
+            env
+        );
+    };
     const size_t nextPow2 = pow2roundup(env.size());
     switch (nextPow2) {
         case 1:
-            return merge<AllToAllStringPolicy, 1>(
-                std::move(recv_string_cont),
-                ranges,
-                num_recv_elems
-            );
+            return merge_k.template operator()<1>(std::move(recv_string_cont));
         case 2:
-            return merge<AllToAllStringPolicy, 2>(
-                std::move(recv_string_cont),
-                ranges,
-                num_recv_elems
-            );
+            return merge_k.template operator()<2>(std::move(recv_string_cont));
         case 4:
-            return merge<AllToAllStringPolicy, 4>(
-                std::move(recv_string_cont),
-                ranges,
-                num_recv_elems
-            );
+            return merge_k.template operator()<4>(std::move(recv_string_cont));
         case 8:
-            return merge<AllToAllStringPolicy, 8>(
-                std::move(recv_string_cont),
-                ranges,
-                num_recv_elems
-            );
+            return merge_k.template operator()<8>(std::move(recv_string_cont));
         case 16:
-            return merge<AllToAllStringPolicy, 16>(
-                std::move(recv_string_cont),
-                ranges,
-                num_recv_elems
-            );
+            return merge_k.template operator()<16>(std::move(recv_string_cont));
         case 32:
-            return merge<AllToAllStringPolicy, 32>(
-                std::move(recv_string_cont),
-                ranges,
-                num_recv_elems
-            );
+            return merge_k.template operator()<32>(std::move(recv_string_cont));
         case 64:
-            return merge<AllToAllStringPolicy, 64>(
-                std::move(recv_string_cont),
-                ranges,
-                num_recv_elems
-            );
+            return merge_k.template operator()<64>(std::move(recv_string_cont));
         case 128:
-            return merge<AllToAllStringPolicy, 128>(
-                std::move(recv_string_cont),
-                ranges,
-                num_recv_elems
-            );
+            return merge_k.template operator()<128>(std::move(recv_string_cont));
         case 256:
-            return merge<AllToAllStringPolicy, 256>(
-                std::move(recv_string_cont),
-                ranges,
-                num_recv_elems
-            );
+            return merge_k.template operator()<256>(std::move(recv_string_cont));
         case 512:
-            return merge<AllToAllStringPolicy, 512>(
-                std::move(recv_string_cont),
-                ranges,
-                num_recv_elems
-            );
+            return merge_k.template operator()<512>(std::move(recv_string_cont));
         case 1024:
-            return merge<AllToAllStringPolicy, 1024>(
-                std::move(recv_string_cont),
-                ranges,
-                num_recv_elems
-            );
+            return merge_k.template operator()<1024>(std::move(recv_string_cont));
         case 2048:
-            return merge<AllToAllStringPolicy, 2048>(
-                std::move(recv_string_cont),
-                ranges,
-                num_recv_elems
-            );
+            return merge_k.template operator()<2048>(std::move(recv_string_cont));
         case 4096:
-            return merge<AllToAllStringPolicy, 4096>(
-                std::move(recv_string_cont),
-                ranges,
-                num_recv_elems
-            );
+            return merge_k.template operator()<4096>(std::move(recv_string_cont));
         case 8192:
-            return merge<AllToAllStringPolicy, 8192>(
-                std::move(recv_string_cont),
-                ranges,
-                num_recv_elems
-            );
+            return merge_k.template operator()<8192>(std::move(recv_string_cont));
         case 16384:
-            return merge<AllToAllStringPolicy, 16384>(
-                std::move(recv_string_cont),
-                ranges,
-                num_recv_elems
-            );
+            return merge_k.template operator()<16384>(std::move(recv_string_cont));
         default:
             std::cout << "Error in merge: K is not 2^i for i in {0,...,14} " << std::endl;
             std::abort();
