@@ -4,7 +4,6 @@
 #pragma once
 
 #include <cstddef>
-#include <format>
 #include <iostream>
 #include <ostream>
 #include <string>
@@ -34,7 +33,7 @@ struct PhaseValue {
     std::size_t getValue() const { return value; }
 
     friend std::ostream& operator<<(ostream_wrapper out, PhaseValue const& data) {
-        return out.stream << std::format("phase={} value={}", data.phase, data.value);
+        return out.stream << "phase=" << data.phase << "value=" << data.value;
     }
 
     friend std::ostream& operator<<(std::ostream& stream, PhaseValue const& record) {

@@ -5,7 +5,6 @@
 #pragma once
 
 #include <algorithm>
-#include <format>
 #include <iostream>
 #include <iterator>
 #include <random>
