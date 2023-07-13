@@ -94,6 +94,8 @@ static inline std::vector<DataType> allgatherv_small(
 
     return receiving_data;
 }
+
+// todo turn this into a plugin
 template <typename DataType>
 static inline std::vector<DataType> allgatherv(std::vector<DataType>& send_data, environment env) {
     using dss_schimek::measurement::MeasuringTool;

@@ -46,7 +46,7 @@ public:
             if (globalInputLcps_[i] == globalSortedLcps_[i])
                 counter++;
         }
-        std::cout << " checked lcp: " << std::endl;
+        // std::cout << " checked lcp: " << std::endl;
         return correctSize && counter + env.size() >= globalSortedLcps_.size();
     }
 

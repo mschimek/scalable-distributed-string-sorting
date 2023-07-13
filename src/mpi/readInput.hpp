@@ -116,9 +116,7 @@ std::vector<unsigned char> distribute_strings(
     return result;
 }
 
-std::vector<unsigned char> readFilePerPE(std::string const& path) {
-    dss_schimek::mpi::environment env;
-
+std::vector<unsigned char> readFilePerPE(std::string const& path, mpi::environment env) {
     std::ifstream in(path, std::ifstream::binary);
     if (!in.good()) {
         std::cout << "file not good on rank: " << env.rank() << std::endl;
@@ -155,9 +153,7 @@ dss_schimek::RawStringsLines readFile(std::string const& path) {
     return data;
 }
 
-std::vector<unsigned char> readFileInParallel(std::string const& path) {
-    dss_schimek::mpi::environment env;
-
+std::vector<unsigned char> readFileInParallel(std::string const& path, mpi::environment env) {
     std::ifstream in(path, std::ifstream::binary);
     if (!in.good()) {
         std::cout << "file not good on rank: " << env.rank() << std::endl;
@@ -217,8 +213,7 @@ std::vector<unsigned char> readFileInParallel(std::string const& path) {
     return rawStrings;
 }
 
-std::vector<unsigned char> readFileAndDistribute(std::string const& path) {
-    dss_schimek::mpi::environment env;
+std::vector<unsigned char> readFileAndDistribute(std::string const& path, mpi::environment env) {
     std::vector<unsigned char> rawStrings;
     size_t recvCount = 0;
     dss_schimek::mpi::data_type_mapper<size_t> dtm;

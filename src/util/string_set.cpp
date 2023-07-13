@@ -10,6 +10,8 @@
 
 #include <utility>
 
+#include <mpi.h>
+
 #include "mpi/environment.hpp"
 
 namespace dsss {
@@ -25,7 +27,7 @@ string_set::string_set(std::vector<dsss::char_type>&& string_data)
         strings_.emplace_back(strings_raw_data_.data() + i);
     }
     if constexpr (debug) {
-        dss_schimek::mpi::environment env;
+        dss_schimek::mpi::environment env{MPI_COMM_WORLD};
         size_t min_length = strings_raw_data_.size();
         size_t max_length = 0;
         for (size_t i = 0; i < strings_.size() - 1; ++i) {
@@ -83,7 +85,7 @@ void string_set::update(std::vector<dsss::char_type>&& string_data) {
         strings_.emplace_back(strings_raw_data_.data() + i);
     }
     if constexpr (debug) {
-        dss_schimek::mpi::environment env;
+        dss_schimek::mpi::environment env{MPI_COMM_WORLD};
         size_t min_length = strings_raw_data_.size();
         size_t max_length = 0;
         for (size_t i = 0; i < strings_.size() - 1; ++i) {
