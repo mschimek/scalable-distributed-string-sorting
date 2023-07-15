@@ -180,9 +180,8 @@ std::pair<std::vector<unsigned char>, std::vector<uint64_t>> getSplittersIndexed
 }
 
 template <typename StringSet>
-IndexStringLcpContainer<StringSet> choose_splitters(
-    IndexStringLcpContainer<StringSet>& indexContainer, dss_schimek::mpi::environment env
-) {
+IndexStringLcpContainer<StringSet>
+choose_splitters(IndexStringLcpContainer<StringSet>& indexContainer, mpi::environment env) {
     using Char = typename StringSet::Char;
     using String = typename StringSet::String;
 
@@ -221,9 +220,7 @@ IndexStringLcpContainer<StringSet> choose_splitters(
 }
 template <typename StringSet>
 StringLcpContainer<StringSet> choose_splitters(
-    StringSet const& ss,
-    std::vector<typename StringSet::Char>& all_splitters,
-    dss_schimek::mpi::environment env
+    StringSet const& ss, std::vector<typename StringSet::Char>& all_splitters, mpi::environment env
 ) {
     using Char = typename StringSet::Char;
     using String = typename StringSet::String;
@@ -458,125 +455,6 @@ static inline std::vector<std::pair<size_t, size_t>> compute_ranges_and_set_lcp_
     return ranges;
 }
 
-// todo migrate to partition.hpp
-// template <typename Sampler, typename StringPtr>
-// typename std::enable_if<!Sampler::isIndexed, std::vector<uint64_t>>::type
-// computePartition(StringPtr stringptr, uint64_t samplingFactor, std::vector<uint64_t> const& dist)
-// {
-//     using Comparator = dss_schimek::StringComparator;
-//     using StringContainer = dss_schimek::StringContainer<UCharLengthStringSet>;
-//     using StringSet = typename StringPtr::StringSet;
-//     using namespace dss_schimek;
-//     using measurement::MeasuringTool;
-//
-//     mpi::environment env;
-//
-//     auto ss = stringptr.active();
-//     MeasuringTool& measuringTool = MeasuringTool::measuringTool();
-//     measuringTool.start("sample_splitters");
-//     std::vector<unsigned char> raw_splitters = Sampler::sample_splitters(ss, samplingFactor,
-//     dist); measuringTool.stop("sample_splitters");
-//
-//     // measuringTool.add(raw_splitters.size(),
-//     // "allgather_splitters_bytes_sent");
-//     // measuringTool.start("allgather_splitters");
-//     // std::vector<unsigned char> splitters =
-//     //    dss_schimek::mpi::allgather_strings(raw_splitters);
-//     // measuringTool.stop("allgather_splitters");
-//
-//     // measuringTool.start("choose_splitters");
-//     // dss_schimek::StringLcpContainer chosen_splitters_cont =
-//     //    choose_splitters(ss, splitters);
-//     // measuringTool.stop("choose_splitters");
-//     measuringTool.start("sort_splitter");
-//     Comparator comp;
-//     std::mt19937_64 generator;
-//     int data_seed = 3469931 + env.rank();
-//     generator.seed(data_seed);
-//     RQuick::Data<StringContainer, StringContainer::isIndexed> sampleData;
-//     sampleData.rawStrings = std::move(raw_splitters); // TODO
-//     measuringTool.disable();
-//     StringContainer sortedLocalSample = splitterSort(std::move(sampleData), generator, comp);
-//     measuringTool.enable();
-//     measuringTool.stop("sort_splitter");
-//
-//     measuringTool.start("choose_splitters");
-//     auto rawChosenSplitters = getSplitters(sortedLocalSample);
-//     StringContainer chosen_splitters_cont(std::move(rawChosenSplitters));
-//     measuringTool.stop("choose_splitters");
-//
-//     const StringSet chosen_splitters_set(
-//         chosen_splitters_cont.strings(),
-//         chosen_splitters_cont.strings() + chosen_splitters_cont.size()
-//     );
-//
-//     measuringTool.start("compute_interval_sizes");
-//     std::vector<std::size_t> interval_sizes = compute_interval_binary(ss, chosen_splitters_set);
-//     measuringTool.stop("compute_interval_sizes");
-//     return interval_sizes;
-// }
-
-// todo migrate to partition.hpp
-// template <typename Sampler, typename StringPtr>
-// typename std::enable_if<Sampler::isIndexed, std::vector<uint64_t>>::type computePartition(
-//     StringPtr stringptr,
-//     uint64_t samplingFactor,
-//     std::vector<uint64_t> const& dist,
-//     dss_mehnert::Communicator comm
-// ) {
-//     using IndexStringContainer = dss_schimek::IndexStringContainer<UCharLengthIndexStringSet>;
-//     using Comparator = dss_schimek::IndexStringComparator;
-//     using namespace dss_schimek;
-//     using namespace measurement;
-//     // using IndexStringSet = UCharLengthIndexStringSet;
-//     MeasuringTool& measuringTool = MeasuringTool::measuringTool();
-//
-//     auto ss = stringptr.active();
-//     measuringTool.start("sample_splitters");
-//     auto sampleIndices = Sampler::sample_splitters(stringptr.active(), samplingFactor, dist);
-//     measuringTool.stop("sample_splitters");
-//     measuringTool.add(sampleIndices.sample.size(), "allgather_splitters_bytes_sent");
-//
-//     measuringTool.start("sort_splitter");
-//     Comparator comp;
-//     std::mt19937_64 generator;
-//     int data_seed = 3469931 + comm.rank();
-//     generator.seed(data_seed);
-//     RQuick::Data<IndexStringContainer, IndexStringContainer::isIndexed> sampleData;
-//     sampleData.rawStrings = std::move(sampleIndices.sample); // TODO
-//     sampleData.indices = std::move(sampleIndices.indices);   // TODO better way?
-//     // measuringTool.disable();
-//     IndexStringContainer sortedLocalSample =
-//         splitterSort(std::move(sampleData), generator, comp, comm);
-//     // measuringTool.enable();
-//     measuringTool.stop("sort_splitter");
-//
-//     measuringTool.start("choose_splitters");
-//     auto [rawChosenSplitters, splitterIndices] = getSplittersIndexed(sortedLocalSample);
-//     IndexStringContainer chosen_splitters_cont(std::move(rawChosenSplitters), splitterIndices);
-//     measuringTool.stop("choose_splitters");
-//
-//     // measuringTool.start("allgather_splitters");
-//     // auto recvSample = mpi::allgatherv(sampleIndices.sample);
-//     // auto recvIndices = mpi::allgatherv(sampleIndices.indices);
-//     // measuringTool.stop("allgather_splitters");
-//
-//     // measuringTool.start("choose_splitters");
-//     // IndexStringLcpContainer<IndexStringSet> indexContainer(
-//     //    std::move(recvSample), recvIndices);
-//     // indexContainer = choose_splitters(indexContainer);
-//     // measuringTool.stop("choose_splitters");
-//     measuringTool.start("compute_interval_sizes");
-//     auto interval_sizes = compute_interval_binary_index(
-//         ss,
-//         chosen_splitters_cont.make_string_set(),
-//         dss_mehnert::sample::getLocalOffset(ss.size()),
-//         comm
-//     );
-//     measuringTool.stop("compute_interval_sizes");
-//     return interval_sizes;
-// }
-
 template <typename Sampler, typename StringPtr>
 typename std::enable_if<!Sampler::isIndexed, std::vector<uint64_t>>::type
 computePartitionSequentialSort(
@@ -684,7 +562,7 @@ computePartitionSequentialSort(
     auto interval_sizes = compute_interval_binary_index(
         ss,
         indexContainer.make_string_set(),
-        dss_mehnert::sample::getLocalOffset(ss.size()),
+        dss_mehnert::sample::get_local_offset(ss.size()),
         env
     );
     measuringTool.stop("compute_interval_sizes");
@@ -722,7 +600,7 @@ computePartitionSequentialSort(
     auto interval_sizes = compute_interval_binary_index(
         ss,
         indexContainer.make_string_set(),
-        dss_mehnert::sample::getLocalOffset(ss.size()),
+        dss_mehnert::sample::get_local_offset(ss.size()),
         env
     );
     measuringTool.stop("compute_interval_sizes");

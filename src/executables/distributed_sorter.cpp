@@ -265,22 +265,22 @@ void arg3(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
     using namespace dss_mehnert::sample;
     switch (key.sampleStringPolicy_) {
         case PolicyEnums::SampleString::numStrings: {
-            using SampleString = SampleSplittersNumStringsPolicy<StringSet>;
+            using SampleString = NumStringsPolicy<StringSet>;
             arg4<StringSet, StringGenerator, SampleString>(key, args);
             break;
         }
         case PolicyEnums::SampleString::numChars: {
-            using SampleString = SampleSplittersNumCharsPolicy<StringSet>;
+            using SampleString = NumCharsPolicy<StringSet>;
             arg4<StringSet, StringGenerator, SampleString>(key, args);
             break;
         }
         case PolicyEnums::SampleString::indexedNumStrings: {
-            using SampleString = SampleIndexedSplittersNumStringsPolicy<StringSet>;
+            using SampleString = IndexedNumStringPolicy<StringSet>;
             arg4<StringSet, StringGenerator, SampleString>(key, args);
             break;
         }
         case PolicyEnums::SampleString::indexedNumChars: {
-            using SampleString = SampleIndexedSplittersNumCharsPolicy<StringSet>;
+            using SampleString = IndexedNumCharsPolicy<StringSet>;
             arg4<StringSet, StringGenerator, SampleString>(key, args);
             break;
         }
