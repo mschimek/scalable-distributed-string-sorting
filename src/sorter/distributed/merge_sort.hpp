@@ -85,11 +85,15 @@ public:
 
             measuring_tool_.setPhase("sort_globally");
             measuring_tool_.start("partial_sorting");
-            auto [color, sorted_container] =
+            auto [group_size, sorted_container] =
                 sort_partial(std::move(container), num_groups, comm_group);
             container = std::move(sorted_container);
             measuring_tool_.setPhase("sort_globally");
             measuring_tool_.stop("partial_sorting");
+
+            auto color = comm_group.rank() / group_size;
+            auto global_color = comm.rank() / group_size;
+            measuring_tool_.add(global_color, "global_group");
 
             // todo use create_subcommunicators here
             measuring_tool_.start("split_communicator");
@@ -102,8 +106,7 @@ public:
                 auto group_strings = comm_group.reduce(send_buf(size_strings), op(ops::plus<>{}));
                 auto group_chars = comm_group.reduce(send_buf(size_chars), op(ops::plus<>{}));
                 if (comm_group.is_root()) {
-                    auto color_world = comm.rank() / comm_group.size();
-                    std::cout << "iter=" << round << " group_world=" << color_world
+                    std::cout << "iter=" << round << " group_world=" << global_color
                               << " group=" << color
                               << " group_strings=" << group_strings.extract_recv_buffer()[0]
                               << " group_chars=" << group_chars.extract_recv_buffer()[0] << "\n";
@@ -148,9 +151,10 @@ private:
 
         // todo why the *100 here
         // todo make sampling_factor variable
-        constexpr auto compute_partition = partition::compute_partition<StringPtr, SamplePolicy>;
         sample::SampleParams params{.num_partitions = num_groups, .sampling_factor = 2};
-        auto interval_sizes{compute_partition(string_ptr, 100 * global_lcp_avg, params, comm)};
+        constexpr auto compute_partition =
+            partition::compute_partition<StringPtr, SamplePolicy, size_t>;
+        auto interval_sizes{compute_partition(string_ptr, params, 2 * 100 * global_lcp_avg, comm)};
 
         auto group_offset{comm.rank() / num_groups};
         std::vector<uint64_t> send_counts(comm.size());
@@ -166,12 +170,10 @@ private:
         auto [recv_container, recv_intervals] =
             string_exchange(std::move(container), send_counts, comm);
 
-        // todo prune empty ranges before merging
         measuring_tool_.setPhase("merging");
         auto sorted_container = merge_ranges(std::move(recv_container), recv_intervals, comm);
-        auto color = comm.rank() / group_size;
 
-        return {color, std::move(sorted_container)};
+        return {group_size, std::move(sorted_container)};
     }
 
     StringLcpContainer sort_exhaustive(StringLcpContainer&& container, Communicator const& comm) {
@@ -184,9 +186,9 @@ private:
 
         // todo why the *100 here
         // todo make sampling_factor variable
-        constexpr auto compute_partition = partition::compute_partition<StringPtr, SamplePolicy>;
         sample::SampleParams params{.num_partitions = comm.size(), .sampling_factor = 2};
-        auto interval_sizes = compute_partition(string_ptr, 100 * global_lcp_avg, params, comm);
+        auto compute_partition = partition::compute_partition<StringPtr, SamplePolicy, size_t>;
+        auto interval_sizes = compute_partition(string_ptr, params, 2 * 100 * global_lcp_avg, comm);
 
         comm.barrier();
         measuring_tool_.setPhase("string_exchange");
@@ -233,6 +235,11 @@ private:
         std::vector<size_t>& interval_sizes,
         Communicator const& comm
     ) {
+        measuring_tool_.start("pruning_ranges");
+        // todo prune empty intervals
+        // std::erase(interval_sizes, 0);
+        measuring_tool_.stop("pruning_ranges");
+
         measuring_tool_.start("compute_ranges");
         std::vector<std::pair<size_t, size_t>> ranges =
             compute_ranges_and_set_lcp_at_start_of_range(container, interval_sizes, comm);

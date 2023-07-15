@@ -13,17 +13,20 @@
 #include "mpi/communicator.hpp"
 #include "sorter/RQuick/RQuick.hpp"
 #include "sorter/distributed/misc.hpp"
+#include "sorter/distributed/sample.hpp"
 #include "strings/stringcontainer.hpp"
 #include "util/measuringTool.hpp"
 
 namespace dss_mehnert {
 namespace partition {
 
-template <typename StringPtr, typename Sampler>
+using dss_mehnert::sample::SampleParams;
+
+template <typename StringPtr, typename Sampler, typename MaxLength>
 std::enable_if_t<!Sampler::isIndexed, std::vector<uint64_t>> compute_partition(
     StringPtr string_ptr,
-    size_t global_lcp_avg,
-    sample::SampleParams const& params,
+    SampleParams const& params,
+    MaxLength const& max_length,
     Communicator const& comm
 ) {
     using namespace dss_schimek;
@@ -36,7 +39,7 @@ std::enable_if_t<!Sampler::isIndexed, std::vector<uint64_t>> compute_partition(
     auto ss = string_ptr.active();
 
     measuring_tool.start("sample_splitters");
-    auto samples = Sampler::sample_splitters(ss, 2 * global_lcp_avg, params, comm);
+    auto samples = Sampler::sample_splitters(ss, params, max_length, comm);
     measuring_tool.stop("sample_splitters");
 
     measuring_tool.start("sort_splitter");
@@ -61,11 +64,11 @@ std::enable_if_t<!Sampler::isIndexed, std::vector<uint64_t>> compute_partition(
     return interval_sizes;
 }
 
-template <typename StringPtr, typename Sampler>
+template <typename StringPtr, typename Sampler, typename MaxLength>
 std::enable_if_t<Sampler::isIndexed, std::vector<uint64_t>> compute_partition(
     StringPtr string_ptr,
-    size_t global_lcp_avg,
-    sample::SampleParams const& params,
+    SampleParams const& params,
+    MaxLength const& max_length,
     Communicator const& comm
 ) {
     using namespace dss_schimek;
@@ -78,8 +81,9 @@ std::enable_if_t<Sampler::isIndexed, std::vector<uint64_t>> compute_partition(
     auto ss = string_ptr.active();
 
     measuring_tool.start("sample_splitters");
-    auto samples = Sampler::sample_splitters(ss, 2 * global_lcp_avg, params, comm);
+    auto samples = Sampler::sample_splitters(ss, params, max_length, comm);
     measuring_tool.stop("sample_splitters");
+    // todo remove or move to somewhere else
     measuring_tool.add(samples.sample.size(), "allgather_splitters_bytes_sent");
 
     measuring_tool.start("sort_splitter");
@@ -99,7 +103,8 @@ std::enable_if_t<Sampler::isIndexed, std::vector<uint64_t>> compute_partition(
 
     measuring_tool.start("compute_interval_sizes");
     auto splitter_set = chosen_splitters_cont.make_string_set();
-    auto local_offset = sample::getLocalOffset(ss.size(), comm);
+    // tood this is being computed redundantly multiple times
+    auto local_offset = sample::get_local_offset(ss.size(), comm);
     auto interval_sizes = compute_interval_binary_index(ss, splitter_set, local_offset);
     measuring_tool.stop("compute_interval_sizes");
 
