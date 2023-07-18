@@ -102,5 +102,65 @@ compute_partition(StringPtr string_ptr, Params const& params, Communicator const
     return interval_sizes;
 }
 
+template <typename StringPtr, typename Sampler, typename Params>
+typename std::enable_if_t<!Sampler::isIndexed, std::vector<uint64_t>>
+compute_partition_sequential(StringPtr string_ptr, Params const& params, Communicator const& comm) {
+    auto& measuringTool = measurement::MeasuringTool::measuringTool();
+    auto ss = string_ptr.active();
+
+    measuringTool.start("sample_splitters");
+    auto samples = Sampler::sample_splitters(ss, params, comm);
+    measuringTool.stop("sample_splitters");
+
+    measuringTool.add(samples.size(), "allgather_splitters_bytes_sent");
+    measuringTool.start("allgather_splitters");
+    auto splitters = dss_schimek::mpi::allgather_strings(samples, comm);
+    measuringTool.stop("allgather_splitters");
+
+    measuringTool.start("choose_splitters");
+    auto chosen_splitters_cont = choose_splitters(ss, splitters, comm);
+    measuringTool.stop("choose_splitters");
+
+    measuringTool.start("compute_interval_sizes");
+    auto splitter_set = chosen_splitters_cont.make_string_set();
+    auto interval_sizes = compute_interval_binary(ss, splitter_set);
+    measuringTool.stop("compute_interval_sizes");
+
+    return interval_sizes;
+}
+
+template <typename Sampler, typename StringPtr, typename Params>
+typename std::enable_if<Sampler::isIndexed, std::vector<uint64_t>>::type
+compute_partition_sequential(StringPtr string_ptr, Params const& params, Communicator const& comm) {
+    using StringSet = dss_schimek::UCharLengthIndexStringSet;
+    using StringContainer = dss_schimek::IndexStringLcpContainer<StringSet>;
+
+    auto& measuringTool = measurement::MeasuringTool::measuringTool();
+    auto ss = string_ptr.active();
+
+    measuringTool.start("sample_splitters");
+    auto sample = Sampler::sample_splitters(ss, params, comm);
+    measuringTool.stop("sample_splitters");
+
+    measuringTool.add(sample.sample.size(), "allgather_splitters_bytes_sent");
+    measuringTool.start("allgather_splitters");
+    auto recv_sample = dss_schimek::mpi::allgatherv(sample.sample, comm);
+    auto recv_idxs = dss_schimek::mpi::allgatherv(sample.indices, comm);
+    measuringTool.stop("allgather_splitters");
+
+    measuringTool.start("choose_splitters");
+    StringContainer indexContainer{std::move(recv_sample), recv_idxs};
+    indexContainer = choose_splitters(indexContainer, comm);
+    measuringTool.stop("choose_splitters");
+
+    measuringTool.start("compute_interval_sizes");
+    auto splitter_set = indexContainer.make_string_set();
+    auto local_offset = sample::get_local_offset(ss.size(), comm);
+    auto interval_sizes = compute_interval_binary_index(ss, splitter_set, local_offset);
+    measuringTool.stop("compute_interval_sizes");
+
+    return interval_sizes;
+}
+
 } // namespace partition
 } // namespace dss_mehnert
