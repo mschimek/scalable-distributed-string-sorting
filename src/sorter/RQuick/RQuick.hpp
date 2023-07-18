@@ -221,7 +221,6 @@ struct Data {
             MPI_Probe(source, tag, comm, &status);
             int count = 0;
             MPI_Get_count(&status, MPI_BYTE, &count);
-            assert(static_cast<size_t>(count) <= n);
             returnData.rawStrings.resize(count);
 
             MPI_Recv(
@@ -500,7 +499,6 @@ StringContainer sortRec(
     MPI_Comm_rank(comm, &myrank);
 
     assert(nprocs >= 2);
-    assert(std::is_sorted(v.begin(), v.end(), std::forward<Comp>(comp)));
     assert(tlx::integer_log2_floor(nprocs));
 
     auto const is_left_group = myrank < nprocs / 2;

@@ -79,7 +79,7 @@ public:
 
     //! check sorted order of strings
     bool check() const {
-        assert(output().check_order());
+        assert(active().check_order());
         return true;
     }
 
@@ -241,7 +241,7 @@ public:
 
     //! check sorted order of strings
     bool check() const {
-        assert(output().check_order());
+        assert(active().check_order());
         return true;
     }
 

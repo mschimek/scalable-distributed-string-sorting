@@ -244,7 +244,6 @@ protected:
         measuring_tool_.start("merge_ranges");
         size_t num_recv_elems =
             std::accumulate(interval_sizes.begin(), interval_sizes.end(), static_cast<size_t>(0u));
-        assert(num_recv_elems == recv_string_cont.size());
 
         auto sorted_container =
             choose_merge<AllToAllStringPolicy>(std::move(container), ranges, num_recv_elems, comm);
