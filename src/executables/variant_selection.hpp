@@ -53,19 +53,6 @@ inline GolombEncoding getGolombEncoding(size_t i) {
     }
 }
 
-enum class StringSet { UCharLengthStringSet = 0, UCharStringSet = 1 };
-
-inline StringSet getStringSet(size_t i) {
-    switch (i) {
-        case 0:
-            return StringSet::UCharLengthStringSet;
-        case 1:
-            return StringSet::UCharStringSet;
-        default:
-            std::abort();
-    }
-}
-
 enum class StringGenerator {
     skewedRandomStringLcpContainer = 0,
     DNRatioGenerator = 1,
@@ -131,10 +118,7 @@ inline MPIRoutineAllToAll getMPIRoutineAllToAll(size_t i) {
 enum class ByteEncoder {
     emptyByteEncoderCopy = 0,
     emptyByteEncoderMemCpy = 1,
-    sequentialDelayedByteEncoder = 2,
-    sequentialByteEncoder = 3,
-    interleavedByteEncoder = 4,
-    emptyLcpByteEncoderMemCpy = 5
+    emptyLcpByteEncoderMemCpy = 2,
 };
 
 inline ByteEncoder getByteEncoder(size_t i) {
@@ -144,12 +128,6 @@ inline ByteEncoder getByteEncoder(size_t i) {
         case 1:
             return ByteEncoder::emptyByteEncoderMemCpy;
         case 2:
-            return ByteEncoder::sequentialDelayedByteEncoder;
-        case 3:
-            return ByteEncoder::sequentialByteEncoder;
-        case 4:
-            return ByteEncoder::interleavedByteEncoder;
-        case 5:
             return ByteEncoder::emptyLcpByteEncoderMemCpy;
         default:
             std::cout << "Enum ByteEncoder not defined" << std::endl;
@@ -158,7 +136,6 @@ inline ByteEncoder getByteEncoder(size_t i) {
 }
 
 struct CombinationKey {
-    StringSet stringSet_;
     GolombEncoding golombEncoding_;
     StringGenerator stringGenerator_;
     SampleString sampleStringPolicy_;
@@ -166,11 +143,7 @@ struct CombinationKey {
     ByteEncoder byteEncoder_;
     bool compressLcps_;
 
-    bool operator==(CombinationKey const& other) {
-        return stringSet_ == other.stringSet_ && sampleStringPolicy_ == other.sampleStringPolicy_
-               && other.mpiRoutineAllToAll_ == mpiRoutineAllToAll_
-               && other.byteEncoder_ == byteEncoder_;
-    }
+    auto operator<=>(CombinationKey const&) const = default;
 };
 
 } // namespace PolicyEnums

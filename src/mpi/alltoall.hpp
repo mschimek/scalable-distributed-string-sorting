@@ -357,26 +357,26 @@ inline void setLcpAtStartOfInterval(
 template <bool useCompression, typename AllToAllPolicy>
 inline std::vector<uint64_t> sendLcps(
     std::vector<uint64_t>& lcps,
-    std::vector<uint64_t> const& sendCounts,
-    std::vector<uint64_t> const& recvCounts,
+    std::vector<uint64_t> const& send_counts,
+    std::vector<uint64_t> const& recv_counts,
     environment env
 ) {
     using namespace dss_schimek;
     if constexpr (useCompression) {
         auto compressedData =
-            IntegerCompression::writeRanges(sendCounts.begin(), sendCounts.end(), lcps.data());
+            IntegerCompression::writeRanges(send_counts.begin(), send_counts.end(), lcps.data());
 
         std::vector<uint8_t> recvCompressedLcps =
             AllToAllPolicy::alltoallv(compressedData.integers.data(), compressedData.counts, env);
 
         // decode Lcp Compression:
         return IntegerCompression::readRanges(
-            recvCounts.begin(),
-            recvCounts.end(),
+            recv_counts.begin(),
+            recv_counts.end(),
             recvCompressedLcps.data()
         );
     } else {
-        return AllToAllPolicy::alltoallv(lcps.data(), sendCounts, env);
+        return AllToAllPolicy::alltoallv(lcps.data(), send_counts, env);
     }
 }
 
@@ -391,23 +391,20 @@ struct AllToAllStringImpl {
 
     dss_schimek::StringLcpContainer<StringSet> alltoallv(
         dss_schimek::StringLcpContainer<StringSet>& container,
-        std::vector<size_t> const& sendCountsString,
+        std::vector<size_t> const& send_counts,
         environment env
     ) {
         using namespace dss_schimek;
-        using namespace dss_schimek::measurement;
-        MeasuringTool& measuringTool = MeasuringTool::measuringTool();
+
+        auto& measuringTool = measurement::MeasuringTool::measuringTool();
 
         measuringTool.start("all_to_all_strings_intern_copy");
 
         const ByteEncoderPolicy byteEncoder;
-        StringSet const& sendSet = container.make_string_set();
+        const StringSet ss = container.make_string_set();
 
-        std::vector<size_t> sendCountsTotal = computeSendCountsBytes<StringSet, ByteEncoderPolicy>(
-            sendSet,
-            sendCountsString,
-            byteEncoder
-        );
+        std::vector<size_t> sendCountsTotal =
+            computeSendCountsBytes<StringSet, ByteEncoderPolicy>(ss, send_counts, byteEncoder);
 
         size_t totalNumberSendBytes = std::accumulate(
             sendCountsTotal.begin(),
@@ -416,20 +413,15 @@ struct AllToAllStringImpl {
         );
 
         auto stringLcpPtr = container.make_string_lcp_ptr();
-        setLcpAtStartOfInterval(
-            stringLcpPtr.lcp(),
-            sendCountsString.begin(),
-            sendCountsString.end()
-        );
+        setLcpAtStartOfInterval(stringLcpPtr.lcp(), send_counts.begin(), send_counts.end());
 
         std::vector<unsigned char> buffer(totalNumberSendBytes);
         unsigned char* curPos = buffer.data();
-        for (size_t interval = 0, stringsWritten = 0; interval < sendCountsString.size();
-             ++interval) {
-            auto begin = sendSet.begin() + stringsWritten;
-            StringSet subSet = sendSet.sub(begin, begin + sendCountsString[interval]);
+        for (size_t interval = 0, stringsWritten = 0; interval < send_counts.size(); ++interval) {
+            auto begin = ss.begin() + stringsWritten;
+            StringSet subSet = ss.sub(begin, begin + send_counts[interval]);
             curPos = byteEncoder.write(curPos, subSet, container.lcp_array() + stringsWritten);
-            stringsWritten += sendCountsString[interval];
+            stringsWritten += send_counts[interval];
         }
         measuringTool.stop("all_to_all_strings_intern_copy");
 
@@ -451,7 +443,7 @@ struct AllToAllStringImpl<
     compressLcps,
     StringSet,
     AllToAllPolicy,
-    dss_schimek::EmptyByteEncoderCopy> {
+    dss_schimek::EmptyByteEncoderMemCpy> {
     static constexpr bool Lcps = true;
     static constexpr bool PrefixCompression = false;
 
@@ -461,227 +453,61 @@ struct AllToAllStringImpl<
         environment env
     ) {
         using namespace dss_schimek;
-        using namespace dss_schimek::measurement;
 
-        using String = typename StringSet::String;
-        MeasuringTool& measuringTool = MeasuringTool::measuringTool();
+        auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
-        measuringTool.start("all_to_all_strings_intern_copy");
+        measuring_tool.start("all_to_all_strings_intern_copy");
+
+        const EmptyByteEncoderMemCpy byteEncoder;
         const StringSet ss = send_data.make_string_set();
 
         if (send_data.size() == 0)
             return dss_schimek::StringLcpContainer<StringSet>();
 
-        std::vector<unsigned char> receive_buffer_char;
-        std::vector<size_t> receive_buffer_lcp;
-        std::vector<size_t> send_counts_lcp(send_counts);
-        std::vector<size_t> send_counts_char(send_counts.size(), 0);
+        std::vector<unsigned char> recv_buf_char;
+        std::vector<size_t> send_counts_char(send_counts.size());
 
         auto stringLcpPtr = send_data.make_string_lcp_ptr();
-
-        // for (size_t interval = 0, stringsWritten = 0;
-        //     interval < send_counts.size(); ++interval) {
-        //    *(stringLcpPtr.get_lcp() + stringsWritten) = 0;
-        //    stringsWritten += send_counts[interval];
-        //}
         setLcpAtStartOfInterval(stringLcpPtr.lcp(), send_counts.begin(), send_counts.end());
 
-        std::vector<unsigned char> send_buffer(send_data.char_size());
-        uint64_t curPos = 0;
-        for (size_t interval = 0, offset = 0; interval < send_counts.size(); ++interval) {
-            for (size_t j = offset; j < send_counts[interval] + offset; ++j) {
-                String str = ss[ss.begin() + j];
-                size_t string_length = ss.get_length(str) + 1;
-
-                send_counts_char[interval] += string_length;
-                std::copy(
-                    ss.get_chars(str, 0),
-                    ss.get_chars(str, 0) + string_length,
-                    send_buffer.begin() + curPos
-                );
-                curPos += string_length;
-            }
-            offset += send_counts[interval];
-        }
-
-        measuringTool.stop("all_to_all_strings_intern_copy");
-        measuringTool.start("all_to_all_strings_mpi");
-        receive_buffer_char = AllToAllPolicy::alltoallv(send_buffer.data(), send_counts_char, env);
-
-        auto recvNumberStrings = dss_schimek::mpi::alltoall(send_counts, env);
-
-        auto recvLcpValues = sendLcps<compressLcps, AllToAllPolicy>(
-            send_data.lcps(),
-            send_counts,
-            recvNumberStrings
-        );
-
-        measuringTool.stop("all_to_all_strings_mpi");
-        measuringTool.add(send_data.char_size() + send_data.size(), "bytes_sent");
-
-        // no bytes are read in this version only for evaluation layout
-        measuringTool.start("all_to_all_strings_read");
-        measuringTool.stop("all_to_all_strings_read");
-        return dss_schimek::StringLcpContainer<StringSet>(
-            std::move(receive_buffer_char),
-            std::move(recvLcpValues)
-        );
-    }
-};
-
-template <bool compressLcps, typename StringSet, typename AllToAllPolicy>
-struct AllToAllStringImpl<compressLcps, StringSet, AllToAllPolicy, dss_schimek::NoLcps> {
-    static constexpr bool Lcps = false;
-    static constexpr bool PrefixCompression = false;
-    dss_schimek::StringLcpContainer<StringSet> alltoallv(
-        dss_schimek::StringLcpContainer<StringSet>& send_data,
-        std::vector<size_t> const& sendCountsString,
-        environment env
-    ) {
-        using namespace dss_schimek;
-        using namespace dss_schimek::measurement;
-
-        MeasuringTool& measuringTool = MeasuringTool::measuringTool();
-
-        measuringTool.start("all_to_all_strings_intern_copy");
-        const EmptyByteEncoderMemCpy byteEncoder;
-        const StringSet ss = send_data.make_string_set();
-
-        if (send_data.size() == 0)
-            return dss_schimek::StringLcpContainer<StringSet>();
-
-        std::vector<unsigned char> receive_buffer_char;
-        // std::vector<size_t> receive_buffer_lcp;
-        // std::vector<size_t> send_counts_lcp(sendCountsString);
-        std::vector<size_t> send_counts_char(sendCountsString.size());
-
-        // auto stringLcpPtr = send_data.make_string_lcp_ptr();
-        //  for (size_t interval = 0, stringsWritten = 0;
-        //      interval < sendCountsString.size(); ++interval) {
-        //     *(stringLcpPtr.get_lcp() + stringsWritten) = 0;
-        //     stringsWritten += sendCountsString[interval];
-        // }
-        // setLcpAtStartOfInterval(stringLcpPtr.get_lcp(),
-        //     sendCountsString.begin(), sendCountsString.end());
-
         std::vector<unsigned char> buffer(send_data.char_size());
         unsigned char* curPos = buffer.data();
-        for (size_t interval = 0, stringsWritten = 0; interval < sendCountsString.size();
-             ++interval) {
+
+        for (size_t interval = 0, stringsWritten = 0; interval < send_counts.size(); ++interval) {
             auto begin = ss.begin() + stringsWritten;
-            StringSet subSet = ss.sub(begin, begin + sendCountsString[interval]);
+            StringSet subSet = ss.sub(begin, begin + send_counts[interval]);
             size_t numWrittenChars = 0;
             std::tie(curPos, numWrittenChars) = byteEncoder.write(curPos, subSet);
 
             send_counts_char[interval] = numWrittenChars;
-            stringsWritten += sendCountsString[interval];
+            stringsWritten += send_counts[interval];
         }
 
         send_data.deleteRawStrings();
         send_data.deleteStrings();
 
-        measuringTool.stop("all_to_all_strings_intern_copy");
-        measuringTool.start("all_to_all_strings_mpi");
-        receive_buffer_char = AllToAllPolicy::alltoallv(buffer.data(), send_counts_char, env);
+        measuring_tool.stop("all_to_all_strings_intern_copy");
+        measuring_tool.start("all_to_all_strings_mpi");
+        recv_buf_char = AllToAllPolicy::alltoallv(buffer.data(), send_counts_char, env);
+
+        auto recv_num_strings = dss_schimek::mpi::alltoall(send_counts, env);
+
+        constexpr auto send_lcps = sendLcps<compressLcps, AllToAllPolicy>;
+        auto recv_buf_lcp = send_lcps(send_data.lcps(), send_counts, recv_num_strings, env);
         send_data.deleteAll();
 
-        measuringTool.stop("all_to_all_strings_mpi");
-        measuringTool.add(send_data.char_size() + send_data.size(), "bytes_sent");
+        measuring_tool.stop("all_to_all_strings_mpi");
+        measuring_tool.add(send_data.char_size() + send_data.size(), "bytes_sent");
 
-        // no bytes are read in this version only for evaluation layout
-        measuringTool.start("all_to_all_strings_read");
-        measuringTool.stop("all_to_all_strings_read");
-        measuringTool.start("container_construction");
-        dss_schimek::StringLcpContainer<StringSet> returnContainer(std::move(receive_buffer_char));
-        measuringTool.stop("container_construction");
-        return returnContainer;
-    }
-};
-template <bool compressLcps, typename StringSet, typename AllToAllPolicy>
-struct AllToAllStringImpl<
-    compressLcps,
-    StringSet,
-    AllToAllPolicy,
-    dss_schimek::EmptyByteEncoderMemCpy> {
-    static constexpr bool Lcps = true;
-    static constexpr bool PrefixCompression = false;
-    dss_schimek::StringLcpContainer<StringSet> alltoallv(
-        dss_schimek::StringLcpContainer<StringSet>& send_data,
-        std::vector<size_t> const& sendCountsString,
-        environment env
-    ) {
-        using namespace dss_schimek;
-        using namespace dss_schimek::measurement;
+        measuring_tool.start("all_to_all_strings_read");
+        measuring_tool.stop("all_to_all_strings_read");
 
-        MeasuringTool& measuringTool = MeasuringTool::measuringTool();
-
-        measuringTool.start("all_to_all_strings_intern_copy");
-        const EmptyByteEncoderMemCpy byteEncoder;
-        const StringSet ss = send_data.make_string_set();
-
-        if (send_data.size() == 0)
-            return dss_schimek::StringLcpContainer<StringSet>();
-
-        std::vector<unsigned char> receive_buffer_char;
-        std::vector<size_t> receive_buffer_lcp;
-        std::vector<size_t> send_counts_lcp(sendCountsString);
-        std::vector<size_t> send_counts_char(sendCountsString.size());
-
-        auto stringLcpPtr = send_data.make_string_lcp_ptr();
-        // for (size_t interval = 0, stringsWritten = 0;
-        //     interval < sendCountsString.size(); ++interval) {
-        //    *(stringLcpPtr.get_lcp() + stringsWritten) = 0;
-        //    stringsWritten += sendCountsString[interval];
-        //}
-        setLcpAtStartOfInterval(
-            stringLcpPtr.lcp(),
-            sendCountsString.begin(),
-            sendCountsString.end()
-        );
-
-        std::vector<unsigned char> buffer(send_data.char_size());
-        unsigned char* curPos = buffer.data();
-        for (size_t interval = 0, stringsWritten = 0; interval < sendCountsString.size();
-             ++interval) {
-            auto begin = ss.begin() + stringsWritten;
-            StringSet subSet = ss.sub(begin, begin + sendCountsString[interval]);
-            size_t numWrittenChars = 0;
-            std::tie(curPos, numWrittenChars) = byteEncoder.write(curPos, subSet);
-
-            send_counts_char[interval] = numWrittenChars;
-            stringsWritten += sendCountsString[interval];
-        }
-
-        send_data.deleteRawStrings();
-        send_data.deleteStrings();
-
-        measuringTool.stop("all_to_all_strings_intern_copy");
-        measuringTool.start("all_to_all_strings_mpi");
-        receive_buffer_char = AllToAllPolicy::alltoallv(buffer.data(), send_counts_char, env);
-
-        auto recvNumberStrings = dss_schimek::mpi::alltoall(sendCountsString, env);
-
-        auto recvLcpValues = sendLcps<compressLcps, AllToAllPolicy>(
-            send_data.lcps(),
-            sendCountsString,
-            recvNumberStrings,
-            env
-        );
-
-        send_data.deleteAll();
-
-        measuringTool.stop("all_to_all_strings_mpi");
-        measuringTool.add(send_data.char_size() + send_data.size(), "bytes_sent");
-
-        // no bytes are read in this version only for evaluation layout
-        measuringTool.start("all_to_all_strings_read");
-        measuringTool.stop("all_to_all_strings_read");
-        measuringTool.start("container_construction");
+        measuring_tool.start("container_construction");
         dss_schimek::StringLcpContainer<StringSet> returnContainer(
-            std::move(receive_buffer_char),
-            std::move(recvLcpValues)
+            std::move(recv_buf_char),
+            std::move(recv_buf_lcp)
         );
-        measuringTool.stop("container_construction");
+        measuring_tool.stop("container_construction");
         return returnContainer;
     }
 };
@@ -697,14 +523,14 @@ struct AllToAllStringImpl<
 
     dss_schimek::StringLcpContainer<StringSet> alltoallv(
         dss_schimek::StringLcpContainer<StringSet>& send_data,
-        std::vector<size_t> const& sendCountsString,
+        std::vector<size_t> const& send_counts,
         environment env
     ) {
         using namespace dss_schimek;
-        using namespace dss_schimek::measurement;
 
-        MeasuringTool& measuringTool = MeasuringTool::measuringTool();
-        measuringTool.start("all_to_all_strings_intern_copy");
+        auto& measuring_tool = measurement::MeasuringTool::measuringTool();
+
+        measuring_tool.start("all_to_all_strings_intern_copy");
 
         const EmptyLcpByteEncoderMemCpy byteEncoder;
         const StringSet ss = send_data.make_string_set();
@@ -712,166 +538,55 @@ struct AllToAllStringImpl<
         if (send_data.size() == 0)
             return dss_schimek::StringLcpContainer<StringSet>();
 
-        std::vector<unsigned char> receive_buffer_char;
-        std::vector<size_t> receive_buffer_lcp;
-        std::vector<size_t> send_counts_lcp(sendCountsString);
-        std::vector<size_t> send_counts_char(sendCountsString.size());
+        std::vector<unsigned char> recv_buf_char;
+        std::vector<size_t> send_counts_char(send_counts.size());
 
         std::vector<size_t>& lcps = send_data.lcps();
-        setLcpAtStartOfInterval(lcps.begin(), sendCountsString.begin(), sendCountsString.end());
-        const size_t L = std::accumulate(lcps.begin(), lcps.end(), static_cast<size_t>(0u));
+        setLcpAtStartOfInterval(lcps.begin(), send_counts.begin(), send_counts.end());
+        const size_t L = std::accumulate(lcps.begin(), lcps.end(), 0);
 
         const size_t numCharsToSend = send_data.char_size() - L;
-        // std::cout << " numCharsToSend: " << numCharsToSend << std::endl;
         std::vector<unsigned char> buffer(numCharsToSend);
         unsigned char* curPos = buffer.data();
-        size_t totalNumWrittenChars = 0;
 
-        for (size_t interval = 0, stringsWritten = 0; interval < sendCountsString.size();
-             ++interval) {
+        for (size_t interval = 0, stringsWritten = 0; interval < send_counts.size(); ++interval) {
             auto begin = ss.begin() + stringsWritten;
-            StringSet subSet = ss.sub(begin, begin + sendCountsString[interval]);
-            size_t numWrittenChars = 0;
-            std::tie(curPos, numWrittenChars) =
-                byteEncoder.write(curPos, subSet, lcps.data() + stringsWritten);
+            size_t chars_written = 0;
+            std::tie(curPos, chars_written) = byteEncoder.write(
+                curPos,
+                ss.sub(begin, begin + send_counts[interval]),
+                lcps.data() + stringsWritten
+            );
 
-            totalNumWrittenChars += numWrittenChars;
-            send_counts_char[interval] = numWrittenChars;
-            stringsWritten += sendCountsString[interval];
+            send_counts_char[interval] = chars_written;
+            stringsWritten += send_counts[interval];
         }
+
         send_data.deleteRawStrings();
         send_data.deleteStrings();
 
-        measuringTool.stop("all_to_all_strings_intern_copy");
-        measuringTool.start("all_to_all_strings_mpi");
-        receive_buffer_char = AllToAllPolicy::alltoallv(buffer.data(), send_counts_char, env);
+        measuring_tool.stop("all_to_all_strings_intern_copy");
+        measuring_tool.start("all_to_all_strings_mpi");
+        recv_buf_char = AllToAllPolicy::alltoallv(buffer.data(), send_counts_char, env);
 
-        auto recvNumberStrings = dss_schimek::mpi::alltoall(sendCountsString, env);
-
-        auto recvLcpValues = sendLcps<compressLcps, AllToAllPolicy>(
-            send_data.lcps(),
-            sendCountsString,
-            recvNumberStrings,
-            env
-        );
+        auto recv_counts = dss_schimek::mpi::alltoall(send_counts, env);
+        auto send_lcps = sendLcps<compressLcps, AllToAllPolicy>;
+        auto recv_buf_lcp = send_lcps(send_data.lcps(), send_counts, recv_counts, env);
         send_data.deleteAll();
-        measuringTool.stop("all_to_all_strings_mpi");
-        measuringTool.add(numCharsToSend + send_data.lcps().size(), "bytes_sent");
 
-        //// no bytes are read in this version only for evaluation layout
-        measuringTool.start("all_to_all_strings_read");
-        measuringTool.stop("all_to_all_strings_read");
+        measuring_tool.stop("all_to_all_strings_mpi");
+        measuring_tool.add(numCharsToSend + send_data.lcps().size(), "bytes_sent");
 
-        measuringTool.start("container_construction");
-        dss_schimek::StringLcpContainer<StringSet> recvContainer(
-            std::move(receive_buffer_char),
-            std::move(recvLcpValues)
+        measuring_tool.start("all_to_all_strings_read");
+        measuring_tool.stop("all_to_all_strings_read");
+
+        measuring_tool.start("container_construction");
+        dss_schimek::StringLcpContainer<StringSet> recv_container(
+            std::move(recv_buf_char),
+            std::move(recv_buf_lcp)
         );
-        measuringTool.stop("container_construction");
-        return recvContainer;
-    }
-};
-
-template <typename StringSet>
-struct RecvDataAllToAll {
-    dss_schimek::StringLcpContainer<StringSet> container;
-    std::vector<size_t> recvStringSizes;
-    RecvDataAllToAll(
-        dss_schimek::StringLcpContainer<StringSet>&& container,
-        std::vector<size_t>&& recvStringSizes
-    )
-        : container(std::move(container)),
-          recvStringSizes(std::move(recvStringSizes)) {}
-};
-
-// Function for All-To-All exchange of all strings in the
-// distributed-merge-sort-algorithm, using the sequentialDelayedByteEncoder
-template <bool compressLcps, typename StringSet, typename AllToAllPolicy>
-struct AllToAllStringImpl<
-    compressLcps,
-    StringSet,
-    AllToAllPolicy,
-    dss_schimek::SequentialDelayedByteEncoder> {
-    static constexpr bool Lcps = true;
-    static constexpr bool PrefixCompression = false;
-
-    dss_schimek::StringLcpContainer<StringSet> alltoallv(
-        dss_schimek::StringLcpContainer<StringSet>& container,
-        std::vector<size_t> const& sendCountsString,
-        environment env
-    ) {
-        using namespace dss_schimek;
-        using namespace dss_schimek::measurement;
-
-        MeasuringTool& measuringTool = MeasuringTool::measuringTool();
-
-        const SequentialDelayedByteEncoder byteEncoder;
-
-        measuringTool.start("all_to_all_strings_intern_copy");
-        StringSet const& sendSet = container.make_string_set();
-        std::vector<unsigned char> contiguousStrings =
-            dss_schimek::getContiguousStrings(sendSet, container.char_size());
-
-        std::vector<size_t> const& sendCountsLcp(sendCountsString);
-        std::vector<size_t> sendCountsChar(sendCountsString.size(), 0);
-        std::vector<size_t> sendCountsTotal(sendCountsString.size(), 0);
-
-        auto stringLcpPtr = container.make_string_lcp_ptr();
-
-        // for (size_t interval = 0, stringsWritten = 0;
-        //     interval < sendCountsString.size(); ++interval) {
-        //    *(stringLcpPtr.get_lcp() + stringsWritten) = 0;
-        //    stringsWritten += sendCountsString[interval];
-        //}
-        setLcpAtStartOfInterval(
-            stringLcpPtr.get_lcp(),
-            sendCountsString.begin(),
-            sendCountsString.end()
-        );
-
-        for (size_t interval = 0, offset = 0; interval < sendCountsString.size(); ++interval) {
-            for (size_t j = offset; j < sendCountsString[interval] + offset; ++j) {
-                size_t stringLength = sendSet.get_length(sendSet[sendSet.begin() + j]);
-                sendCountsChar[interval] += stringLength + 1;
-            }
-            sendCountsTotal[interval] = byteEncoder.computeNumberOfSendBytes(
-                sendCountsChar[interval],
-                sendCountsLcp[interval]
-            );
-            offset += sendCountsString[interval];
-        }
-
-        size_t totalNumberSendBytes =
-            byteEncoder.computeNumberOfSendBytes(sendCountsChar, sendCountsLcp);
-
-        std::vector<unsigned char> buffer(totalNumberSendBytes);
-        unsigned char* curPos = buffer.data();
-
-        for (size_t interval = 0, offset = 0, stringsWritten = 0;
-             interval < sendCountsString.size();
-             ++interval) {
-            curPos = byteEncoder.write(
-                curPos,
-                contiguousStrings.data() + offset,
-                sendCountsChar[interval],
-                container.lcp_array() + stringsWritten,
-                sendCountsLcp[interval]
-            );
-            offset += sendCountsChar[interval];
-            stringsWritten += sendCountsLcp[interval];
-        }
-
-        measuringTool.stop("all_to_all_strings_intern_copy");
-        measuringTool.start("all_to_all_strings_mpi");
-        std::vector<unsigned char> recv =
-            AllToAllPolicy::alltoallv(buffer.data(), sendCountsTotal, env);
-        measuringTool.stop("all_to_all_strings_mpi");
-        measuringTool.add(totalNumberSendBytes, "bytes_sent");
-
-        measuringTool.start("all_to_all_strings_read");
-        auto [rawStrings, rawLcps] = byteEncoder.read(recv.data(), recv.size());
-        measuringTool.stop("all_to_all_strings_read");
-        return StringLcpContainer<StringSet>(std::move(rawStrings), std::move(rawLcps));
+        measuring_tool.stop("container_construction");
+        return recv_container;
     }
 };
 
@@ -886,121 +601,89 @@ struct AllToAllStringImplPrefixDoubling {
 
     dss_schimek::StringLcpContainer<ReturnStringSet> alltoallv(
         dss_schimek::StringLcpContainer<StringSet>&& send_data,
-        std::vector<size_t> const& sendCountsString,
-        std::vector<size_t> const& distinguishingPrefixValues,
+        std::vector<size_t> const& send_counts,
+        std::vector<size_t> const& dist_prefixes,
         environment env
     ) {
         using namespace dss_schimek;
-        using namespace dss_schimek::measurement;
 
-        MeasuringTool& measuringTool = MeasuringTool::measuringTool();
+        auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
-        measuringTool.start("all_to_all_strings_intern_copy");
+        measuring_tool.start("all_to_all_strings_intern_copy");
         const EmptyPrefixDoublingLcpByteEncoderMemCpy byteEncoder;
         StringLcpPtr stringLcpPtr = send_data.make_string_lcp_ptr();
         const StringSet ss = stringLcpPtr.active();
 
         if (ss.size() == 0)
-            return dss_schimek::StringLcpContainer<ReturnStringSet>();
+            return dss_schimek::StringLcpContainer<ReturnStringSet>{};
 
-        std::vector<unsigned char> receive_buffer_char;
-        std::vector<size_t> receive_buffer_lcp;
-        std::vector<size_t> send_counts_lcp(sendCountsString);
-        std::vector<size_t> send_counts_char(sendCountsString.size());
+        std::vector<unsigned char> recv_buf_char;
+        std::vector<size_t> send_counts_char(send_counts.size());
 
-        // for (size_t interval = 0, stringsWritten = 0;
-        //     interval < sendCountsString.size(); ++interval) {
-        //    *(stringLcpPtr.get_lcp() + stringsWritten) = 0;
-        //    stringsWritten += sendCountsString[interval];
-        //}
-        setLcpAtStartOfInterval(
-            stringLcpPtr.get_lcp(),
-            sendCountsString.begin(),
-            sendCountsString.end()
-        );
+        setLcpAtStartOfInterval(stringLcpPtr.get_lcp(), send_counts.begin(), send_counts.end());
 
         const size_t L = std::accumulate(
             stringLcpPtr.get_lcp(),
             stringLcpPtr.get_lcp() + stringLcpPtr.size(),
-            static_cast<size_t>(0u)
+            0
         );
-        const size_t D = std::accumulate(
-            distinguishingPrefixValues.begin(),
-            distinguishingPrefixValues.end(),
-            static_cast<size_t>(0u)
-        );
-        measuringTool.add(L, "localL");
-        measuringTool.add(D, "localD");
+        const size_t D = std::accumulate(dist_prefixes.begin(), dist_prefixes.end(), 0u);
+        measuring_tool.add(L, "localL");
+        measuring_tool.add(D, "localD");
 
         const size_t numCharsToSend = stringLcpPtr.size() + D - L;
-
-        // std::cout << "numCharsToSend : " << numCharsToSend << std::endl;
-        // std::cout << "localL : " << L << std::endl;
-        // std::cout << "localD : " << D << std::endl;
         std::vector<unsigned char> buffer(numCharsToSend);
+
         unsigned char* curPos = buffer.data();
-        size_t totalNumWrittenChars = 0;
-        for (size_t interval = 0, stringsWritten = 0; interval < sendCountsString.size();
-             ++interval) {
-            auto begin = ss.begin() + stringsWritten;
-            StringSet subSet = ss.sub(begin, begin + sendCountsString[interval]);
-            size_t numWrittenChars = 0;
-            std::tie(curPos, numWrittenChars) = byteEncoder.write(
+        for (size_t interval = 0, strs_written = 0; interval < send_counts.size(); ++interval) {
+            auto begin = ss.begin() + strs_written;
+            size_t chars_written = 0;
+
+            std::tie(curPos, chars_written) = byteEncoder.write(
                 curPos,
-                subSet,
-                stringLcpPtr.get_lcp() + stringsWritten,
-                distinguishingPrefixValues.data() + stringsWritten
+                ss.sub(begin, begin + send_counts[interval]),
+                stringLcpPtr.get_lcp() + strs_written,
+                dist_prefixes.data() + strs_written
             );
 
-            totalNumWrittenChars += numWrittenChars;
-            send_counts_char[interval] = numWrittenChars;
-            stringsWritten += sendCountsString[interval];
+            send_counts_char[interval] = chars_written;
+            strs_written += send_counts[interval];
         }
         send_data.deleteRawStrings();
         send_data.deleteStrings();
 
-        measuringTool.stop("all_to_all_strings_intern_copy");
-        measuringTool.start("all_to_all_strings_mpi");
-        receive_buffer_char = AllToAllPolicy::alltoallv(buffer.data(), send_counts_char, env);
+        measuring_tool.stop("all_to_all_strings_intern_copy");
+        measuring_tool.start("all_to_all_strings_mpi");
+        recv_buf_char = AllToAllPolicy::alltoallv(buffer.data(), send_counts_char, env);
 
-        std::vector<size_t> recvNumberStrings = dss_schimek::mpi::alltoall(sendCountsString, env);
-
-        auto recvLcpValues = sendLcps<compressLcps, AllToAllPolicy>(
-            send_data.lcps(),
-            sendCountsString,
-            recvNumberStrings
-        );
+        auto recv_counts = dss_schimek::mpi::alltoall(send_counts, env);
+        auto send_lcps = sendLcps<compressLcps, AllToAllPolicy>;
+        auto recv_buf_lcp = send_lcps(send_data.lcps(), send_counts, recv_counts, env);
         send_data.deleteAll();
 
-        // decode Lcp Compression:
-        std::vector<size_t> offsets;
-        offsets.reserve(env.size());
-        offsets.push_back(0);
-        std::partial_sum(
-            sendCountsString.begin(),
-            sendCountsString.end() - 1,
-            std::back_inserter(offsets)
-        );
+        std::vector<size_t> offsets(send_counts.size());
+        std::exclusive_scan(send_counts.begin(), send_counts.end(), offsets.begin(), 0);
 
-        std::vector<size_t> recvOffsets = dss_schimek::mpi::alltoall(offsets, env);
-        measuringTool.stop("all_to_all_strings_mpi");
-        measuringTool.add(
+        auto recv_offsets = dss_schimek::mpi::alltoall(offsets, env);
+        measuring_tool.stop("all_to_all_strings_mpi");
+        measuring_tool.add(
             numCharsToSend + stringLcpPtr.size() * sizeof(size_t),
             "string_exchange_bytes_sent"
         );
 
-        //// no bytes are read in this version only for evaluation layout
-        measuringTool.start("all_to_all_strings_read");
-        measuringTool.stop("all_to_all_strings_read");
-        measuringTool.start("container_construction");
-        dss_schimek::StringLcpContainer<ReturnStringSet> returnContainer(
-            std::move(receive_buffer_char),
-            std::move(recvLcpValues),
-            recvNumberStrings,
-            recvOffsets
-        );
-        measuringTool.stop("container_construction");
-        return returnContainer;
+        measuring_tool.start("all_to_all_strings_read");
+        measuring_tool.stop("all_to_all_strings_read");
+
+        measuring_tool.start("container_construction");
+        dss_schimek::StringLcpContainer<ReturnStringSet> recv_container{
+            std::move(recv_buf_char),
+            std::move(recv_buf_lcp),
+            recv_counts,
+            recv_offsets
+
+        };
+        measuring_tool.stop("container_construction");
+        return recv_container;
     }
 };
 
