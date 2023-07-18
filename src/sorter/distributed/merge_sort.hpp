@@ -70,6 +70,11 @@ public:
         tlx::sort_strings_detail::radixsort_CI3(string_ptr, 0, 0);
         measuring_tool_.stop("sort_locally");
 
+        measuring_tool_.start("avg_lcp");
+        const size_t lcp_summand = 5u;
+        auto global_lcp_avg = getAvgLcp(string_ptr, comm) + lcp_summand;
+        measuring_tool_.stop("avg_lcp");
+
         if (comm.size() == 1) {
             measuring_tool_.setPhase("none");
             return container_;
@@ -119,25 +124,27 @@ public:
             measuring_tool_.setRound(++round);
         }
 
-
         measuring_tool_.setPhase("sort_globally");
         measuring_tool_.start("final_sorting");
         auto sorted_container = sort_exhaustive(std::move(container), comm_group);
         measuring_tool_.setPhase("sort_globally");
         measuring_tool_.stop("final_sorting");
 
-        // todo this is a horrible bodge, pls remove
         measuring_tool_.setRound(0);
         measuring_tool_.setPhase("none");
         return sorted_container;
     }
 
-private:
+protected:
     using MeasuringTool = measurement::MeasuringTool;
     MeasuringTool& measuring_tool_ = MeasuringTool::measuringTool();
 
-    std::pair<int, StringLcpContainer>
-    sort_partial(StringLcpContainer&& container, size_t num_groups, Communicator const& comm) {
+    std::pair<int, StringLcpContainer> sort_partial(
+        StringLcpContainer&& container,
+        size_t num_groups,
+        size_t global_lcp_avg,
+        Communicator const& comm
+    ) {
         tlx_die_unless(comm.size() % num_groups == 0);
 
         auto string_ptr{container.make_string_lcp_ptr()};
@@ -147,13 +154,10 @@ private:
         measuring_tool_.add(group_size, "group_size");
 
         measuring_tool_.setPhase("bucket_computation");
-        auto global_lcp_avg{get_avg_lcp(string_ptr, comm)};
 
         // todo why the *100 here
         // todo make sampling_factor variable
         sample::SampleParams params{.num_partitions = num_groups, .sampling_factor = 2};
-        constexpr auto compute_partition =
-            partition::compute_partition<StringPtr, SamplePolicy, size_t>;
         auto interval_sizes{compute_partition(string_ptr, params, 2 * 100 * global_lcp_avg, comm)};
 
         auto group_offset{comm.rank() / num_groups};
@@ -176,18 +180,18 @@ private:
         return {group_size, std::move(sorted_container)};
     }
 
-    StringLcpContainer sort_exhaustive(StringLcpContainer&& container, Communicator const& comm) {
+    StringLcpContainer sort_exhaustive(
+        StringLcpContainer&& container, size_t global_lcp_avg, Communicator const& comm
+    ) {
         auto string_ptr = container.make_string_lcp_ptr();
 
         measuring_tool_.add(container.size(), "num_strings");
 
         measuring_tool_.setPhase("bucket_computation");
-        auto global_lcp_avg = get_avg_lcp(string_ptr, comm);
 
         // todo why the *100 here
         // todo make sampling_factor variable
         sample::SampleParams params{.num_partitions = comm.size(), .sampling_factor = 2};
-        auto compute_partition = partition::compute_partition<StringPtr, SamplePolicy, size_t>;
         auto interval_sizes = compute_partition(string_ptr, params, 2 * 100 * global_lcp_avg, comm);
 
         comm.barrier();
@@ -199,14 +203,6 @@ private:
         auto sorted_container = merge_ranges(std::move(recv_container), recv_intervals, comm);
 
         return sorted_container;
-    }
-
-    size_t get_avg_lcp(StringPtr string_ptr, Communicator const& comm) {
-        measuring_tool_.start("avg_lcp");
-        const size_t lcp_summand = 5u;
-        auto avg_lcp = getAvgLcp(string_ptr, comm) + lcp_summand;
-        measuring_tool_.stop("avg_lcp");
-        return avg_lcp;
     }
 
     std::pair<StringLcpContainer, std::vector<size_t>> string_exchange(
@@ -235,10 +231,10 @@ private:
         std::vector<size_t>& interval_sizes,
         Communicator const& comm
     ) {
-        measuring_tool_.start("pruning_ranges");
+        // measuring_tool_.start("pruning_ranges");
         // todo prune empty intervals
         // std::erase(interval_sizes, 0);
-        measuring_tool_.stop("pruning_ranges");
+        // measuring_tool_.stop("pruning_ranges");
 
         measuring_tool_.start("compute_ranges");
         std::vector<std::pair<size_t, size_t>> ranges =
@@ -256,6 +252,10 @@ private:
 
         return sorted_container;
     }
+
+private:
+    static constexpr auto compute_partition =
+        partition::compute_partition<StringPtr, SamplePolicy, size_t>;
 };
 
 } // namespace sorter
