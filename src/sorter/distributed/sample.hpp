@@ -9,9 +9,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <limits>
 #include <numeric>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <kamping/collectives/exscan.hpp>
@@ -22,7 +24,27 @@
 namespace dss_mehnert {
 namespace sample {
 
-struct SampleParams {
+template <bool enable>
+struct MaxLength {};
+
+template <>
+struct MaxLength<true> {
+    size_t max_length;
+};
+
+template <bool enable>
+struct DistPrefixes {};
+
+template <>
+struct DistPrefixes<true> {
+    std::vector<size_t> const& prefixes;
+};
+
+template <bool max_length, bool dist_prefixes>
+struct SampleParams : public MaxLength<max_length>, public DistPrefixes<dist_prefixes> {
+    static constexpr bool has_max_length = max_length;
+    static constexpr bool has_dist_prefixes = dist_prefixes;
+
     uint64_t num_partitions;
     uint64_t sampling_factor;
 
@@ -31,9 +53,39 @@ struct SampleParams {
     }
 };
 
+static_assert(sizeof(SampleParams<false, false>) == 16);
+
 inline size_t get_local_offset(size_t local_size, Communicator const& comm) {
     using namespace kamping;
     return comm.exscan_single(send_buf(local_size), op(ops::plus<>{}));
+}
+
+template <typename StringSet, typename Params>
+static size_t get_num_chars(StringSet const& ss, Params const& params) {
+    if constexpr (Params::has_dist_prefixes) {
+        return std::accumulate(std::begin(params.prefixes), std::end(params.prefixes), 0);
+    } else {
+        auto op = [&ss](auto sum, auto const& str) { return sum + ss.get_length(str); };
+        return std::accumulate(std::begin(ss), std::end(ss), 0, op);
+    }
+}
+
+template <typename StringSet, typename Params>
+static size_t get_splitter_len(
+    StringSet const& ss, typename StringSet::String const& str, size_t index, Params const& params
+) {
+    size_t splitter_len;
+    if constexpr (Params::has_dist_prefixes) {
+        splitter_len = params.prefixes[index];
+    } else {
+        splitter_len = ss.get_length(str);
+    }
+
+    if constexpr (Params::has_max_length) {
+        return std::min(params.max_length, splitter_len);
+    } else {
+        return splitter_len;
+    }
 }
 
 template <typename Char>
@@ -42,55 +94,18 @@ struct SampleIndices {
     std::vector<uint64_t> indices;
 };
 
-template <typename StringSet, typename Policy>
-class Sampler {
-public:
-    static auto sample_splitters(
-        StringSet const& ss, SampleParams const& params, size_t max_length, Communicator const& comm
-    ) {
-        auto num_chars = [&ss] {
-            auto op = [&ss](auto sum, auto const& str) { return sum + ss.get_length(str); };
-            return std::accumulate(std::begin(ss), std::end(ss), 0ull, op);
-        };
-        auto max_len = [=, &ss](auto const& str, size_t idx) {
-            return std::min(ss.get_length(str), max_length);
-        };
-        return Policy::sample_splitters_(ss, params, num_chars, max_len, comm);
-    }
-
-    static auto sample_splitters(
-        StringSet const& ss,
-        SampleParams const& params,
-        std::vector<size_t> const& dist,
-        Communicator const& comm
-    ) {
-        auto num_chars = [&dist] {
-            return std::accumulate(std::begin(dist), std::end(dist), 0ull);
-        };
-        auto max_len = [&dist](auto const&, size_t idx) { return dist[idx]; };
-        return Policy::sample_splitters_(ss, params, num_chars, max_len, comm);
-    }
-};
-
 template <typename StringSet>
-class NumStringsPolicy : public Sampler<StringSet, NumStringsPolicy<StringSet>> {
-    friend class Sampler<StringSet, NumStringsPolicy<StringSet>>;
-
+class NumStringsPolicy {
 public:
     static constexpr bool isIndexed = false;
     static constexpr std::string_view getName() { return "NumStrings"; }
 
-private:
     using Char = typename StringSet::Char;
     using String = typename StringSet::String;
 
-    static std::vector<Char> sample_splitters_(
-        StringSet const& ss,
-        SampleParams const& params,
-        auto get_num_chars,
-        auto get_splitter_len,
-        Communicator const& comm
-    ) {
+    template <typename Params>
+    static std::vector<Char>
+    sample_splitters(StringSet const& ss, Params const& params, Communicator const& comm) {
         const size_t local_num_strings = ss.size();
         const size_t nr_splitters = params.get_number_splitters(ss.size());
         double const splitter_dist =
@@ -102,7 +117,7 @@ private:
         for (size_t i = 1; i <= nr_splitters; ++i) {
             const size_t splitter_index = i * static_cast<size_t>(splitter_dist);
             const String splitter = ss[ss.begin() + splitter_index];
-            const size_t splitter_len = get_splitter_len(splitter, splitter_index);
+            const size_t splitter_len = get_splitter_len(ss, splitter, splitter_index, params);
             std::copy_n(ss.get_chars(splitter, 0), splitter_len, std::back_inserter(raw_splitters));
             raw_splitters.push_back(0);
         }
@@ -111,24 +126,17 @@ private:
 };
 
 template <typename StringSet>
-class IndexedNumStringPolicy : public Sampler<StringSet, IndexedNumStringPolicy<StringSet>> {
-    friend class Sampler<StringSet, IndexedNumStringPolicy<StringSet>>;
-
+class IndexedNumStringPolicy {
 public:
     static constexpr bool isIndexed = true;
     static constexpr std::string_view getName() { return "IndexedNumStrings"; }
 
-private:
     using Char = typename StringSet::Char;
     using String = typename StringSet::String;
 
-    static SampleIndices<Char> sample_splitters_(
-        StringSet const& ss,
-        SampleParams const& params,
-        auto get_num_chars,
-        auto get_splitter_len,
-        Communicator const& comm
-    ) {
+    template <typename Params>
+    static SampleIndices<Char>
+    sample_splitters(StringSet const& ss, Params const& params, Communicator const& comm) {
         const size_t local_offset = get_local_offset(ss.size(), comm);
         const size_t local_num_strings = ss.size();
         const size_t nr_splitters = params.get_number_splitters(local_num_strings);
@@ -145,7 +153,7 @@ private:
             const size_t splitter_index = static_cast<size_t>(i * splitter_dist);
             splitter_idxs[i - 1] += splitter_index;
             const String splitter = ss[ss.begin() + splitter_index];
-            const size_t splitter_len = get_splitter_len(splitter, splitter_index);
+            const size_t splitter_len = get_splitter_len(ss, splitter, splitter_index, params);
             std::copy_n(ss.get_chars(splitter, 0), splitter_len, std::back_inserter(raw_splitters));
             raw_splitters.push_back(0);
         }
@@ -154,25 +162,18 @@ private:
 };
 
 template <typename StringSet>
-class NumCharsPolicy : public Sampler<StringSet, NumCharsPolicy<StringSet>> {
-    friend class Sampler<StringSet, NumCharsPolicy<StringSet>>;
-
+class NumCharsPolicy {
 public:
     static constexpr bool isIndexed = false;
     static constexpr std::string_view getName() { return "NumChars"; }
 
-private:
     using Char = typename StringSet::Char;
     using String = typename StringSet::String;
 
-    static std::vector<Char> sample_splitters_(
-        StringSet const& ss,
-        SampleParams const& params,
-        auto get_num_chars,
-        auto get_splitter_len,
-        Communicator const& comm
-    ) {
-        const size_t num_chars = get_num_chars();
+    template <typename Params>
+    static std::vector<Char>
+    sample_splitters(StringSet const& ss, Params const& params, Communicator const& comm) {
+        const size_t num_chars = get_num_chars(ss, params);
         const size_t local_num_strings = ss.size();
         const size_t nr_splitters = params.get_number_splitters(local_num_strings);
         const size_t splitter_dist = num_chars / (nr_splitters + 1);
@@ -190,7 +191,7 @@ private:
             }
 
             const String splitter = ss[ss.begin() + string_index - 1];
-            const size_t splitter_len = get_splitter_len(splitter, string_index - 1);
+            const size_t splitter_len = get_splitter_len(ss, splitter, string_index - 1, params);
             std::copy_n(ss.get_chars(splitter, 0), splitter_len, std::back_inserter(raw_splitters));
             raw_splitters.push_back(0);
         }
@@ -199,26 +200,19 @@ private:
 };
 
 template <typename StringSet>
-class IndexedNumCharsPolicy : public Sampler<StringSet, IndexedNumCharsPolicy<StringSet>> {
-    friend class Sampler<StringSet, IndexedNumCharsPolicy<StringSet>>;
-
+class IndexedNumCharsPolicy {
 public:
     static constexpr bool isIndexed = true;
     static constexpr std::string_view getName() { return "IndexedNumChars"; }
 
-private:
     using Char = typename StringSet::Char;
     using String = typename StringSet::String;
 
-    static SampleIndices<Char> sample_splitters_(
-        StringSet const& ss,
-        SampleParams const& params,
-        auto get_num_chars,
-        auto get_splitter_len,
-        Communicator const& comm
-    ) {
+    template <typename Params>
+    static SampleIndices<Char>
+    sample_splitters(StringSet const& ss, Params const& params, Communicator const& comm) {
         const size_t local_offset = get_local_offset(ss.size(), comm);
-        const size_t num_chars = get_num_chars();
+        const size_t num_chars = get_num_chars(ss, params);
         const size_t local_num_strings = ss.size();
         const size_t nr_splitters = params.get_number_splitters(local_num_strings);
         const size_t splitter_dist = num_chars / (nr_splitters + 1);
@@ -239,12 +233,13 @@ private:
             splitter_idxs[i - 1] += string_idx - 1;
 
             const String splitter = ss[ss.begin() + string_idx - 1];
-            const size_t splitter_len = get_splitter_len(splitter, string_idx - 1);
+            const size_t splitter_len = get_splitter_len(ss, splitter, string_idx - 1, params);
             std::copy_n(ss.get_chars(splitter, 0), splitter_len, std::back_inserter(raw_splitters));
             raw_splitters.push_back(0);
         }
-        if (i < nr_splitters)
+        if (i < nr_splitters) {
             splitter_idxs.resize(i);
+        }
         return sample_indices;
     }
 };

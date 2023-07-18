@@ -8,6 +8,7 @@
 #include <numeric>
 #include <random>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "mpi/communicator.hpp"
@@ -22,15 +23,10 @@ namespace partition {
 
 using dss_mehnert::sample::SampleParams;
 
-template <typename StringPtr, typename Sampler, typename MaxLength>
-std::enable_if_t<!Sampler::isIndexed, std::vector<uint64_t>> compute_partition(
-    StringPtr string_ptr,
-    SampleParams const& params,
-    MaxLength const& max_length,
-    Communicator const& comm
-) {
+template <typename StringPtr, typename Sampler, typename Params>
+std::enable_if_t<!Sampler::isIndexed, std::vector<uint64_t>>
+compute_partition(StringPtr string_ptr, Params const& params, Communicator const& comm) {
     using namespace dss_schimek;
-
     using Comparator = StringComparator;
     using StringContainer = StringContainer<UCharLengthStringSet>;
     using RQuickData = RQuick::Data<StringContainer, StringContainer::isIndexed>;
@@ -39,7 +35,7 @@ std::enable_if_t<!Sampler::isIndexed, std::vector<uint64_t>> compute_partition(
     auto ss = string_ptr.active();
 
     measuring_tool.start("sample_splitters");
-    auto samples = Sampler::sample_splitters(ss, params, max_length, comm);
+    auto samples = Sampler::sample_splitters(ss, params, comm);
     measuring_tool.stop("sample_splitters");
 
     measuring_tool.start("sort_splitter");
@@ -64,15 +60,10 @@ std::enable_if_t<!Sampler::isIndexed, std::vector<uint64_t>> compute_partition(
     return interval_sizes;
 }
 
-template <typename StringPtr, typename Sampler, typename MaxLength>
-std::enable_if_t<Sampler::isIndexed, std::vector<uint64_t>> compute_partition(
-    StringPtr string_ptr,
-    SampleParams const& params,
-    MaxLength const& max_length,
-    Communicator const& comm
-) {
+template <typename StringPtr, typename Sampler, typename Params>
+std::enable_if_t<Sampler::isIndexed, std::vector<uint64_t>>
+compute_partition(StringPtr string_ptr, Params const& params, Communicator const& comm) {
     using namespace dss_schimek;
-
     using Comparator = IndexStringComparator;
     using StringContainer = IndexStringContainer<UCharLengthIndexStringSet>;
     using RQuickData = RQuick::Data<StringContainer, StringContainer::isIndexed>;
@@ -81,7 +72,7 @@ std::enable_if_t<Sampler::isIndexed, std::vector<uint64_t>> compute_partition(
     auto ss = string_ptr.active();
 
     measuring_tool.start("sample_splitters");
-    auto samples = Sampler::sample_splitters(ss, params, max_length, comm);
+    auto samples = Sampler::sample_splitters(ss, params, comm);
     measuring_tool.stop("sample_splitters");
     // todo remove or move to somewhere else
     measuring_tool.add(samples.sample.size(), "allgather_splitters_bytes_sent");

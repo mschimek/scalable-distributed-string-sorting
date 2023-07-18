@@ -91,7 +91,7 @@ public:
             measuring_tool_.setPhase("sort_globally");
             measuring_tool_.start("partial_sorting");
             auto [group_size, sorted_container] =
-                sort_partial(std::move(container), num_groups, comm_group);
+                sort_partial(std::move(container), num_groups, global_lcp_avg, comm_group);
             container = std::move(sorted_container);
             measuring_tool_.setPhase("sort_globally");
             measuring_tool_.stop("partial_sorting");
@@ -126,7 +126,7 @@ public:
 
         measuring_tool_.setPhase("sort_globally");
         measuring_tool_.start("final_sorting");
-        auto sorted_container = sort_exhaustive(std::move(container), comm_group);
+        auto sorted_container = sort_exhaustive(std::move(container), global_lcp_avg, comm_group);
         measuring_tool_.setPhase("sort_globally");
         measuring_tool_.stop("final_sorting");
 
@@ -157,8 +157,8 @@ protected:
 
         // todo why the *100 here
         // todo make sampling_factor variable
-        sample::SampleParams params{.num_partitions = num_groups, .sampling_factor = 2};
-        auto interval_sizes{compute_partition(string_ptr, params, 2 * 100 * global_lcp_avg, comm)};
+        SampleParams params{{2 * 100 * global_lcp_avg}, {}, num_groups, 2};
+        auto interval_sizes{compute_partition(string_ptr, params, comm)};
 
         auto group_offset{comm.rank() / num_groups};
         std::vector<uint64_t> send_counts(comm.size());
@@ -191,8 +191,8 @@ protected:
 
         // todo why the *100 here
         // todo make sampling_factor variable
-        sample::SampleParams params{.num_partitions = comm.size(), .sampling_factor = 2};
-        auto interval_sizes = compute_partition(string_ptr, params, 2 * 100 * global_lcp_avg, comm);
+        SampleParams params{{2 * 100 * global_lcp_avg}, {}, comm.size(), 2};
+        auto interval_sizes = compute_partition(string_ptr, params, comm);
 
         comm.barrier();
         measuring_tool_.setPhase("string_exchange");
@@ -254,8 +254,9 @@ protected:
     }
 
 private:
+    using SampleParams = sample::SampleParams<true, false>;
     static constexpr auto compute_partition =
-        partition::compute_partition<StringPtr, SamplePolicy, size_t>;
+        partition::compute_partition<StringPtr, SamplePolicy, SampleParams>;
 };
 
 } // namespace sorter

@@ -67,11 +67,10 @@ size_t getAvgLcp(const StringLcpPtr string_lcp_ptr, dss_mehnert::Communicator co
     using namespace kamping;
 
     struct Result {
-        size_t lcpSum;
-        size_t numStrings;
+        size_t lcp_sum, num_strs;
 
         Result operator+(Result const& rhs) const {
-            return {lcpSum + rhs.lcpSum, numStrings + rhs.numStrings};
+            return {lcp_sum + rhs.lcp_sum, num_strs + rhs.num_strs};
         }
     };
 
@@ -82,7 +81,7 @@ size_t getAvgLcp(const StringLcpPtr string_lcp_ptr, dss_mehnert::Communicator co
 
     auto global_result = comm.allreduce(send_buf(local_result), op(ops::plus<>{}, ops::commutative))
                              .extract_recv_buffer()[0];
-    return global_result.lcpSum / global_result.numStrings;
+    return global_result.lcp_sum / global_result.num_strs;
 }
 
 template <typename StringContainer>
@@ -446,22 +445,19 @@ static inline std::vector<std::pair<size_t, size_t>> compute_ranges_and_set_lcp_
     for (size_t i = 0, offset = 0; i < env.size(); ++i) {
         if (recv_interval_sizes[i] == 0) {
             ranges.emplace_back(0, 0);
-            continue;
+        } else {
+            *(recv_string_cont.lcp_array() + offset) = 0;
+            ranges.emplace_back(offset, recv_interval_sizes[i]);
+            offset += recv_interval_sizes[i];
         }
-        *(recv_string_cont.lcp_array() + offset) = 0;
-        ranges.emplace_back(offset, recv_interval_sizes[i]);
-        offset += recv_interval_sizes[i];
     }
     return ranges;
 }
 
-template <typename Sampler, typename StringPtr>
+template <typename Sampler, typename StringPtr, typename Params>
 typename std::enable_if<!Sampler::isIndexed, std::vector<uint64_t>>::type
 computePartitionSequentialSort(
-    StringPtr stringptr,
-    uint64_t globalLcpAvg,
-    dss_mehnert::sample::SampleParams const& params,
-    mpi::environment env
+    StringPtr stringptr, uint64_t globalLcpAvg, Params const& params, mpi::environment env
 ) {
     using StringSet = typename StringPtr::StringSet;
     using namespace dss_schimek;
@@ -493,13 +489,10 @@ computePartitionSequentialSort(
     return interval_sizes;
 }
 
-template <typename Sampler, typename StringPtr>
+template <typename Sampler, typename StringPtr, typename Params>
 typename std::enable_if<!Sampler::isIndexed, std::vector<uint64_t>>::type
 computePartitionSequentialSort(
-    StringPtr stringptr,
-    dss_mehnert::sample::SampleParams const& params,
-    std::vector<uint64_t> const& dist,
-    mpi::environment env
+    StringPtr stringptr, Params const& params, std::vector<size_t> const& dist, mpi::environment env
 ) {
     using StringSet = typename StringPtr::StringSet;
     using namespace dss_schimek;
@@ -531,13 +524,10 @@ computePartitionSequentialSort(
     return interval_sizes;
 }
 
-template <typename Sampler, typename StringPtr>
+template <typename Sampler, typename StringPtr, typename Params>
 typename std::enable_if<Sampler::isIndexed, std::vector<uint64_t>>::type
 computePartitionSequentialSort(
-    StringPtr stringptr,
-    size_t globalLcpAvg,
-    dss_mehnert::sample::SampleParams const& params,
-    mpi::environment env
+    StringPtr stringptr, size_t globalLcpAvg, Params const& params, mpi::environment env
 ) {
     using namespace dss_schimek;
     using namespace measurement;
@@ -569,13 +559,10 @@ computePartitionSequentialSort(
     return interval_sizes;
 }
 
-template <typename Sampler, typename StringPtr>
+template <typename Sampler, typename StringPtr, typename Params>
 typename std::enable_if<Sampler::isIndexed, std::vector<uint64_t>>::type
 computePartitionSequentialSort(
-    StringPtr stringptr,
-    dss_mehnert::sample::SampleParams const& params,
-    std::vector<uint64_t> const& dist,
-    mpi::environment env
+    StringPtr stringptr, Params const& params, std::vector<size_t> const& dist, mpi::environment env
 ) {
     using namespace dss_schimek;
     using namespace measurement;
