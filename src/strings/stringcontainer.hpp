@@ -1,4 +1,5 @@
 // (c) 2019 Matthias Schimek
+// (c) 2023 Pascal Mehnert
 // This code is licensed under BSD 2-Clause License (see LICENSE for details)
 
 #pragma once
@@ -8,6 +9,7 @@
 #include <iostream>
 #include <memory>
 #include <numeric>
+#include <vector>
 
 #include <numa.h>
 #include <stdint.h>
@@ -32,8 +34,7 @@ public:
         strings.reserve(approx_string_size);
         for (size_t i = 0; i < raw_strings.size(); ++i) {
             strings.emplace_back(raw_strings.data() + i);
-            while (raw_strings[i] != 0)
-                ++i;
+            while (raw_strings[i] != 0) ++i;
         }
         return strings;
     }
@@ -60,8 +61,7 @@ public:
         strings.reserve(raw_strings.size() / 100); // just a guess
         for (size_t i = 0; i < raw_strings.size(); ++i) {
             strings.emplace_back(raw_strings.data() + i, i);
-            while (raw_strings[i] != 0)
-                ++i;
+            while (raw_strings[i] != 0) ++i;
             strings.back().length = i - strings.back().length;
         }
         return strings;
@@ -90,8 +90,7 @@ public:
         size_t curString = 0;
         for (size_t i = 0; i < raw_strings.size(); ++i) {
             strings.emplace_back(raw_strings.data() + i, i, curString);
-            while (raw_strings[i] != 0)
-                ++i;
+            while (raw_strings[i] != 0) ++i;
             strings.back().length = i - strings.back().length;
             ++curString;
         }
@@ -111,8 +110,7 @@ public:
         size_t curString = 0;
         for (size_t i = 0; i < raw_strings.size(); ++i) {
             strings.emplace_back(raw_strings.data() + i, i, stringIndices[curString]);
-            while (raw_strings[i] != 0)
-                ++i;
+            while (raw_strings[i] != 0) ++i;
             strings.back().length = i - strings.back().length;
             ++curString;
         }
@@ -147,10 +145,24 @@ public:
                     offsets[curPEIndex] + stringIndex,
                     curPEIndex
                 );
-                while (raw_strings[curOffset] != 0)
-                    ++curOffset;
+                while (raw_strings[curOffset] != 0) ++curOffset;
                 ++curOffset;
             }
+        }
+        return strings;
+    }
+
+    std::vector<String> init_strings(
+        std::vector<Char>& raw_strings,
+        std::vector<size_t>&& PE_indices,
+        std::vector<size_t>&& str_indices
+    ) {
+        std::vector<String> strings(PE_indices.size());
+        for (size_t offset = 0, idx = 0; auto& str: strings) {
+            str = {raw_strings.data() + offset, str_indices[idx], PE_indices[idx]};
+
+            while (raw_strings[offset] != 0) ++offset;
+            ++offset, ++idx;
         }
         return strings;
     }
@@ -195,6 +207,19 @@ public:
         : raw_strings_(std::make_unique<std::vector<Char>>(std::move(raw_strings))),
           savedLcps_() {
         update_strings(intervalSizes, offsets);
+        lcps_ = std::move(lcp);
+    }
+
+    // todo this overload is pretty horrendous
+    explicit StringLcpContainer(
+        std::vector<Char>&& raw_strings,
+        std::vector<size_t>&& lcp,
+        std::vector<size_t>&& PE_indices,
+        std::vector<size_t>&& str_indices
+    )
+        : raw_strings_(std::make_unique<std::vector<Char>>(std::move(raw_strings))),
+          savedLcps_() {
+        update_strings(std::move(PE_indices), std::move(str_indices));
         lcps_ = std::move(lcp);
     }
 
@@ -411,6 +436,14 @@ protected:
     void
     update_strings(std::vector<size_t> const& intervalSizes, std::vector<size_t> const& offsets) {
         strings_ = InitPolicy<StringSet>::init_strings(*raw_strings_, intervalSizes, offsets);
+    }
+
+    void update_strings(std::vector<size_t>&& PE_indices, std::vector<size_t>&& str_indices) {
+        strings_ = InitPolicy<StringSet>::init_strings(
+            *raw_strings_,
+            std::move(PE_indices),
+            std::move(str_indices)
+        );
     }
 };
 

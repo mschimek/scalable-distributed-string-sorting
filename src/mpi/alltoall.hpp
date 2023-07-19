@@ -1,10 +1,7 @@
-/*******************************************************************************
- * mpi/alltoall.hpp
- *
- * Copyright (C) 2018 Florian Kurpicz <florian.kurpicz@tu-dortmund.de>
- *
- * All rights reserved. Published under the BSD-2 license in the LICENSE file.
- ******************************************************************************/
+// (c) 2018 Florian Kurpicz
+// (c) 2019 Matthias Schimek
+// (c) 2023 Pascal Mehnert
+// This code is licensed under BSD 2-Clause License (see LICENSE for details)
 
 #pragma once
 
@@ -595,11 +592,11 @@ struct AllToAllStringImpl<
 template <bool compressLcps, typename StringLcpPtr, typename AllToAllPolicy>
 struct AllToAllStringImplPrefixDoubling {
     using StringSet = typename StringLcpPtr::StringSet;
-    using ReturnStringSet = dss_schimek::UCharIndexPEIndexStringSet;
+    using StringPEIndexSet = dss_schimek::UCharIndexPEIndexStringSet;
     static constexpr bool Lcps = true;
     static constexpr bool PrefixCompression = true;
 
-    dss_schimek::StringLcpContainer<ReturnStringSet> alltoallv(
+    dss_schimek::StringLcpContainer<StringPEIndexSet> alltoallv(
         dss_schimek::StringLcpContainer<StringSet>&& send_data,
         std::vector<size_t> const& send_counts,
         std::vector<size_t> const& dist_prefixes,
@@ -615,7 +612,7 @@ struct AllToAllStringImplPrefixDoubling {
         const StringSet ss = stringLcpPtr.active();
 
         if (ss.size() == 0)
-            return dss_schimek::StringLcpContainer<ReturnStringSet>{};
+            return dss_schimek::StringLcpContainer<StringPEIndexSet>{};
 
         std::vector<unsigned char> recv_buf_char;
         std::vector<size_t> send_counts_char(send_counts.size());
@@ -675,13 +672,94 @@ struct AllToAllStringImplPrefixDoubling {
         measuring_tool.stop("all_to_all_strings_read");
 
         measuring_tool.start("container_construction");
-        dss_schimek::StringLcpContainer<ReturnStringSet> recv_container{
+        dss_schimek::StringLcpContainer<StringPEIndexSet> recv_container{
             std::move(recv_buf_char),
             std::move(recv_buf_lcp),
             recv_counts,
             recv_offsets
 
         };
+        measuring_tool.stop("container_construction");
+        return recv_container;
+    }
+
+    dss_schimek::StringLcpContainer<StringPEIndexSet> alltoallv(
+        dss_schimek::StringLcpContainer<StringPEIndexSet>&& send_data,
+        std::vector<size_t> const& send_counts,
+        environment env
+    ) {
+        using namespace dss_schimek;
+
+        auto& measuring_tool = measurement::MeasuringTool::measuringTool();
+
+        measuring_tool.start("all_to_all_strings_intern_copy");
+        const EmptyLcpByteEncoderMemCpy byteEncoder;
+        StringLcpPtr string_ptr = send_data.make_string_lcp_ptr();
+        const StringSet ss = string_ptr.active();
+
+        if (ss.size() == 0)
+            return dss_schimek::StringLcpContainer<StringPEIndexSet>{};
+
+        std::vector<unsigned char> recv_buf_char;
+        std::vector<size_t> send_counts_char(send_counts.size());
+
+        setLcpAtStartOfInterval(string_ptr.get_lcp(), send_counts.begin(), send_counts.end());
+
+        const size_t L =
+            std::accumulate(string_ptr.get_lcp(), string_ptr.get_lcp() + string_ptr.size(), 0);
+        measuring_tool.add(L, "localL");
+
+        const size_t numCharsToSend = string_ptr.size() - L;
+        std::vector<unsigned char> send_buf_char(numCharsToSend);
+
+        unsigned char* curPos = send_buf_char.data();
+        for (size_t interval = 0, strs_written = 0; interval < send_counts.size(); ++interval) {
+            auto begin = ss.begin() + strs_written;
+            auto sub_set = ss.sub(begin, begin + send_counts[interval]);
+
+            size_t chars_written = 0;
+            std::tie(curPos, chars_written) =
+                byteEncoder.write(curPos, sub_set, string_ptr.get_lcp() + strs_written);
+
+            send_counts_char[interval] = chars_written;
+            strs_written += send_counts[interval];
+        }
+
+        // todo should maybe switch to sep. buffers for PE/str index in StringSet
+        std::vector<size_t> send_buf_PE_idx(ss.size());
+        std::vector<size_t> send_buf_str_idx(ss.size());
+
+        auto get_PE_idx = [&ss](auto const& str) { return ss.getPEIndex(str); };
+        std::transform(ss.begin(), ss.end(), send_buf_PE_idx.begin(), get_PE_idx);
+
+        auto get_str_idx = [&ss](auto const& str) { return ss.getIndex(str); };
+        std::transform(ss.begin(), ss.end(), send_buf_str_idx.begin(), get_str_idx);
+
+        send_data.deleteRawStrings();
+        send_data.deleteStrings();
+
+        measuring_tool.stop("all_to_all_strings_intern_copy");
+        measuring_tool.start("all_to_all_strings_mpi");
+        recv_buf_char = AllToAllPolicy::alltoallv(send_buf_char.data(), send_counts_char, env);
+
+        auto recv_counts = dss_schimek::mpi::alltoall(send_counts, env);
+        auto send_lcps = sendLcps<compressLcps, AllToAllPolicy>;
+        auto recv_buf_lcp = send_lcps(send_data.lcps(), send_counts, recv_counts, env);
+
+        // todo this is pretty hacky
+        auto recv_buf_PE_idx = send_lcps(send_buf_PE_idx, send_counts, recv_counts, env);
+        auto recv_buf_str_idx = send_lcps(send_buf_str_idx, send_counts, recv_counts, env);
+        send_data.deleteAll();
+
+        measuring_tool.start("all_to_all_strings_read");
+        measuring_tool.stop("all_to_all_strings_read");
+
+        measuring_tool.start("container_construction");
+        dss_schimek::StringLcpContainer<StringPEIndexSet> recv_container{
+            std::move(recv_buf_char),
+            std::move(recv_buf_lcp),
+            std::move(recv_buf_PE_idx),
+            std::move(recv_buf_str_idx)};
         measuring_tool.stop("container_construction");
         return recv_container;
     }
@@ -747,5 +825,3 @@ getStrings(Iterator requestBegin, Iterator requestEnd, StringSet localSS, enviro
 }
 
 } // namespace dss_schimek::mpi
-
-/******************************************************************************/
