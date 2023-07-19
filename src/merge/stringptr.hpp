@@ -38,7 +38,6 @@
 
 #include <cassert>
 
-#include <numa.h>
 #include <stdint.h>
 
 #include "merge/stringtools.hpp"

@@ -324,8 +324,7 @@ Data<StringContainer, StringContainer::isIndexed> middleMostElements(
         data.rawStrings = cont.raw_strings();
         if constexpr (StringContainer::isIndexed) {
             data.indices.reserve(cont.size());
-            for (auto str: cont.make_string_set())
-                data.indices.push_back(str.index);
+            for (auto str: cont.make_string_set()) data.indices.push_back(str.index);
         }
         return data;
     }

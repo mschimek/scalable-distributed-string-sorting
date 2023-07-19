@@ -9,6 +9,7 @@
 #include <random>
 #include <type_traits>
 
+#include <ips4o.hpp>
 #include <tlx/algorithm/multiway_merge.hpp>
 #include <tlx/siphash.hpp>
 #include <tlx/sort/strings/radix_sort.hpp>
@@ -16,7 +17,6 @@
 
 #include "encoding/golomb_encoding.hpp"
 #include "hash/xxhash.hpp"
-#include "ips4o.hpp"
 #include "merge/bingmann-lcp_losertree.hpp"
 #include "merge/stringtools.hpp"
 #include "mpi/allgather.hpp"
@@ -73,8 +73,7 @@ struct StringTriple {
 
     bool operator<(StringTriple const& rhs) const {
         size_t i = 0;
-        while (string[i] != 0 && string[i] == rhs.string[i])
-            ++i;
+        while (string[i] != 0 && string[i] == rhs.string[i]) ++i;
         return string[i] < rhs.string[i];
     }
 
@@ -635,8 +634,7 @@ struct SendOnlyHashesToFilter : private SendPolicy {
         size_t curPE = 0;
         size_t curBoundary = recvData.intervalSizes[0];
         for (size_t i = 0; i < recvData.data.size(); ++i) {
-            while (i == curBoundary)
-                curBoundary += recvData.intervalSizes[++curPE];
+            while (i == curBoundary) curBoundary += recvData.intervalSizes[++curPE];
             hashesPEIndex.emplace_back(recvData.data[i], curPE);
         }
         return hashesPEIndex;
@@ -1367,8 +1365,7 @@ public:
     ) {
         // eosCandidates is subset of candidates whose length is <= depth
         StringSet ss = strptr.active();
-        for (size_t candidate = 0; candidate < ss.size(); ++candidate)
-            results[candidate] = depth;
+        for (size_t candidate = 0; candidate < ss.size(); ++candidate) results[candidate] = depth;
 
         for (const size_t curEOSCandidate: eosCandidates) {
             String str = ss[ss.begin() + curEOSCandidate];
@@ -1386,8 +1383,7 @@ public:
     ) {
         // eosCandidates is subset of candidates whose length is <= depth
         StringSet ss = strptr.active();
-        for (const size_t curCandidate: candidates)
-            results[curCandidate] = depth;
+        for (const size_t curCandidate: candidates) results[curCandidate] = depth;
 
         for (const size_t curEOSCandidate: eosCandidates) {
             String str = ss[ss.begin() + curEOSCandidate];

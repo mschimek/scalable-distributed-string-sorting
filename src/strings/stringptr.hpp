@@ -39,7 +39,6 @@
 #include <cassert>
 #include <iostream>
 
-#include <numa.h>
 #include <stdint.h>
 #include <tlx/logger.hpp>
 

@@ -11,7 +11,6 @@
 #include <numeric>
 #include <vector>
 
-#include <numa.h>
 #include <stdint.h>
 #include <tlx/logger.hpp>
 #include <tlx/sort/strings/string_ptr.hpp>
