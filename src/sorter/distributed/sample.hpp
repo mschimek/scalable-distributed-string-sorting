@@ -95,29 +95,25 @@ struct SampleIndices {
     std::vector<uint64_t> indices;
 };
 
-template <typename StringSet>
 class NumStringsPolicy {
 public:
     static constexpr bool isIndexed = false;
     static constexpr std::string_view getName() { return "NumStrings"; }
 
-    using Char = typename StringSet::Char;
-    using String = typename StringSet::String;
-
-    template <typename Params>
-    static std::vector<Char>
+    template <typename StringSet, typename Params>
+    static std::vector<typename StringSet::Char>
     sample_splitters(StringSet const& ss, Params const& params, Communicator const& comm) {
         const size_t local_num_strings = ss.size();
         const size_t nr_splitters = params.get_number_splitters(ss.size());
         double const splitter_dist =
             static_cast<double>(local_num_strings) / static_cast<double>(nr_splitters + 1);
 
-        std::vector<Char> raw_splitters;
+        std::vector<typename StringSet::Char> raw_splitters;
         raw_splitters.reserve(nr_splitters * (100 + 1u));
 
         for (size_t i = 1; i <= nr_splitters; ++i) {
             const size_t splitter_index = i * static_cast<size_t>(splitter_dist);
-            const String splitter = ss[ss.begin() + splitter_index];
+            auto const splitter = ss[ss.begin() + splitter_index];
             const size_t splitter_len = get_splitter_len(ss, splitter, splitter_index, params);
             std::copy_n(ss.get_chars(splitter, 0), splitter_len, std::back_inserter(raw_splitters));
             raw_splitters.push_back(0);
@@ -126,17 +122,13 @@ public:
     }
 };
 
-template <typename StringSet>
 class IndexedNumStringPolicy {
 public:
     static constexpr bool isIndexed = true;
     static constexpr std::string_view getName() { return "IndexedNumStrings"; }
 
-    using Char = typename StringSet::Char;
-    using String = typename StringSet::String;
-
-    template <typename Params>
-    static SampleIndices<Char>
+    template <typename StringSet, typename Params>
+    static SampleIndices<typename StringSet::Char>
     sample_splitters(StringSet const& ss, Params const& params, Communicator const& comm) {
         const size_t local_offset = get_local_offset(ss.size(), comm);
         const size_t local_num_strings = ss.size();
@@ -144,7 +136,7 @@ public:
         double const splitter_dist =
             static_cast<double>(local_num_strings) / static_cast<double>(nr_splitters + 1);
 
-        SampleIndices<Char> sample_indices;
+        SampleIndices<typename StringSet::Char> sample_indices;
         auto& [raw_splitters, splitter_idxs] = sample_indices;
         // raw_splitters.reserve(nr_splitters * (maxLength + 1u));
         raw_splitters.reserve(nr_splitters * (100 + 1u));
@@ -153,7 +145,7 @@ public:
         for (size_t i = 1; i <= nr_splitters; ++i) {
             const size_t splitter_index = static_cast<size_t>(i * splitter_dist);
             splitter_idxs[i - 1] += splitter_index;
-            const String splitter = ss[ss.begin() + splitter_index];
+            auto const splitter = ss[ss.begin() + splitter_index];
             const size_t splitter_len = get_splitter_len(ss, splitter, splitter_index, params);
             std::copy_n(ss.get_chars(splitter, 0), splitter_len, std::back_inserter(raw_splitters));
             raw_splitters.push_back(0);
@@ -162,24 +154,20 @@ public:
     }
 };
 
-template <typename StringSet>
 class NumCharsPolicy {
 public:
     static constexpr bool isIndexed = false;
     static constexpr std::string_view getName() { return "NumChars"; }
 
-    using Char = typename StringSet::Char;
-    using String = typename StringSet::String;
-
-    template <typename Params>
-    static std::vector<Char>
+    template <typename StringSet, typename Params>
+    static std::vector<typename StringSet::Char>
     sample_splitters(StringSet const& ss, Params const& params, Communicator const& comm) {
         const size_t num_chars = get_num_chars(ss, params);
         const size_t local_num_strings = ss.size();
         const size_t nr_splitters = params.get_number_splitters(local_num_strings);
         const size_t splitter_dist = num_chars / (nr_splitters + 1);
 
-        std::vector<Char> raw_splitters;
+        std::vector<typename StringSet::Char> raw_splitters;
         // raw_splitters.reserve(nr_splitters * (maxLength + 1));
         raw_splitters.reserve(nr_splitters * (100 + 1));
 
@@ -191,7 +179,7 @@ public:
                 ++string_index;
             }
 
-            const String splitter = ss[ss.begin() + string_index - 1];
+            auto const splitter = ss[ss.begin() + string_index - 1];
             const size_t splitter_len = get_splitter_len(ss, splitter, string_index - 1, params);
             std::copy_n(ss.get_chars(splitter, 0), splitter_len, std::back_inserter(raw_splitters));
             raw_splitters.push_back(0);
@@ -200,17 +188,13 @@ public:
     }
 };
 
-template <typename StringSet>
 class IndexedNumCharsPolicy {
 public:
     static constexpr bool isIndexed = true;
     static constexpr std::string_view getName() { return "IndexedNumChars"; }
 
-    using Char = typename StringSet::Char;
-    using String = typename StringSet::String;
-
-    template <typename Params>
-    static SampleIndices<Char>
+    template <typename StringSet, typename Params>
+    static SampleIndices<typename StringSet::Char>
     sample_splitters(StringSet const& ss, Params const& params, Communicator const& comm) {
         const size_t local_offset = get_local_offset(ss.size(), comm);
         const size_t num_chars = get_num_chars(ss, params);
@@ -218,7 +202,7 @@ public:
         const size_t nr_splitters = params.get_number_splitters(local_num_strings);
         const size_t splitter_dist = num_chars / (nr_splitters + 1);
 
-        SampleIndices<Char> sample_indices;
+        SampleIndices<typename StringSet::Char> sample_indices;
         auto& [raw_splitters, splitter_idxs] = sample_indices;
         // raw_splitters.reserve(nr_splitters * (maxLength + 1u));
         raw_splitters.reserve(nr_splitters * (100 + 1u));
@@ -233,7 +217,7 @@ public:
             }
             splitter_idxs[i - 1] += string_idx - 1;
 
-            const String splitter = ss[ss.begin() + string_idx - 1];
+            auto const splitter = ss[ss.begin() + string_idx - 1];
             const size_t splitter_len = get_splitter_len(ss, splitter, string_idx - 1, params);
             std::copy_n(ss.get_chars(splitter, 0), splitter_len, std::back_inserter(raw_splitters));
             raw_splitters.push_back(0);
