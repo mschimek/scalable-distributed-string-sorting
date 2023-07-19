@@ -25,7 +25,6 @@
 #include "sorter/distributed/merging.hpp"
 #include "sorter/distributed/partition.hpp"
 #include "sorter/distributed/sample.hpp"
-#include "strings/stringtools.hpp"
 #include "util/measuringTool.hpp"
 
 namespace dss_mehnert {
@@ -38,11 +37,8 @@ public:
     static constexpr bool debug = true;
     static constexpr bool barrier = true;
 
-    using StringSet = typename StringPtr::StringSet;
-    using StringLcpContainer = dss_schimek::StringLcpContainer<StringSet>;
+    using StringLcpContainer = dss_schimek::StringLcpContainer<typename StringPtr::StringSet>;
 
-    // todo not sure about the usage of StringLcpContainer&& here
-    // todo get rid of NoLcps in AllToAll
     // todo need to consider AllToAllStringPolicy::PrefixCompression?
     // todo why pass both string_ptr and container?
     template <typename Levels>
@@ -53,17 +49,17 @@ public:
         Communicator const& comm
     ) {
         using namespace kamping;
+
+        auto const& ss = string_ptr.active();
         measuring_tool_.setPhase("local_sorting");
 
-        StringSet const& ss = string_ptr.active();
-
         if constexpr (debug) {
-            size_t charactersInSet = 0;
+            size_t chars_in_set = 0;
             for (auto const& str: ss) {
-                charactersInSet += ss.get_length(str) + 1;
+                chars_in_set += ss.get_length(str) + 1;
             }
-            measuring_tool_.add(charactersInSet, "charactersInSet");
-            assert_equal(charactersInSet, container_.char_size());
+            measuring_tool_.add(chars_in_set, "chars_in_set");
+            assert_equal(chars_in_set, container_.char_size());
         }
 
         measuring_tool_.start("sort_locally");
@@ -117,9 +113,6 @@ public:
                               << " group_chars=" << group_chars.extract_recv_buffer()[0] << "\n";
                 }
             }
-            if constexpr (barrier) {
-                comm.barrier();
-            }
 
             measuring_tool_.setRound(++round);
         }
@@ -135,9 +128,13 @@ public:
         return sorted_container;
     }
 
-protected:
+private:
     using MeasuringTool = measurement::MeasuringTool;
     MeasuringTool& measuring_tool_ = MeasuringTool::measuringTool();
+
+    using SampleParams = sample::SampleParams<true, false>;
+    static constexpr auto compute_partition =
+        partition::compute_partition<StringPtr, SamplePolicy, SampleParams>;
 
     std::pair<int, StringLcpContainer> sort_partial(
         StringLcpContainer&& container,
@@ -170,13 +167,7 @@ protected:
             dst_iter += group_size;
         }
 
-        measuring_tool_.setPhase("string_exchange");
-        auto [recv_container, recv_intervals] =
-            string_exchange(std::move(container), send_counts, comm);
-
-        measuring_tool_.setPhase("merging");
-        auto sorted_container = merge_ranges(std::move(recv_container), recv_intervals, comm);
-
+        auto sorted_container = exchange_and_merge(std::move(container), send_counts, comm);
         return {group_size, std::move(sorted_container)};
     }
 
@@ -194,43 +185,30 @@ protected:
         SampleParams params{{2 * 100 * global_lcp_avg}, {}, comm.size(), 2};
         auto interval_sizes = compute_partition(string_ptr, params, comm);
 
-        comm.barrier();
-        measuring_tool_.setPhase("string_exchange");
-        auto [recv_container, recv_intervals] =
-            string_exchange(std::move(container), interval_sizes, comm);
-
-        measuring_tool_.setPhase("merging");
-        auto sorted_container = merge_ranges(std::move(recv_container), recv_intervals, comm);
-
-        return sorted_container;
+        return exchange_and_merge(std::move(container), interval_sizes, comm);
     }
 
-    std::pair<StringLcpContainer, std::vector<size_t>> string_exchange(
+    StringLcpContainer exchange_and_merge(
         StringLcpContainer&& container,
-        std::vector<size_t> const& interval_sizes,
+        std::vector<size_t>& interval_sizes,
         Communicator const& comm
     ) {
+        measuring_tool_.setPhase("string_exchange");
         measuring_tool_.start("all_to_all_strings");
 
-        std::vector<size_t> recv_interval_sizes =
+        auto recv_interval_sizes =
             comm.alltoall(kamping::send_buf(interval_sizes)).extract_recv_buffer();
 
         StringLcpContainer recv_string_container =
             AllToAllStringPolicy::alltoallv(container, interval_sizes, comm);
+        container.deleteAll();
         measuring_tool_.stop("all_to_all_strings");
 
         auto num_received_chars = recv_string_container.char_size() - recv_string_container.size();
         measuring_tool_.add(num_received_chars, "num_recv_chars", false);
         measuring_tool_.add(recv_string_container.size(), "num_recv_strings", false);
 
-        return {std::move(recv_string_container), std::move(recv_interval_sizes)};
-    }
-
-    StringLcpContainer merge_ranges(
-        StringLcpContainer&& container,
-        std::vector<size_t>& interval_sizes,
-        Communicator const& comm
-    ) {
+        measuring_tool_.setPhase("merging");
         // measuring_tool_.start("pruning_ranges");
         // todo prune empty intervals
         // std::erase(interval_sizes, 0);
@@ -238,24 +216,30 @@ protected:
 
         measuring_tool_.start("compute_ranges");
         std::vector<std::pair<size_t, size_t>> ranges =
-            compute_ranges_and_set_lcp_at_start_of_range(container, interval_sizes, comm);
+            compute_ranges_and_set_lcp_at_start_of_range(
+                recv_string_container,
+                recv_interval_sizes,
+                comm
+            );
         measuring_tool_.stop("compute_ranges");
 
         measuring_tool_.start("merge_ranges");
-        size_t num_recv_elems =
-            std::accumulate(interval_sizes.begin(), interval_sizes.end(), static_cast<size_t>(0u));
+        size_t num_recv_elems = std::accumulate(
+            recv_interval_sizes.begin(),
+            recv_interval_sizes.end(),
+            static_cast<size_t>(0u)
+        );
 
-        auto sorted_container =
-            choose_merge<AllToAllStringPolicy>(std::move(container), ranges, num_recv_elems, comm);
+        auto sorted_container = choose_merge<AllToAllStringPolicy>(
+            std::move(recv_string_container),
+            ranges,
+            num_recv_elems,
+            comm
+        );
         measuring_tool_.stop("merge_ranges");
 
         return sorted_container;
     }
-
-private:
-    using SampleParams = sample::SampleParams<true, false>;
-    static constexpr auto compute_partition =
-        partition::compute_partition<StringPtr, SamplePolicy, SampleParams>;
 };
 
 } // namespace sorter
