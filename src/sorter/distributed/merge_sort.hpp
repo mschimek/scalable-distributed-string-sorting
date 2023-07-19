@@ -44,7 +44,7 @@ public:
     template <typename Levels>
     StringLcpContainer sort(
         StringPtr& string_ptr,
-        StringLcpContainer&& container_,
+        StringLcpContainer&& container,
         Levels&& intermediate_levels,
         Communicator const& comm
     ) {
@@ -59,7 +59,7 @@ public:
                 chars_in_set += ss.get_length(str) + 1;
             }
             measuring_tool_.add(chars_in_set, "chars_in_set");
-            assert_equal(chars_in_set, container_.char_size());
+            assert_equal(chars_in_set, container.char_size());
         }
 
         measuring_tool_.start("sort_locally");
@@ -73,24 +73,19 @@ public:
 
         if (comm.size() == 1) {
             measuring_tool_.setPhase("none");
-            return container_;
+            return container;
         }
 
         // todo address imbalance in partitions
         size_t round{0};
         Communicator comm_group{comm};
-        StringLcpContainer container{std::move(container_)};
 
         for (auto num_groups: intermediate_levels) {
             tlx_die_unless(1 < num_groups && num_groups < comm_group.size());
 
-            measuring_tool_.setPhase("sort_globally");
-            measuring_tool_.start("partial_sorting");
-            auto [group_size, sorted_container] =
+            size_t group_size;
+            std::tie(group_size, container) =
                 sort_partial(std::move(container), num_groups, global_lcp_avg, comm_group);
-            container = std::move(sorted_container);
-            measuring_tool_.setPhase("sort_globally");
-            measuring_tool_.stop("partial_sorting");
 
             auto color = comm_group.rank() / group_size;
             auto global_color = comm.rank() / group_size;
@@ -117,11 +112,7 @@ public:
             measuring_tool_.setRound(++round);
         }
 
-        measuring_tool_.setPhase("sort_globally");
-        measuring_tool_.start("final_sorting");
         auto sorted_container = sort_exhaustive(std::move(container), global_lcp_avg, comm_group);
-        measuring_tool_.setPhase("sort_globally");
-        measuring_tool_.stop("final_sorting");
 
         measuring_tool_.setRound(0);
         measuring_tool_.setPhase("none");
@@ -132,11 +123,12 @@ private:
     using MeasuringTool = measurement::MeasuringTool;
     MeasuringTool& measuring_tool_ = MeasuringTool::measuringTool();
 
-    using SampleParams = sample::SampleParams<true, false>;
+    using SampleParams = sample::SampleParams<sample::MaxLength>;
+
     static constexpr auto compute_partition =
         partition::compute_partition<StringPtr, SamplePolicy, SampleParams>;
 
-    std::pair<int, StringLcpContainer> sort_partial(
+    std::pair<size_t, StringLcpContainer> sort_partial(
         StringLcpContainer&& container,
         size_t num_groups,
         size_t global_lcp_avg,
@@ -147,6 +139,8 @@ private:
         auto string_ptr{container.make_string_lcp_ptr()};
         auto group_size{comm.size() / num_groups};
 
+        measuring_tool_.setPhase("sort_globally");
+        measuring_tool_.start("partial_sorting");
         measuring_tool_.add(num_groups, "num_groups");
         measuring_tool_.add(group_size, "group_size");
 
@@ -154,7 +148,7 @@ private:
 
         // todo why the *100 here
         // todo make sampling_factor variable
-        SampleParams params{{2 * 100 * global_lcp_avg}, {}, num_groups, 2};
+        SampleParams params{num_groups, 2, {2 * 100 * global_lcp_avg}};
         auto interval_sizes{compute_partition(string_ptr, params, comm)};
 
         auto group_offset{comm.rank() / num_groups};
@@ -168,6 +162,10 @@ private:
         }
 
         auto sorted_container = exchange_and_merge(std::move(container), send_counts, comm);
+
+        measuring_tool_.setPhase("sort_globally");
+        measuring_tool_.stop("partial_sorting");
+
         return {group_size, std::move(sorted_container)};
     }
 
@@ -176,16 +174,22 @@ private:
     ) {
         auto string_ptr = container.make_string_lcp_ptr();
 
+        measuring_tool_.setPhase("sort_globally");
+        measuring_tool_.start("final_sorting");
         measuring_tool_.add(container.size(), "num_strings");
 
         measuring_tool_.setPhase("bucket_computation");
 
         // todo why the *100 here
         // todo make sampling_factor variable
-        SampleParams params{{2 * 100 * global_lcp_avg}, {}, comm.size(), 2};
+        SampleParams params{comm.size(), 2, {2 * 100 * global_lcp_avg}};
         auto interval_sizes = compute_partition(string_ptr, params, comm);
+        auto sorted_container = exchange_and_merge(std::move(container), interval_sizes, comm);
 
-        return exchange_and_merge(std::move(container), interval_sizes, comm);
+        measuring_tool_.setPhase("sort_globally");
+        measuring_tool_.stop("final_sorting");
+
+        return std::move(sorted_container);
     }
 
     StringLcpContainer exchange_and_merge(

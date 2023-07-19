@@ -19,7 +19,6 @@
 #include "mpi/environment.hpp"
 #include "sorter/RQuick/RQuick.hpp"
 #include "sorter/distributed/duplicateSorting.hpp"
-#include "sorter/distributed/sample.hpp"
 #include "strings/stringcontainer.hpp"
 #include "strings/stringtools.hpp"
 
@@ -364,9 +363,9 @@ static inline int binarySearchIndexed(
     return left - ss.begin();
 }
 
-template <typename StringSet>
+template <typename StringSet, typename SplitterSet>
 inline std::vector<size_t>
-compute_interval_binary(StringSet const& ss, StringSet const& splitters) {
+compute_interval_binary(StringSet const& ss, SplitterSet const& splitters) {
     using CharIt = typename StringSet::CharIterator;
     std::vector<size_t> intervals;
     intervals.reserve(splitters.size() + 1);
@@ -381,9 +380,9 @@ compute_interval_binary(StringSet const& ss, StringSet const& splitters) {
     return intervals;
 }
 
-template <typename StringSet> // TODO
+template <typename StringSet, typename SplitterSet>
 inline std::vector<size_t> compute_interval_binary_index(
-    StringSet const& ss, UCharLengthIndexStringSet const& splitters, const uint64_t localOffset
+    StringSet const& ss, SplitterSet const& splitters, const uint64_t localOffset
 ) {
     // using CharIt = typename StringSet::CharIterator;
     std::vector<size_t> intervals;

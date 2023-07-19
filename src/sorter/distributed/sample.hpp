@@ -24,26 +24,29 @@
 namespace dss_mehnert {
 namespace sample {
 
-template <bool enable>
-struct MaxLength {};
+template <typename T, typename... Args>
+struct is_present {
+    static constexpr bool value{(std::is_same_v<T, Args> || ...)};
+};
 
-template <>
-struct MaxLength<true> {
+struct MaxLength {
     size_t max_length;
 };
 
-template <bool enable>
-struct DistPrefixes {};
-
-template <>
-struct DistPrefixes<true> {
+struct DistPrefixes {
     std::vector<size_t> const& prefixes;
 };
 
-template <bool max_length, bool dist_prefixes>
-struct SampleParams : public MaxLength<max_length>, public DistPrefixes<dist_prefixes> {
-    static constexpr bool has_max_length = max_length;
-    static constexpr bool has_dist_prefixes = dist_prefixes;
+template <typename... Args>
+struct SampleParams : public Args... {
+    static constexpr bool has_max_length{is_present<MaxLength, Args...>::value};
+    static constexpr bool has_dist_prefixes{is_present<DistPrefixes, Args...>::value};
+
+    // todo is this constructor really necessary
+    SampleParams(uint64_t num_partitions_, uint64_t sampling_factor_, Args... args)
+        : Args(args)...,
+          num_partitions(num_partitions_),
+          sampling_factor(sampling_factor_) {}
 
     uint64_t num_partitions;
     uint64_t sampling_factor;
@@ -52,8 +55,6 @@ struct SampleParams : public MaxLength<max_length>, public DistPrefixes<dist_pre
         return std::min(sampling_factor * (num_partitions - 1), local_size);
     }
 };
-
-static_assert(sizeof(SampleParams<false, false>) == 16);
 
 inline size_t get_local_offset(size_t local_size, Communicator const& comm) {
     using namespace kamping;
