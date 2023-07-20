@@ -18,6 +18,8 @@
  *
  *******************************************************************************
  * Copyright (C) 2015 Timo Bingmann <tb@panthema.net>
+ * Copyright (C) 2019 Matthias Schimek
+ * Copyright (C) 2023 Pascal Mehnert
  *
  * This program is free software: you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the Free
@@ -37,6 +39,7 @@
 #define PSS_SRC_TOOLS_STRINGSET_HEADER
 
 #include <cassert>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -148,8 +151,7 @@ public:
     get_char_uint8_simple(const typename Traits::String& s, typename Traits::CharIterator i) const {
         StringSet const& ss = *static_cast<StringSet const*>(this);
 
-        if (ss.is_end(s, i))
-            return 0;
+        if (ss.is_end(s, i)) return 0;
         return uint8_t(*i);
     }
 
@@ -161,12 +163,10 @@ public:
         StringSet const& ss = *static_cast<StringSet const*>(this);
 
         uint16_t v = 0;
-        if (ss.is_end(s, i))
-            return v;
+        if (ss.is_end(s, i)) return v;
         v = (uint16_t(*i) << 8);
         ++i;
-        if (ss.is_end(s, i))
-            return v;
+        if (ss.is_end(s, i)) return v;
         v |= (uint16_t(*i) << 0);
         return v;
     }
@@ -179,20 +179,16 @@ public:
         StringSet const& ss = *static_cast<StringSet const*>(this);
 
         uint32_t v = 0;
-        if (ss.is_end(s, i))
-            return v;
+        if (ss.is_end(s, i)) return v;
         v = (uint32_t(*i) << 24);
         ++i;
-        if (ss.is_end(s, i))
-            return v;
+        if (ss.is_end(s, i)) return v;
         v |= (uint32_t(*i) << 16);
         ++i;
-        if (ss.is_end(s, i))
-            return v;
+        if (ss.is_end(s, i)) return v;
         v |= (uint32_t(*i) << 8);
         ++i;
-        if (ss.is_end(s, i))
-            return v;
+        if (ss.is_end(s, i)) return v;
         v |= (uint32_t(*i) << 0);
         return v;
     }
@@ -205,36 +201,28 @@ public:
         StringSet const& ss = *static_cast<StringSet const*>(this);
 
         uint64_t v = 0;
-        if (ss.is_end(s, i))
-            return v;
+        if (ss.is_end(s, i)) return v;
         v = (uint64_t(*i) << 56);
         ++i;
-        if (ss.is_end(s, i))
-            return v;
+        if (ss.is_end(s, i)) return v;
         v |= (uint64_t(*i) << 48);
         ++i;
-        if (ss.is_end(s, i))
-            return v;
+        if (ss.is_end(s, i)) return v;
         v |= (uint64_t(*i) << 40);
         ++i;
-        if (ss.is_end(s, i))
-            return v;
+        if (ss.is_end(s, i)) return v;
         v |= (uint64_t(*i) << 32);
         ++i;
-        if (ss.is_end(s, i))
-            return v;
+        if (ss.is_end(s, i)) return v;
         v |= (uint64_t(*i) << 24);
         ++i;
-        if (ss.is_end(s, i))
-            return v;
+        if (ss.is_end(s, i)) return v;
         v |= (uint64_t(*i) << 16);
         ++i;
-        if (ss.is_end(s, i))
-            return v;
+        if (ss.is_end(s, i)) return v;
         v |= (uint64_t(*i) << 8);
         ++i;
-        if (ss.is_end(s, i))
-            return v;
+        if (ss.is_end(s, i)) return v;
         v |= (uint64_t(*i) << 0);
         return v;
     }
@@ -279,23 +267,19 @@ public:
         typename StringSet::CharIterator c1 = ss.get_chars(s1, 0);
         typename StringSet::CharIterator c2 = ss.get_chars(s2, 0);
 
-        while (ss.is_equal(s1, c1, s2, c2))
-            ++c1, ++c2;
+        while (ss.is_equal(s1, c1, s2, c2)) ++c1, ++c2;
 
-        if (!ss.is_leq(s1, c1, s2, c2))
-            return false;
+        if (!ss.is_leq(s1, c1, s2, c2)) return false;
 
         return true;
     }
 
     bool check_order() const {
         StringSet const& ss = *static_cast<StringSet const*>(this);
-        if (ss.size() == 0)
-            return true;
+        if (ss.size() == 0) return true;
 
         for (typename Traits::Iterator pi = ss.begin() + 1; pi != ss.end(); ++pi) {
-            if (!check_order(ss[pi - 1], ss[pi]))
-                return false;
+            if (!check_order(ss[pi - 1], ss[pi])) return false;
         }
 
         return true;
@@ -352,187 +336,95 @@ Type get_key(StringSet const& ss, const typename StringSet::String& s, size_t de
 
 /******************************************************************************/
 
-/*!
- * Traits class implementing StringSet concept for char* and unsigned char*
- * strings.
- */
-template <typename CharType>
-class GenericCharStringSetTraits {
-public:
-    //! exported alias for character type
-    typedef CharType Char;
+struct Length {
+    size_t length;
 
-    //! String reference: pointer to first character
-    typedef Char* String;
+    size_t value() const { return length; }
 
-    //! Iterator over string references: pointer over pointers
-    typedef String* Iterator;
-
-    //! iterator of characters in a string
-    typedef Char const* CharIterator;
-
-    //! exported alias for assumed string container
-    typedef std::pair<Iterator, size_t> Container;
+    inline size_t getLength() const { return length; }
 };
 
-/*!
- * Class implementing StringSet concept for char* and unsigned char* strings.
- */
-template <typename CharType>
-class GenericCharStringSet
-    : public GenericCharStringSetTraits<CharType>,
-      public StringSetBase<GenericCharStringSet<CharType>, GenericCharStringSetTraits<CharType>> {
-public:
-    typedef GenericCharStringSetTraits<CharType> Traits;
+struct Index {
+    uint64_t index; // todo is u64 the right type here?
 
-    typedef typename Traits::Char Char;
-    typedef typename Traits::String String;
-    typedef typename Traits::Iterator Iterator;
-    typedef typename Traits::CharIterator CharIterator;
-    typedef typename Traits::Container Container;
+    size_t value() const { return index; }
 
-    //! Construct from begin and end string pointers
-    GenericCharStringSet(Iterator begin, Iterator end) : begin_(begin), end_(end) {}
-
-    //! Construct from a string container
-    explicit GenericCharStringSet(Container const& c) : begin_(c.first), end_(c.first + c.second) {}
-
-    //! Return size of string array
-    size_t size() const { return end_ - begin_; }
-    //! Iterator representing first String position
-    Iterator begin() const { return begin_; }
-    //! Iterator representing beyond last String position
-    Iterator end() const { return end_; }
-
-    //! Iterator-based array access (readable and writable) to String objects.
-    String& operator[](Iterator i) const { return *i; }
-
-    //! Return CharIterator for referenced string, which belong to this set.
-    CharIterator get_chars(String const& s, size_t depth) const { return s + depth; }
-
-    //! Returns true if CharIterator is at end of the given String
-    bool is_end(String const&, CharIterator const& i) const { return (*i == 0); }
-
-    //! Return complete string (for debugging purposes)
-    std::string get_string(String const& s, size_t depth = 0) const {
-        return std::string(reinterpret_cast<char const*>(s) + depth);
-    }
-
-    //! Subset this string set using iterator range.
-    GenericCharStringSet sub(Iterator begin, Iterator end) const {
-        return GenericCharStringSet(begin, end);
-    }
-
-    //! Allocate a new temporary string container with n empty Strings
-    static Container allocate(size_t n) { return std::make_pair(new String[n], n); }
-
-    //! Deallocate a temporary string container
-    static void deallocate(Container& c) {
-        delete[] c.first;
-        c.first = NULL;
-    }
-
-    //! \name CharIterator Comparisons
-    //! \{
-
-    //! check equality of two strings a and b at char iterators ai and bi.
-    bool
-    is_equal(String const&, CharIterator const& ai, String const&, CharIterator const& bi) const {
-        return (*ai == *bi) && (*ai != 0);
-    }
-
-    //! check if string a is less or equal to string b at iterators ai and bi.
-    bool
-    is_less(String const&, CharIterator const& ai, String const&, CharIterator const& bi) const {
-        return (*ai < *bi);
-    }
-
-    //! check if string a is less or equal to string b at iterators ai and bi.
-    bool
-    is_leq(String const&, CharIterator const& ai, String const&, CharIterator const& bi) const {
-        return (*ai <= *bi);
-    }
-
-    //! \}
-
-    //! \name Character Extractors
-    //! \{
-
-    //! Return up to 1 characters of string s at iterator i packed into a uint8
-    //! (only works correctly for 8-bit characters)
-    uint8_t get_char_uint8_simple(String const&, CharIterator i) const { return uint8_t(*i); }
-
-    //! \}
-
-    void print() const {
-        size_t i = 0;
-        for (Iterator pi = begin(); pi != end(); ++pi) {
-            LOG1 << "[" << i++ << "] = " << *pi << " = " << get_string(*pi, 0);
-        }
-    }
-
-    size_t get_length(String const& str) const {
-        size_t length = 0;
-        CharIterator it = get_chars(str, 0);
-        while (*it != 0) {
-            ++length;
-            ++it;
-        }
-        return length;
-    }
-
-    static String empty_string() {
-        static Char zero = 0;
-        return &zero;
-    }
-
-    static std::string getName() { return "GenericCharStringSet"; }
-
-protected:
-    //! array of string pointers
-    Iterator begin_, end_;
+    inline uint64_t getIndex() const { return index; }
 };
 
-typedef GenericCharStringSet<char> CharStringSet;
-typedef GenericCharStringSet<unsigned char> UCharStringSet;
-/******************************************************************************/
+struct PEIndex {
+    size_t PEIndex;
 
-template <typename String, typename Length = size_t>
-struct StringLengthIndex {
-    StringLengthIndex() : string(nullptr), length(0), index(0) {}
-    StringLengthIndex(const String string, const Length length, const uint64_t index)
-        : string(string),
-          length(length),
-          index(index) {}
-    StringLengthIndex(const String string, const Length length)
-        : string(string),
-          length(length),
-          index(0) {}
+    size_t value() const { return PEIndex; }
+
+    inline size_t getPEIndex() const { return PEIndex; }
+};
+
+// todo replace usages of StringIndex with Index
+struct StringIndex {
+    size_t stringIndex;
+
+    size_t value() const { return stringIndex; }
+
+    inline size_t getStringIndex() { return stringIndex; }
+};
+
+template <typename String, typename... Args>
+struct StringData : public Args... {
+    template <typename T>
+    static constexpr bool has_member{(std::is_same_v<T, Args> || ...)};
+
+    StringData() = default;
+
+    template <typename... Init>
+    StringData(String string, Init... args) : Init{args}...,
+                                              string{string} {}
+
     String string;
-    Length length;
-    uint64_t index;
-    inline void setChars(String newString) { string = newString; }
+
+    inline void setChars(String string_) { string = string_; }
+
     inline String getChars() { return string; }
-    inline Length getLength() { return length; }
 };
 
-template <typename String, typename Length>
-std::ostream& operator<<(std::ostream& out, StringLengthIndex<String, Length> const& str_length) {
-    return out << "[" << str_length.string << "," << str_length.length << "," << str_length.index
-               << "]";
+template <typename Data, typename T>
+inline constexpr bool has_member = Data::template has_member<T>;
+
+template <typename String>
+using StringOnly = StringData<String>;
+
+template <typename String>
+using StringLength = StringData<String, Length>;
+
+template <typename String>
+using StringLengthIndex = StringData<String, Length, Index>;
+
+template <typename String>
+using StringStringIndexPEIndex = StringData<String, StringIndex, PEIndex>;
+
+template <typename String>
+using StringLengthStringIndexPEIndex = StringData<String, Length, StringIndex, PEIndex>;
+
+template <typename String, typename... Args>
+std::ostream& operator<<(std::ostream& out, StringData<String, Args...> const& str) {
+    out << "[";
+    (str.string == nullptr) ? out << "(null)" : out << str.string;
+    ((out << ", " << static_cast<Args>(str).value()), ...);
+    return out << "]";
 }
+
 /*!
  * Traits class implementing StringSet concept for char* and unsigned char*
  * strings with additional length attribute.
  */
-template <typename CharType>
-class GenericCharLengthIndexStringSetTraits {
+template <typename CharType, template <typename> typename Data_>
+class GenericStringSetTraits {
 public:
     //! exported alias for character type
     using Char = CharType;
 
     //! String reference: pointer to first character
-    using String = StringLengthIndex<Char*>;
+    using String = Data_<Char*>;
 
     //! Iterator over string references: pointer over pointers
     typedef String* Iterator;
@@ -548,13 +440,13 @@ public:
  * Class implementing StringSet concept for char* and unsigned char* strings
  * with additional length attribute.
  */
-template <typename CharType>
-class GenericCharLengthIndexStringSet : public GenericCharLengthIndexStringSetTraits<CharType>,
-                                        public StringSetBase<
-                                            GenericCharLengthIndexStringSet<CharType>,
-                                            GenericCharLengthIndexStringSetTraits<CharType>> {
+template <typename CharType, template <typename> typename Data_>
+class GenericStringSet : public GenericStringSetTraits<CharType, Data_>,
+                         public StringSetBase<
+                             GenericStringSet<CharType, Data_>,
+                             GenericStringSetTraits<CharType, Data_>> {
 public:
-    typedef GenericCharLengthIndexStringSetTraits<CharType> Traits;
+    typedef GenericStringSetTraits<CharType, Data_> Traits;
 
     typedef typename Traits::Char Char;
     typedef typename Traits::String String;
@@ -563,17 +455,17 @@ public:
     typedef typename Traits::Container Container;
 
     //! Construct from begin and end string pointers
-    GenericCharLengthIndexStringSet(Iterator begin, Iterator end) : begin_(begin), end_(end) {}
+    GenericStringSet(Iterator begin, Iterator end) : begin_(begin), end_(end) {}
 
     //! Construct from a string container
-    explicit GenericCharLengthIndexStringSet(Container const& c)
-        : begin_(c.first),
-          end_(c.first + c.second) {}
+    explicit GenericStringSet(Container const& c) : begin_(c.first), end_(c.first + c.second) {}
 
     //! Return size of string array
     size_t size() const { return end_ - begin_; }
+
     //! Iterator representing first String position
     Iterator begin() const { return begin_; }
+
     //! Iterator representing beyond last String position
     Iterator end() const { return end_; }
 
@@ -591,9 +483,10 @@ public:
         return std::string(reinterpret_cast<char const*>(s.string) + depth);
     }
 
+    // todo is this actually returning This?
     //! Subset this string set using iterator range.
-    GenericCharLengthIndexStringSet sub(Iterator begin, Iterator end) const {
-        return GenericCharLengthIndexStringSet(begin, end);
+    GenericStringSet sub(Iterator begin, Iterator end) const {
+        return GenericStringSet(begin, end);
     }
 
     //! Allocate a new temporary string container with n empty Strings
@@ -605,38 +498,35 @@ public:
         c.first = NULL;
     }
 
-    //! \name CharIterator Comparisons
-    //! \{
-
     //! check equality of two strings a and b at char iterators ai and bi.
     bool is_equal(String const& a, CharIterator const& ai, String const& b, CharIterator const& bi)
         const {
-        if (*ai == *bi && *ai == 0) {
-            return a.index == b.index;
+        if constexpr (has_member<String, Index>) {
+            return (*ai == *bi) && ((*ai != 0) || (a.index == b.index));
+        } else {
+            return (*ai == *bi) && (*ai != 0);
         }
-        return (*ai == *bi);
     }
 
     //! check if string a is less or equal to string b at iterators ai and bi.
     bool is_less(String const& a, CharIterator const& ai, String const& b, CharIterator const& bi)
         const {
-        if (*ai == 0 && *bi == 0)
-            return a.index < b.index;
-        return (*ai < *bi);
+        if constexpr (has_member<String, Index>) {
+            return (*ai == 0 && *bi == 0) ? (a.index < b.index) : (*ai < *bi);
+        } else {
+            return (*ai < *bi);
+        }
     }
 
     //! check if string a is less or equal to string b at iterators ai and bi.
     bool
     is_leq(String const& a, CharIterator const& ai, String const& b, CharIterator const& bi) const {
-        if (*ai == 0 && *bi == 0)
-            return a.index <= b.index;
-        return (*ai <= *bi);
+        if constexpr (has_member<String, Index>) {
+            return (*ai == 0 && *bi == 0) ? (a.index <= b.index) : (*ai <= *bi);
+        } else {
+            return (*ai <= *bi);
+        }
     }
-
-    //! \}
-
-    //! \name Character Extractors
-    //! \{
 
     //! Return up to 1 characters of string s at iterator i packed into a uint8
     //! (only works correctly for 8-bit characters)
@@ -644,172 +534,7 @@ public:
 
     //! \}
 
-    void print() const {
-        size_t i = 0;
-        for (Iterator pi = begin(); pi != end(); ++pi) {
-            LOG1 << "[" << i++ << "] = " << (*pi) << " = " << get_string(*pi, 0);
-        }
-    }
-
-    static String empty_string() {
-        static Char zeroChar = 0;
-        static String zero(&zeroChar, 0);
-        return zero;
-    }
-
-    size_t get_length(String const& str) const { return str.length; }
-
-    uint64_t get_index(String const& str) const { return str.index; }
-
-    static std::string getName() { return "GenericCharLengthIndexStringSet"; }
-
-protected:
-    //! array of string pointers
-    Iterator begin_, end_;
-};
-typedef GenericCharLengthIndexStringSet<char> CharLengthIndexStringSet;
-typedef GenericCharLengthIndexStringSet<unsigned char> UCharLengthIndexStringSet;
-
-/******************************************************************************/
-
-template <typename String, typename Length = size_t>
-struct StringLength {
-    StringLength() : string(nullptr), length(0) {}
-    StringLength(const String string, const Length length) : string(string), length(length) {}
-    String string;
-    Length length;
-    inline void setChars(String newString) { string = newString; }
-    inline String getChars() { return string; }
-    inline Length getLength() { return length; }
-};
-
-template <typename String, typename Length>
-std::ostream& operator<<(std::ostream& out, StringLength<String, Length> const& str_length) {
-    return out << "[" << str_length.string << "," << str_length.length << "]";
-}
-/*!
- * Traits class implementing StringSet concept for char* and unsigned char*
- * strings with additional length attribute.
- */
-template <typename CharType>
-class GenericCharLengthStringSetTraits {
-public:
-    //! exported alias for character type
-    using Char = CharType;
-
-    //! String reference: pointer to first character
-    using String = StringLength<Char*>;
-
-    //! Iterator over string references: pointer over pointers
-    typedef String* Iterator;
-
-    //! iterator of characters in a string
-    typedef Char const* CharIterator;
-
-    //! exported alias for assumed string container
-    typedef std::pair<Iterator, size_t> Container;
-};
-
-/*!
- * Class implementing StringSet concept for char* and unsigned char* strings
- * with additional length attribute.
- */
-template <typename CharType>
-class GenericCharLengthStringSet : public GenericCharLengthStringSetTraits<CharType>,
-                                   public StringSetBase<
-                                       GenericCharLengthStringSet<CharType>,
-                                       GenericCharLengthStringSetTraits<CharType>> {
-public:
-    typedef GenericCharLengthStringSetTraits<CharType> Traits;
-
-    typedef typename Traits::Char Char;
-    typedef typename Traits::String String;
-    typedef typename Traits::Iterator Iterator;
-    typedef typename Traits::CharIterator CharIterator;
-    typedef typename Traits::Container Container;
-
-    //! Construct from begin and end string pointers
-    GenericCharLengthStringSet(Iterator begin, Iterator end) : begin_(begin), end_(end) {}
-
-    //! Construct from a string container
-    explicit GenericCharLengthStringSet(Container const& c)
-        : begin_(c.first),
-          end_(c.first + c.second) {}
-
-    //! Return size of string array
-    size_t size() const { return end_ - begin_; }
-    //! Iterator representing first String position
-    Iterator begin() const { return begin_; }
-    //! Iterator representing beyond last String position
-    Iterator end() const { return end_; }
-
-    //! Iterator-based array access (readable and writable) to String objects.
-    String& operator[](Iterator i) const { return *i; }
-
-    //! Return CharIterator for referenced string, which belong to this set.
-    CharIterator get_chars(String const& s, size_t depth) const { return s.string + depth; }
-
-    //! Returns true if CharIterator is at end of the given String
-    bool is_end(String const&, CharIterator const& i) const { return (*i == 0); }
-
-    //! Return complete string (for debugging purposes)
-    std::string get_string(String const& s, size_t depth = 0) const {
-        return std::string(reinterpret_cast<char const*>(s.string) + depth);
-    }
-
-    //! Subset this string set using iterator range.
-    GenericCharLengthStringSet sub(Iterator begin, Iterator end) const {
-        return GenericCharLengthStringSet(begin, end);
-    }
-
-    //! Allocate a new temporary string container with n empty Strings
-    static Container allocate(size_t n) { return std::make_pair(new String[n], n); }
-
-    //! Deallocate a temporary string container
-    static void deallocate(Container& c) {
-        delete[] c.first;
-        c.first = NULL;
-    }
-
-    //! \name CharIterator Comparisons
-    //! \{
-
-    //! check equality of two strings a and b at char iterators ai and bi.
-    bool
-    is_equal(String const&, CharIterator const& ai, String const&, CharIterator const& bi) const {
-        return (*ai == *bi) && (*ai != 0);
-    }
-
-    //! check if string a is less or equal to string b at iterators ai and bi.
-    bool
-    is_less(String const&, CharIterator const& ai, String const&, CharIterator const& bi) const {
-        return (*ai < *bi);
-    }
-
-    //! check if string a is less or equal to string b at iterators ai and bi.
-    bool
-    is_leq(String const&, CharIterator const& ai, String const&, CharIterator const& bi) const {
-        return (*ai <= *bi);
-    }
-
-    //! \}
-
-    //! \name Character Extractors
-    //! \{
-
-    //! Return up to 1 characters of string s at iterator i packed into a uint8
-    //! (only works correctly for 8-bit characters)
-    uint8_t get_char_uint8_simple(String const&, CharIterator i) const { return uint8_t(*i); }
-
-    //! \}
-
-    void print() const {
-        size_t i = 0;
-        for (Iterator pi = begin(); pi != end(); ++pi) {
-            LOG1 << "[" << i++ << "] = " << (*pi) << " = " << get_string(*pi, 0);
-        }
-    }
-    void print(std::string const& prefix) const {
+    void print(std::string_view prefix = "") const {
         size_t i = 0;
         for (Iterator pi = begin(); pi != end(); ++pi) {
             LOG1 << prefix << "[" << i++ << "] = " << (*pi) << " = " << get_string(*pi, 0);
@@ -817,193 +542,71 @@ public:
     }
 
     static String empty_string() {
-        static Char zeroChar = 0;
-        static String zero(&zeroChar, 0);
-        return zero;
-    }
-
-    size_t get_length(String const& str) const { return str.length; }
-
-    static std::string getName() { return "GenericCharLengthStringSet"; }
-
-protected:
-    //! array of string pointers
-    Iterator begin_, end_;
-};
-
-typedef GenericCharLengthStringSet<char> CharLengthStringSet;
-typedef GenericCharLengthStringSet<unsigned char> UCharLengthStringSet;
-
-/******************************************************************************/
-
-template <typename String>
-struct StringStringIndexPEIndex {
-    StringStringIndexPEIndex() : string(nullptr), stringIndex(0), PEIndex(0) {}
-    StringStringIndexPEIndex(const String string, const size_t stringIndex, const size_t PEIndex)
-        : string(string),
-          stringIndex(stringIndex),
-          PEIndex(PEIndex) {}
-    String string;
-    size_t stringIndex;
-    size_t PEIndex;
-};
-
-template <typename String>
-std::ostream& operator<<(std::ostream& out, StringStringIndexPEIndex<String> const& str) {
-    return out << "[" << str.string << "," << str.stringIndex << ", " << str.PEIndex << "]";
-}
-/*!
- * Traits class implementing StringSet concept for char* and unsigned char*
- * strings with additional length attribute.
- */
-template <typename CharType>
-class GenericCharIndexPEIndexStringSetTraits {
-public:
-    //! exported alias for character type
-    using Char = CharType;
-
-    //! String reference: pointer to first character
-    using String = StringStringIndexPEIndex<Char*>;
-
-    //! Iterator over string references: pointer over pointers
-    typedef String* Iterator;
-
-    //! iterator of characters in a string
-    typedef Char const* CharIterator;
-
-    //! exported alias for assumed string container
-    typedef std::pair<Iterator, size_t> Container;
-};
-
-/*!
- * Class implementing StringSet concept for char* and unsigned char* strings
- * with additional length attribute.
- */
-template <typename CharType>
-class GenericCharIndexPEIndexStringSet : public GenericCharIndexPEIndexStringSetTraits<CharType>,
-                                         public StringSetBase<
-                                             GenericCharIndexPEIndexStringSet<CharType>,
-                                             GenericCharIndexPEIndexStringSetTraits<CharType>> {
-public:
-    typedef GenericCharIndexPEIndexStringSetTraits<CharType> Traits;
-
-    typedef typename Traits::Char Char;
-    typedef typename Traits::String String;
-    typedef typename Traits::Iterator Iterator;
-    typedef typename Traits::CharIterator CharIterator;
-    typedef typename Traits::Container Container;
-
-    //! Construct from begin and end string pointers
-    GenericCharIndexPEIndexStringSet(Iterator begin, Iterator end) : begin_(begin), end_(end) {}
-
-    //! Construct from a string container
-    explicit GenericCharIndexPEIndexStringSet(Container const& c)
-        : begin_(c.first),
-          end_(c.first + c.second) {}
-
-    //! Return size of string array
-    size_t size() const { return end_ - begin_; }
-    //! Iterator representing first String position
-    Iterator begin() const { return begin_; }
-    //! Iterator representing beyond last String position
-    Iterator end() const { return end_; }
-
-    //! Iterator-based array access (readable and writable) to String objects.
-    String& operator[](Iterator i) const { return *i; }
-
-    //! Return CharIterator for referenced string, which belong to this set.
-    CharIterator get_chars(String const& s, size_t depth) const { return s.string + depth; }
-
-    //! Returns true if CharIterator is at end of the given String
-    bool is_end(String const&, CharIterator const& i) const { return (*i == 0); }
-
-    //! Return complete string (for debugging purposes)
-    std::string get_string(String const& s, size_t depth = 0) const {
-        return std::string(reinterpret_cast<char const*>(s.string) + depth);
-    }
-
-    //! Subset this string set using iterator range.
-    GenericCharIndexPEIndexStringSet sub(Iterator begin, Iterator end) const {
-        return GenericCharIndexPEIndexStringSet(begin, end);
-    }
-
-    //! Allocate a new temporary string container with n empty Strings
-    static Container allocate(size_t n) { return std::make_pair(new String[n], n); }
-
-    //! Deallocate a temporary string container
-    static void deallocate(Container& c) {
-        delete[] c.first;
-        c.first = NULL;
-    }
-
-    //! \name CharIterator Comparisons
-    //! \{
-
-    //! check equality of two strings a and b at char iterators ai and bi.
-    bool
-    is_equal(String const&, CharIterator const& ai, String const&, CharIterator const& bi) const {
-        return (*ai == *bi) && (*ai != 0);
-    }
-
-    //! check if string a is less or equal to string b at iterators ai and bi.
-    bool
-    is_less(String const&, CharIterator const& ai, String const&, CharIterator const& bi) const {
-        return (*ai < *bi);
-    }
-
-    //! check if string a is less or equal to string b at iterators ai and bi.
-    bool
-    is_leq(String const&, CharIterator const& ai, String const&, CharIterator const& bi) const {
-        return (*ai <= *bi);
-    }
-
-    //! \}
-
-    //! \name Character Extractors
-    //! \{
-
-    //! Return up to 1 characters of string s at iterator i packed into a uint8
-    //! (only works correctly for 8-bit characters)
-    uint8_t get_char_uint8_simple(String const&, CharIterator i) const { return uint8_t(*i); }
-
-    //! \}
-
-    void print() const {
-        size_t i = 0;
-        for (Iterator pi = begin(); pi != end(); ++pi) {
-            LOG1 << "[" << i++ << "] = " << (*pi) << " = " << get_string(*pi, 0);
-        }
-    }
-
-    static String empty_string() {
-        static String zero(0, 0, 0);
+        static Char zero_char = 0;
+        static String zero{&zero_char};
         return zero;
     }
 
     size_t get_length(String const& str) const {
-        size_t length = 0;
-        CharIterator it = get_chars(str, 0);
-        while (*it != 0) {
-            ++length;
-            ++it;
+        if constexpr (has_member<String, Length>) {
+            return str.length;
+        } else {
+            size_t length = 0;
+            CharIterator it = get_chars(str, 0);
+            while (*it != 0) {
+                ++length;
+                ++it;
+            }
+            return length;
         }
-        return length;
     }
 
-    size_t getIndex(String const& str) const { return str.stringIndex; }
+    template <typename S = String, typename = std::enable_if_t<has_member<S, StringIndex>>>
+    size_t getIndex(String const& str) const {
+        return str.stringIndex;
+    }
 
-    size_t getPEIndex(String const& str) const { return str.PEIndex; }
+    template <typename S = String, typename = std::enable_if_t<has_member<S, PEIndex>>>
+    size_t getPEIndex(String const& str) const {
+        return str.PEIndex;
+    }
 
-    static std::string getName() { return "GenericCharIndexPEIndexStringSet"; }
+    // todo include name of String Type
+    static std::string getName() { return "GenericStringSet"; }
 
 protected:
     //! array of string pointers
     Iterator begin_, end_;
 };
 
-typedef GenericCharIndexPEIndexStringSet<char> CharIndexPEIndexStringSet;
-typedef GenericCharIndexPEIndexStringSet<unsigned char> UCharIndexPEIndexStringSet;
 
+// template <typename Char>
+// using GenericCharStringSet = GenericStringSet<Char, StringOnly>;
+
+// using CharStringSet = GenericCharStringSet<char>;
+// using UCharStringSet = GenericCharStringSet<unsigned char>;
+
+template <typename Char>
+using GenericCharLengthStringSet = GenericStringSet<Char, StringLength>;
+
+using CharLengthStringSet = GenericCharLengthStringSet<char>;
+using UCharLengthStringSet = GenericCharLengthStringSet<unsigned char>;
+
+template <typename Char>
+using GenericCharLengthIndexStringSet = GenericStringSet<Char, StringLengthIndex>;
+
+using CharLengthIndexStringSet = GenericCharLengthIndexStringSet<char>;
+using UCharLengthIndexStringSet = GenericCharLengthIndexStringSet<unsigned char>;
+
+template <typename Char>
+using GenericCharIndexPEIndexStringSet = GenericStringSet<Char, StringStringIndexPEIndex>;
+
+using CharIndexPEIndexStringSet = GenericCharIndexPEIndexStringSet<char>;
+using UCharIndexPEIndexStringSet = GenericCharIndexPEIndexStringSet<unsigned char>;
+
+using CharLengthIndexPEIndexStringSet = GenericStringSet<char, StringLengthStringIndexPEIndex>;
+using UCharLengthIndexPEIndexStringSet =
+    GenericStringSet<unsigned char, StringLengthStringIndexPEIndex>;
 
 } // namespace dss_schimek
 

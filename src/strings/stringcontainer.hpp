@@ -24,13 +24,10 @@ class InitPolicy {
     using Char = typename StringSet::Char;
     using String = typename StringSet::String;
 
-    static constexpr size_t approx_string_length = 10;
-
 public:
     std::vector<String> init_strings(std::vector<Char>& raw_strings) {
         std::vector<String> strings;
-        size_t approx_string_size = raw_strings.size() / approx_string_length;
-        strings.reserve(approx_string_size);
+        strings.reserve(raw_strings.size() / 100);
         for (size_t i = 0; i < raw_strings.size(); ++i) {
             strings.emplace_back(raw_strings.data() + i);
             while (raw_strings[i] != 0) ++i;
@@ -45,23 +42,14 @@ class InitPolicy<GenericCharLengthStringSet<CharType>> {
     using Char = typename StringSet::Char;
     using String = typename StringSet::String;
 
-    static constexpr size_t approx_string_length = 10;
-
 public:
     std::vector<String> init_strings(std::vector<Char>& raw_strings) {
-        // size_t stringNum = 0;
-        // for (size_t i = 0; i < raw_strings.size(); ++i) {
-        //    while (raw_strings[i] != 0)
-        //        ++i;
-        //    ++stringNum;
-        //}
-
         std::vector<String> strings;
         strings.reserve(raw_strings.size() / 100); // just a guess
         for (size_t i = 0; i < raw_strings.size(); ++i) {
-            strings.emplace_back(raw_strings.data() + i, i);
+            size_t begin = i;
             while (raw_strings[i] != 0) ++i;
-            strings.back().length = i - strings.back().length;
+            strings.emplace_back(raw_strings.data() + begin, Length{i - begin});
         }
         return strings;
     }
@@ -73,45 +61,30 @@ class InitPolicy<GenericCharLengthIndexStringSet<CharType>> {
     using Char = typename StringSet::Char;
     using String = typename StringSet::String;
 
-    static constexpr size_t approx_string_length = 10;
-
 public:
     std::vector<String> init_strings(std::vector<Char>& raw_strings) {
-        // size_t stringNum = 0;
-        // for (size_t i = 0; i < raw_strings.size(); ++i) {
-        //    while (raw_strings[i] != 0)
-        //        ++i;
-        //    ++stringNum;
-        //}
-
         std::vector<String> strings;
         strings.reserve(raw_strings.size() / 100); // just a guess
-        size_t curString = 0;
-        for (size_t i = 0; i < raw_strings.size(); ++i) {
-            strings.emplace_back(raw_strings.data() + i, i, curString);
+        for (size_t i = 0, string = 0; i < raw_strings.size(); ++i, ++string) {
+            size_t begin = i;
             while (raw_strings[i] != 0) ++i;
-            strings.back().length = i - strings.back().length;
-            ++curString;
+            strings.emplace_back(raw_strings.data() + begin, Length{i - begin}, Index{string});
         }
         return strings;
     }
+
     std::vector<String>
     init_strings(std::vector<Char>& raw_strings, std::vector<uint64_t> const& stringIndices) {
-        // size_t stringNum = 0;
-        // for (size_t i = 0; i < raw_strings.size(); ++i) {
-        //    while (raw_strings[i] != 0)
-        //        ++i;
-        //    ++stringNum;
-        //}
-
         std::vector<String> strings;
         strings.reserve(raw_strings.size() / 100); // just a guess
-        size_t curString = 0;
-        for (size_t i = 0; i < raw_strings.size(); ++i) {
-            strings.emplace_back(raw_strings.data() + i, i, stringIndices[curString]);
+        for (size_t i = 0, string = 0; i < raw_strings.size(); ++i, ++string) {
+            size_t begin = i;
             while (raw_strings[i] != 0) ++i;
-            strings.back().length = i - strings.back().length;
-            ++curString;
+            strings.emplace_back(
+                raw_strings.data() + begin,
+                Length{i - begin},
+                Index{stringIndices[string]}
+            );
         }
         return strings;
     }
@@ -123,29 +96,26 @@ class InitPolicy<GenericCharIndexPEIndexStringSet<CharType>> {
     using Char = typename StringSet::Char;
     using String = typename StringSet::String;
 
-    static constexpr size_t approx_string_length = 10;
-
 public:
     std::vector<String> init_strings(
         std::vector<Char>& raw_strings,
-        std::vector<size_t> const& intervalSizes,
+        std::vector<size_t> const& intervals,
         std::vector<size_t> const& offsets
     ) {
         std::vector<String> strings;
-        size_t numStrings =
-            std::accumulate(intervalSizes.begin(), intervalSizes.end(), static_cast<size_t>(0u));
-        strings.reserve(numStrings);
-        size_t curOffset = 0;
+        size_t num_strs = std::accumulate(intervals.begin(), intervals.end(), 0);
+        strings.reserve(num_strs);
+        size_t char_idx = 0;
 
-        for (size_t curPEIndex = 0; curPEIndex < intervalSizes.size(); ++curPEIndex) {
-            for (size_t stringIndex = 0; stringIndex < intervalSizes[curPEIndex]; ++stringIndex) {
+        for (size_t PE_idx = 0; PE_idx < intervals.size(); ++PE_idx) {
+            for (size_t str_idx = 0; str_idx < intervals[PE_idx]; ++str_idx) {
                 strings.emplace_back(
-                    raw_strings.data() + curOffset,
-                    offsets[curPEIndex] + stringIndex,
-                    curPEIndex
+                    raw_strings.data() + char_idx,
+                    StringIndex{offsets[PE_idx] + str_idx},
+                    PEIndex{PE_idx}
                 );
-                while (raw_strings[curOffset] != 0) ++curOffset;
-                ++curOffset;
+                while (raw_strings[char_idx] != 0) ++char_idx;
+                ++char_idx;
             }
         }
         return strings;
@@ -158,7 +128,10 @@ public:
     ) {
         std::vector<String> strings(PE_indices.size());
         for (size_t offset = 0, idx = 0; auto& str: strings) {
-            str = {raw_strings.data() + offset, str_indices[idx], PE_indices[idx]};
+            str = {
+                raw_strings.data() + offset,
+                StringIndex{str_indices[idx]},
+                PEIndex{PE_indices[idx]}};
 
             while (raw_strings[offset] != 0) ++offset;
             ++offset, ++idx;
@@ -446,8 +419,6 @@ protected:
     }
 };
 
-using StringLcpContainerUChar = StringLcpContainer<UCharStringSet>;
-
 template <typename StringSet_>
 class IndexStringLcpContainer : private InitPolicy<StringSet_> {
 public:
@@ -460,13 +431,6 @@ public:
         : raw_strings_(std::make_unique<std::vector<Char>>()),
           strings_(),
           lcps_() {}
-
-    // IndexStringLcpContainer(std::vector<Char>&& raw_strings)
-    //    : raw_strings_(
-    //          std::make_unique<std::vector<Char>>(std::move(raw_strings))) {
-    //    update_strings();
-    //    lcps_.resize(size(), 0);
-    //}
 
     explicit IndexStringLcpContainer(
         std::vector<Char>&& raw_strings, std::vector<uint64_t>& indices

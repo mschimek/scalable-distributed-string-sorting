@@ -40,6 +40,7 @@
 #include "./BinTreeMedianSelection.hpp"
 #include "./RandomBitStore.hpp"
 #include "sorter/distributed/duplicateSorting.hpp"
+#include "strings/stringset.hpp"
 #include "util/measuringTool.hpp"
 
 namespace Tools {
@@ -521,9 +522,13 @@ StringContainer sortRec(
     }
 
     tracker.median_select_t.stop();
-    String pivotString(pivot.rawStrings.data(), pivot.rawStrings.size() - 1);
-    if constexpr (StringContainer::isIndexed)
-        pivotString.index = pivot.indices.front();
+    String pivotString;
+    dss_schimek::Length len{pivot.rawStrings.size() - 1};
+    if constexpr (StringContainer::isIndexed) {
+        pivotString = {pivot.rawStrings.data(), len, dss_schimek::Index{pivot.indices.front()}};
+    } else {
+        pivotString = {pivot.rawStrings.data(), len};
+    }
     // measuringTool.stop("Splitter_median_select");
 
     // Partition data into small elements and large elements.
