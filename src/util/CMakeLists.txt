@@ -6,8 +6,6 @@ target_sources(dss_base
         measurements.hpp
         random_string_generator.hpp
         string.hpp
-        string_set.cpp
-        string_set.hpp
         structs.hpp
         timer.hpp
 )
