@@ -215,8 +215,7 @@ public:
             if (adressEndByteOfString < raw_strings_->data()
                 || adressEndByteOfString >= raw_strings_->data() + raw_strings_->size())
                 return false;
-            if (*adressEndByteOfString != 0)
-                return false;
+            if (*adressEndByteOfString != 0) return false;
         }
         return true;
     }
@@ -237,69 +236,46 @@ public:
 
     void saveLcps() { savedLcps_ = lcps_; }
 
-    template <typename StringSet>
-    void extendPrefix(StringSet ss, std::vector<size_t> const& lcps) {
-        using String = typename StringSet::String;
+    template <typename StringSet, typename LcpIt>
+    void extendPrefix(StringSet ss, LcpIt first_lcp, LcpIt last_lcp) {
+        assert(std::distance(first_lcp, last_lcp) == std::ssize(ss));
+
         using Char = typename StringSet::Char;
-        using CharIt = typename StringSet::CharIterator;
-        const size_t initialPrefixLengthGuess = 10000u;
 
-        if (ss.size() == 0u)
-            return;
+        if (ss.size() == 0u) return;
 
-        const size_t L = std::accumulate(lcps.begin(), lcps.end(), static_cast<size_t>(0u));
-        std::vector<Char> extendedRawStrings(char_size() + L);
+        size_t L = std::accumulate(first_lcp, last_lcp, static_cast<size_t>(0u));
+        std::vector<Char> raw_strings(char_size() + L);
 
-        std::vector<Char> curPrefix;
-        curPrefix.reserve(initialPrefixLengthGuess);
+        auto& fst_str = ss[ss.begin()];
+        auto const fst_str_begin = ss.get_chars(fst_str, 0);
+        auto const fst_str_len = ss.get_length(fst_str) + 1;
+        std::copy(fst_str_begin, fst_str_begin + fst_str_len, raw_strings.begin());
 
-        String curString = ss[ss.begin()];
-        CharIt startCurString = ss.get_chars(curString, 0);
-        size_t stringLength = ss.get_length(curString) + 1;
-        size_t curPos = 0u;
-        std::copy(
-            startCurString,
-            startCurString + stringLength,
-            extendedRawStrings.begin() + curPos
-        );
-        curPos += stringLength;
-        strings_[0].length = stringLength - 1;
-        std::vector<size_t> offset(ss.size(), 0);
+        fst_str.string = raw_strings.data();
+        fst_str.length = fst_str_len - 1;
+
+        auto prev_chars = raw_strings.begin();
+        auto curr_chars = raw_strings.begin() + fst_str_len;
         for (size_t i = 1; i < ss.size(); ++i) {
-            offset[i] = curPos;
-            int64_t lcp_diff = lcps[i] - lcps[i - 1];
-            uint64_t totalStringLength = 0;
-            if (lcp_diff < 0) {
-                curPrefix.erase(curPrefix.end() + lcp_diff, curPrefix.end());
-                lcp_diff = 0;
+            // copy common prefix from previous string
+            size_t lcp = *(++first_lcp);
+            std::copy(prev_chars, prev_chars + lcp, curr_chars);
 
-            } else {
-                String prevString = ss[ss.begin() + i - 1];
-                CharIt commonPrefix = ss.get_chars(prevString, 0);
-                // lcp_diff > 0 see if-branch
-                for (size_t j = 0; j < static_cast<size_t>(lcp_diff); ++j)
-                    curPrefix.push_back(*(commonPrefix + j));
-            }
-            std::copy(curPrefix.begin(), curPrefix.end(), extendedRawStrings.begin() + curPos);
-            curPos += curPrefix.size();
-            totalStringLength += curPrefix.size();
+            // copy remaining (distinct) characters
+            auto& curr_str = ss[ss.begin() + i];
+            auto const curr_str_begin = ss.get_chars(curr_str, 0);
+            auto const curr_str_len = ss.get_length(curr_str) + 1;
+            std::copy(curr_str_begin, curr_str_begin + curr_str_len, curr_chars + lcp);
 
-            String curString = ss[ss.begin() + i];
-            CharIt startCurString = ss.get_chars(curString, 0);
-            size_t stringLength = ss.get_length(curString) + 1;
-            std::copy(
-                startCurString,
-                startCurString + stringLength,
-                extendedRawStrings.begin() + curPos
-            );
-            curPos += stringLength;
-            totalStringLength += stringLength;
-            strings_[i].length = totalStringLength - 1;
+            curr_str.string = &(*curr_chars);
+            curr_str.length = curr_str_len + lcp - 1;
+
+            prev_chars = curr_chars;
+            curr_chars += curr_str_len + lcp;
         }
-        *raw_strings_ = std::move(extendedRawStrings);
-        for (size_t i = 0; i < ss.size(); ++i) {
-            strings_[i].string = raw_strings_->data() + offset[i];
-        }
+
+        *raw_strings_ = std::move(raw_strings);
     }
 
     StringSet make_string_set() { return StringSet(strings(), strings() + size()); }
@@ -351,8 +327,7 @@ public:
     void update(std::vector<Char>&& raw_strings) {
         set(std::move(raw_strings));
         update_strings();
-        if (lcps_.size() != size())
-            lcps_.resize(size(), 0);
+        if (lcps_.size() != size()) lcps_.resize(size(), 0);
     }
 
     bool is_consistent() {
@@ -365,8 +340,7 @@ public:
         return std::all_of(strings_.begin(), strings_.end(), [this](const String str) -> bool {
             if (str < raw_strings_.data() || str > raw_strings_.data() + raw_strings_.size())
                 return false;
-            if (str == raw_strings_.data())
-                return true;
+            if (str == raw_strings_.data()) return true;
             return *(str - 1) == 0;
         });
     }
@@ -482,8 +456,7 @@ public:
     void update(std::vector<Char>&& raw_strings) {
         set(std::move(raw_strings));
         update_strings();
-        if (lcps_.size() != size())
-            lcps_.resize(size(), 0);
+        if (lcps_.size() != size()) lcps_.resize(size(), 0);
     }
 
 public:
@@ -537,8 +510,7 @@ public:
     std::vector<Char>&& releaseRawStrings() { return std::move(*raw_strings_); }
 
     std::vector<unsigned char> getRawString(int64_t i) {
-        if (i < 0 || static_cast<uint64_t>(i) > size())
-            return std::vector<unsigned char>(1, 0);
+        if (i < 0 || static_cast<uint64_t>(i) > size()) return std::vector<unsigned char>(1, 0);
 
         auto const length = strings_[i].length + 1;
         std::vector<unsigned char> rawString(length);
@@ -586,8 +558,7 @@ public:
             if (adressEndByteOfString < raw_strings_->data()
                 || adressEndByteOfString >= raw_strings_->data() + raw_strings_->size())
                 return false;
-            if (*adressEndByteOfString != 0)
-                return false;
+            if (*adressEndByteOfString != 0) return false;
         }
         return true;
     }
@@ -653,8 +624,7 @@ public:
     std::vector<Char>& raw_strings() { return *raw_strings_; }
     std::vector<Char> const& raw_strings() const { return *raw_strings_; }
     std::vector<unsigned char> getRawString(int64_t i) {
-        if (i < 0 || static_cast<uint64_t>(i) > size())
-            return std::vector<unsigned char>(1, 0);
+        if (i < 0 || static_cast<uint64_t>(i) > size()) return std::vector<unsigned char>(1, 0);
 
         auto const length = strings_[i].length + 1;
         std::vector<unsigned char> rawString(length);
@@ -725,8 +695,7 @@ public:
             if (adressEndByteOfString < raw_strings_->data()
                 || adressEndByteOfString >= raw_strings_->data() + raw_strings_->size())
                 return false;
-            if (*adressEndByteOfString != 0)
-                return false;
+            if (*adressEndByteOfString != 0) return false;
         }
         return true;
     }

@@ -242,12 +242,13 @@ private:
         );
         measuring_tool_.stop("merge_ranges");
 
-        // todo don't decompress, instead integrate into splitter selection?
         measuring_tool_.start("prefix_decompression");
         if (AllToAllStringPolicy::PrefixCompression && comm.size() > 1) {
+            std::vector<size_t> saved_lcps = std::move(sorted_container.savedLcps());
             sorted_container.extendPrefix(
                 sorted_container.make_string_set(),
-                sorted_container.savedLcps()
+                saved_lcps.cbegin(),
+                saved_lcps.cend()
             );
         }
         measuring_tool_.stop("prefix_decompression");
