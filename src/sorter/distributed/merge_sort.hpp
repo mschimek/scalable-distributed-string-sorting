@@ -242,6 +242,16 @@ private:
         );
         measuring_tool_.stop("merge_ranges");
 
+        // todo don't decompress, instead integrate into splitter selection?
+        measuring_tool_.start("prefix_decompression");
+        if (AllToAllStringPolicy::PrefixCompression && comm.size() > 1) {
+            sorted_container.extendPrefix(
+                sorted_container.make_string_set(),
+                sorted_container.savedLcps()
+            );
+        }
+        measuring_tool_.stop("prefix_decompression");
+
         return sorted_container;
     }
 };
