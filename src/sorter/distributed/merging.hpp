@@ -1,3 +1,7 @@
+// (c) 2019 Matthias Schimek
+// (c) 2023 Pascal Mehnert
+// This code is licensed under BSD 2-Clause License (see LICENSE for details)
+
 #pragma once
 
 #include <algorithm>

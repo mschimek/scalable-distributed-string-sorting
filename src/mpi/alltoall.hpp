@@ -21,6 +21,7 @@
 #include "mpi/type_mapper.hpp"
 #include "strings/stringcontainer.hpp"
 #include "strings/stringtools.hpp"
+#include "tlx/die.hpp"
 #include "util/measuringTool.hpp"
 #include "util/structs.hpp"
 
@@ -111,6 +112,7 @@ inline std::vector<DataType> alltoallv_small(
 class AllToAllvSmall {
 public:
     static std::string getName() { return "AlltoAllvSmall"; }
+
     template <typename DataType>
     static std::vector<DataType>
     alltoallv(DataType* const send_data, std::vector<size_t> const& send_counts, environment env) {
@@ -240,6 +242,7 @@ template <typename AllToAllvSmallPolicy>
 class AllToAllvCombined {
 public:
     static std::string getName() { return "AllToAllvCombined"; }
+
     template <typename DataType>
     static std::vector<DataType>
     alltoallv(DataType* const send_data, std::vector<size_t> const& send_counts, environment env) {
@@ -608,8 +611,8 @@ struct AllToAllStringImplPrefixDoubling {
 
         measuring_tool.start("all_to_all_strings_intern_copy");
         const EmptyPrefixDoublingLcpByteEncoderMemCpy byteEncoder;
-        StringLcpPtr stringLcpPtr = send_data.make_string_lcp_ptr();
-        const StringSet ss = stringLcpPtr.active();
+        StringLcpPtr string_ptr = send_data.make_string_lcp_ptr();
+        const StringSet ss = string_ptr.active();
 
         if (ss.size() == 0)
             return dss_schimek::StringLcpContainer<StringPEIndexSet>{};
@@ -617,18 +620,14 @@ struct AllToAllStringImplPrefixDoubling {
         std::vector<unsigned char> recv_buf_char;
         std::vector<size_t> send_counts_char(send_counts.size());
 
-        setLcpAtStartOfInterval(stringLcpPtr.get_lcp(), send_counts.begin(), send_counts.end());
+        setLcpAtStartOfInterval(string_ptr.lcp(), send_counts.begin(), send_counts.end());
 
-        const size_t L = std::accumulate(
-            stringLcpPtr.get_lcp(),
-            stringLcpPtr.get_lcp() + stringLcpPtr.size(),
-            0
-        );
+        const size_t L = std::accumulate(string_ptr.lcp(), string_ptr.lcp() + string_ptr.size(), 0);
         const size_t D = std::accumulate(dist_prefixes.begin(), dist_prefixes.end(), 0u);
         measuring_tool.add(L, "localL");
         measuring_tool.add(D, "localD");
 
-        const size_t numCharsToSend = stringLcpPtr.size() + D - L;
+        const size_t numCharsToSend = string_ptr.size() + D - L;
         std::vector<unsigned char> buffer(numCharsToSend);
 
         unsigned char* curPos = buffer.data();
@@ -639,7 +638,7 @@ struct AllToAllStringImplPrefixDoubling {
             std::tie(curPos, chars_written) = byteEncoder.write(
                 curPos,
                 ss.sub(begin, begin + send_counts[interval]),
-                stringLcpPtr.get_lcp() + strs_written,
+                string_ptr.lcp() + strs_written,
                 dist_prefixes.data() + strs_written
             );
 
@@ -664,7 +663,7 @@ struct AllToAllStringImplPrefixDoubling {
         auto recv_offsets = dss_schimek::mpi::alltoall(offsets, env);
         measuring_tool.stop("all_to_all_strings_mpi");
         measuring_tool.add(
-            numCharsToSend + stringLcpPtr.size() * sizeof(size_t),
+            numCharsToSend + string_ptr.size() * sizeof(size_t),
             "string_exchange_bytes_sent"
         );
 
@@ -694,8 +693,8 @@ struct AllToAllStringImplPrefixDoubling {
 
         measuring_tool.start("all_to_all_strings_intern_copy");
         const EmptyLcpByteEncoderMemCpy byteEncoder;
-        StringLcpPtr string_ptr = send_data.make_string_lcp_ptr();
-        const StringSet ss = string_ptr.active();
+        auto string_ptr = send_data.make_string_lcp_ptr();
+        auto ss = string_ptr.active();
 
         if (ss.size() == 0)
             return dss_schimek::StringLcpContainer<StringPEIndexSet>{};
@@ -703,13 +702,12 @@ struct AllToAllStringImplPrefixDoubling {
         std::vector<unsigned char> recv_buf_char;
         std::vector<size_t> send_counts_char(send_counts.size());
 
-        setLcpAtStartOfInterval(string_ptr.get_lcp(), send_counts.begin(), send_counts.end());
+        setLcpAtStartOfInterval(string_ptr.lcp(), send_counts.begin(), send_counts.end());
 
-        const size_t L =
-            std::accumulate(string_ptr.get_lcp(), string_ptr.get_lcp() + string_ptr.size(), 0);
+        const size_t L = std::accumulate(string_ptr.lcp(), string_ptr.lcp() + string_ptr.size(), 0);
         measuring_tool.add(L, "localL");
 
-        const size_t numCharsToSend = string_ptr.size() - L;
+        const size_t numCharsToSend = send_data.char_size() - L;
         std::vector<unsigned char> send_buf_char(numCharsToSend);
 
         unsigned char* curPos = send_buf_char.data();
@@ -719,11 +717,12 @@ struct AllToAllStringImplPrefixDoubling {
 
             size_t chars_written = 0;
             std::tie(curPos, chars_written) =
-                byteEncoder.write(curPos, sub_set, string_ptr.get_lcp() + strs_written);
+                byteEncoder.write(curPos, sub_set, string_ptr.lcp() + strs_written);
 
             send_counts_char[interval] = chars_written;
             strs_written += send_counts[interval];
         }
+        die_unequal(numCharsToSend, std::distance(send_buf_char.data(), curPos));
 
         // todo should maybe switch to sep. buffers for PE/str index in StringSet
         std::vector<size_t> send_buf_PE_idx(ss.size());

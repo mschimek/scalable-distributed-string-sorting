@@ -49,15 +49,16 @@ public:
     }
 
     // todo add back option to print value on every PE
-    void add(size_t value, std::string const& description, bool collect = true) {
+    void add(size_t value, std::string_view description, bool collect = true) {
         if (state.disabled)
             return;
         if (state.verbose && comm.is_root())
             std::cout << description << std::endl;
-        state.nonTimer.add({state.curPhase, 0u, state.curRound, description}, value, collect);
+        state.nonTimer
+            .add({state.curPhase, 0u, state.curRound, std::string{description}}, value, collect);
     }
 
-    void addRawCommunication(size_t value, std::string const& description) {
+    void addRawCommunication(size_t value, std::string_view description) {
         if (state.disabled)
             return;
         if (state.verbose && comm.is_root())
@@ -66,22 +67,22 @@ public:
         state.communicationVolume.add({state.curPhase, value});
     }
 
-    void start(std::string const& description) {
+    void start(std::string_view description) {
         if (state.disabled)
             return;
         if (state.verbose && comm.is_root())
             std::cout << description << std::endl;
 
-        state.timer.start({state.curPhase, state.curRound, description}, {});
+        state.timer.start({state.curPhase, state.curRound, std::string{description}}, {});
     }
 
-    void stop(std::string const& description) {
+    void stop(std::string_view description) {
         if (state.disabled)
             return;
         if (state.verbose && comm.is_root())
             std::cout << description << std::endl;
 
-        state.timer.stop({state.curPhase, state.curRound, description});
+        state.timer.stop({state.curPhase, state.curRound, std::string{description}});
     }
 
     void writeToStream(std::ostream& stream) {
@@ -102,9 +103,9 @@ public:
 
     void setVerbose(bool const value) { state.verbose = value; }
 
-    void setPrefix(std::string const& prefix_) { state.prefix = prefix_; }
+    void setPrefix(std::string_view prefix_) { state.prefix = prefix_; }
 
-    void setPhase(std::string const& phase) { state.curPhase = phase; }
+    void setPhase(std::string_view phase) { state.curPhase = phase; }
 
     void setRound(size_t round) { state.curRound = round; }
 

@@ -37,8 +37,7 @@ flatten(std::vector<std::vector<DataType>> const& dataToFlatten, const size_t to
 template <typename DataType>
 inline std::vector<DataType> flatten(std::vector<std::vector<DataType>> const& dataToFlatten) {
     size_t totalSumElements = 0;
-    for (auto const& curVec: dataToFlatten)
-        totalSumElements += curVec.size();
+    for (auto const& curVec: dataToFlatten) totalSumElements += curVec.size();
 
     return flatten(dataToFlatten, totalSumElements);
 }
@@ -75,6 +74,5 @@ void reorder(StringSet ss, Iterator begin, Iterator end) {
                - smallestIndexInPermutation[indices.PEIndex]];
         reorderedStrings.push_back(str);
     }
-    for (size_t i = 0; i < ss.size(); ++i)
-        ss[ss.begin() + i] = reorderedStrings[i];
+    for (size_t i = 0; i < ss.size(); ++i) ss[ss.begin() + i] = reorderedStrings[i];
 }
