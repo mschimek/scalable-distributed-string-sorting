@@ -31,8 +31,8 @@ list(APPEND
 )
 
 set(CMAKE_CXX_FLAGS_DEBUG "-g")
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG -march=native")
-set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELEASE} -g")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -flto -DNDEBUG -march=native")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -DDEBUG -march=native -ggdb")
 
 # Default to Release builds
 if(NOT CMAKE_BUILD_TYPE)
