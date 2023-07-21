@@ -463,6 +463,10 @@ public:
     //! Return size of string array
     size_t size() const { return end_ - begin_; }
 
+
+    //! Check if the set contains no elements
+    bool empty() const { return begin_ == end_; }
+
     //! Iterator representing first String position
     Iterator begin() const { return begin_; }
 

@@ -46,8 +46,7 @@ struct IndexStringComparator {
             ++lhsChars;
             ++rhsChars;
         }
-        if (*lhsChars == 0 && *rhsChars == 0)
-            return lhs.index < rhs.index;
+        if (*lhsChars == 0 && *rhsChars == 0) return lhs.index < rhs.index;
         return *lhsChars < *rhsChars;
     }
 };
@@ -434,23 +433,26 @@ static inline void print_interval_sizes(
     }
 }
 
+} // namespace dss_schimek
+
+namespace dss_mehnert {
+
 template <typename StringLcpContainer>
 static inline std::vector<std::pair<size_t, size_t>> compute_ranges_and_set_lcp_at_start_of_range(
-    StringLcpContainer& recv_string_cont,
-    std::vector<size_t>& recv_interval_sizes,
-    dss_schimek::mpi::environment env
+    StringLcpContainer& recv_string_cont, std::vector<size_t>& interval_sizes
 ) {
-    std::vector<std::pair<size_t, size_t>> ranges;
-    for (size_t i = 0, offset = 0; i < env.size(); ++i) {
-        if (recv_interval_sizes[i] == 0) {
-            ranges.emplace_back(0, 0);
+    std::vector<std::pair<size_t, size_t>> ranges(interval_sizes.size());
+    auto range_writer = std::begin(ranges);
+    for (auto offset = 0; auto const& interval_size: interval_sizes) {
+        if (interval_size == 0) {
+            *(range_writer++) = {0, 0};
         } else {
-            *(recv_string_cont.lcp_array() + offset) = 0;
-            ranges.emplace_back(offset, recv_interval_sizes[i]);
-            offset += recv_interval_sizes[i];
+            recv_string_cont.lcp_array()[offset] = 0;
+            *(range_writer++) = {offset, interval_size};
+            offset += interval_size;
         }
     }
     return ranges;
 }
 
-} // namespace dss_schimek
+} // namespace dss_mehnert

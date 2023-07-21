@@ -34,12 +34,11 @@ namespace sorter {
 template <typename StringPtr, typename AllToAllStringPolicy, typename SamplePolicy>
 class DistributedMergeSort : private AllToAllStringPolicy, private SamplePolicy {
 public:
-    static constexpr bool debug = true;
-    static constexpr bool barrier = true;
+    static constexpr bool debug = false;
+    static constexpr bool barrier = false;
 
     using StringLcpContainer = dss_schimek::StringLcpContainer<typename StringPtr::StringSet>;
 
-    // todo need to consider AllToAllStringPolicy::PrefixCompression?
     // todo why pass both string_ptr and container?
     template <typename Levels>
     StringLcpContainer sort(
@@ -76,7 +75,6 @@ public:
             return container;
         }
 
-        // todo address imbalance in partitions
         size_t round{0};
         Communicator comm_group{comm};
 
@@ -87,13 +85,13 @@ public:
             std::tie(group_size, container) =
                 sort_partial(std::move(container), num_groups, global_lcp_avg, comm_group);
 
-            auto color = comm_group.rank() / group_size;
+            auto local_color = comm_group.rank() / group_size;
             auto global_color = comm.rank() / group_size;
             measuring_tool_.add(global_color, "global_group");
 
             // todo use create_subcommunicators here
             measuring_tool_.start("split_communicator");
-            comm_group = comm_group.split(color);
+            comm_group = comm_group.split(local_color);
             measuring_tool_.stop("split_communicator");
 
             if constexpr (debug) {
@@ -103,7 +101,7 @@ public:
                 auto group_chars = comm_group.reduce(send_buf(size_chars), op(ops::plus<>{}));
                 if (comm_group.is_root()) {
                     std::cout << "iter=" << round << " group_world=" << global_color
-                              << " group=" << color
+                              << " group=" << local_color
                               << " group_strings=" << group_strings.extract_recv_buffer()[0]
                               << " group_chars=" << group_chars.extract_recv_buffer()[0] << "\n";
                 }
@@ -182,7 +180,7 @@ private:
 
         // todo why the *100 here
         // todo make sampling_factor variable
-        SampleParams params{comm.size(), 2, {2 * 100 * global_lcp_avg}};
+        SampleParams params{comm.size(), 2, sample::MaxLength{2 * 100 * global_lcp_avg}};
         auto interval_sizes = compute_partition(string_ptr, params, comm);
         auto sorted_container = exchange_and_merge(std::move(container), interval_sizes, comm);
 
@@ -213,17 +211,16 @@ private:
         measuring_tool_.add(recv_string_container.size(), "num_recv_strings", false);
 
         measuring_tool_.setPhase("merging");
-        // measuring_tool_.start("pruning_ranges");
-        // todo prune empty intervals
-        // std::erase(interval_sizes, 0);
-        // measuring_tool_.stop("pruning_ranges");
+        measuring_tool_.start("pruning_ranges");
+        // todo maybe add option to not prune for exhaustive sort
+        std::erase(interval_sizes, 0);
+        measuring_tool_.stop("pruning_ranges");
 
         measuring_tool_.start("compute_ranges");
         std::vector<std::pair<size_t, size_t>> ranges =
             compute_ranges_and_set_lcp_at_start_of_range(
                 recv_string_container,
-                recv_interval_sizes,
-                comm
+                recv_interval_sizes
             );
         measuring_tool_.stop("compute_ranges");
 
@@ -237,8 +234,7 @@ private:
         auto sorted_container = choose_merge<AllToAllStringPolicy>(
             std::move(recv_string_container),
             ranges,
-            num_recv_elems,
-            comm
+            num_recv_elems
         );
         measuring_tool_.stop("merge_ranges");
 

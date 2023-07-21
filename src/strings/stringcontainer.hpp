@@ -226,6 +226,7 @@ public:
     String* strings() { return strings_.data(); }
     std::vector<String>& getStrings() { return strings_; }
     size_t size() const { return strings_.size(); }
+    bool empty() const { return strings_.empty(); }
     size_t char_size() const { return raw_strings_->size(); }
     std::vector<size_t>& lcps() { return lcps_; }
     std::vector<size_t>& savedLcps() { return savedLcps_; }
@@ -407,6 +408,7 @@ public:
     String* strings() { return strings_.data(); }
     std::vector<String>& getStrings() { return strings_; }
     size_t size() const { return strings_.size(); }
+    bool empty() const { return strings_.empty(); }
     size_t char_size() const { return raw_strings_->size(); }
     std::vector<size_t>& lcps() { return lcps_; }
     std::vector<size_t> const& lcps() const { return lcps_; }
@@ -504,6 +506,7 @@ public:
     String* strings() { return strings_.data(); }
     std::vector<String>& getStrings() { return strings_; }
     size_t size() const { return strings_.size(); }
+    bool empty() const { return strings_.empty(); }
     size_t char_size() const { return raw_strings_->size(); }
     std::vector<Char>& raw_strings() { return *raw_strings_; }
     std::vector<Char> const& raw_strings() const { return *raw_strings_; }
@@ -620,6 +623,7 @@ public:
     String* strings() { return strings_.data(); }
     std::vector<String>& getStrings() { return strings_; }
     size_t size() const { return strings_.size(); }
+    bool empty() const { return strings_.empty(); }
     size_t char_size() const { return raw_strings_->size(); }
     std::vector<Char>& raw_strings() { return *raw_strings_; }
     std::vector<Char> const& raw_strings() const { return *raw_strings_; }
