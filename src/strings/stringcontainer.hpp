@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cassert>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <numeric>
 #include <vector>
@@ -19,6 +20,21 @@
 
 namespace dss_schimek {
 
+namespace internal {
+
+template <typename OutIt, typename Char, typename Init>
+void init_str_len(OutIt out, std::vector<Char>& raw_strings, Init init) {
+    for (auto it = raw_strings.begin(); it != raw_strings.end(); ++it, ++out) {
+        auto begin = it;
+        while (*it != 0)
+            ++it;
+
+        *out = init(&(*begin), static_cast<size_t>(std::distance(begin, it)));
+    }
+}
+
+} // namespace internal
+
 template <typename StringSet>
 class InitPolicy {
     using Char = typename StringSet::Char;
@@ -28,10 +44,9 @@ public:
     std::vector<String> init_strings(std::vector<Char>& raw_strings) {
         std::vector<String> strings;
         strings.reserve(raw_strings.size() / 100);
-        for (size_t i = 0; i < raw_strings.size(); ++i) {
-            strings.emplace_back(raw_strings.data() + i);
-            while (raw_strings[i] != 0) ++i;
-        }
+
+        auto init = [](auto str, auto) { return String{str}; };
+        internal::init_str_len(std::back_inserter(strings), raw_strings, init);
         return strings;
     }
 };
@@ -46,11 +61,9 @@ public:
     std::vector<String> init_strings(std::vector<Char>& raw_strings) {
         std::vector<String> strings;
         strings.reserve(raw_strings.size() / 100); // just a guess
-        for (size_t i = 0; i < raw_strings.size(); ++i) {
-            size_t begin = i;
-            while (raw_strings[i] != 0) ++i;
-            strings.emplace_back(raw_strings.data() + begin, Length{i - begin});
-        }
+
+        auto init = [](auto str, auto len) { return String{str, Length{len}}; };
+        internal::init_str_len(std::back_inserter(strings), raw_strings, init);
         return strings;
     }
 };
@@ -65,34 +78,38 @@ public:
     std::vector<String> init_strings(std::vector<Char>& raw_strings) {
         std::vector<String> strings;
         strings.reserve(raw_strings.size() / 100); // just a guess
-        for (size_t i = 0, string = 0; i < raw_strings.size(); ++i, ++string) {
-            size_t begin = i;
-            while (raw_strings[i] != 0) ++i;
-            strings.emplace_back(raw_strings.data() + begin, Length{i - begin}, Index{string});
-        }
+
+        auto init = [index = size_t{0}](auto str, auto len) mutable {
+            return String{str, Length{len}, Index{index++}};
+        };
+        internal::init_str_len(std::back_inserter(strings), raw_strings, init);
         return strings;
     }
 
     std::vector<String>
-    init_strings(std::vector<Char>& raw_strings, std::vector<uint64_t> const& stringIndices) {
+    init_strings(std::vector<Char>& raw_strings, std::vector<uint64_t> const& string_idxs) {
         std::vector<String> strings;
         strings.reserve(raw_strings.size() / 100); // just a guess
-        for (size_t i = 0, string = 0; i < raw_strings.size(); ++i, ++string) {
-            size_t begin = i;
-            while (raw_strings[i] != 0) ++i;
-            strings.emplace_back(
-                raw_strings.data() + begin,
-                Length{i - begin},
-                Index{stringIndices[string]}
-            );
-        }
+
+        auto init = [index_it = string_idxs.cbegin()](auto str, auto len) mutable {
+            return String{str, Length{len}, Index{*(index_it++)}};
+        };
+        internal::init_str_len(std::back_inserter(strings), raw_strings, init);
         return strings;
     }
 };
 
-template <typename CharType>
-class InitPolicy<GenericCharIndexPEIndexStringSet<CharType>> {
-    using StringSet = GenericCharIndexPEIndexStringSet<CharType>;
+// just a helper for the template specialization below
+template <typename... Length_>
+struct StringIndexPEIndex_ {
+    template <typename String>
+    using type = StringData<String, Length_..., StringIndex, PEIndex>;
+};
+
+// this specialization may be going a bit far in the pursuit of avoiding code duplication ^^
+template <typename CharType, typename... Length_>
+class InitPolicy<GenericStringSet<CharType, StringIndexPEIndex_<Length_...>::template type>> {
+    using StringSet = GenericStringSet<CharType, StringIndexPEIndex_<Length_...>::template type>;
     using Char = typename StringSet::Char;
     using String = typename StringSet::String;
 
@@ -102,40 +119,35 @@ public:
         std::vector<size_t> const& intervals,
         std::vector<size_t> const& offsets
     ) {
-        std::vector<String> strings;
-        size_t num_strs = std::accumulate(intervals.begin(), intervals.end(), 0);
-        strings.reserve(num_strs);
-        size_t char_idx = 0;
+        auto num_strs = std::accumulate(intervals.begin(), intervals.end(), 0);
+        std::vector<String> strings(num_strs);
 
+        auto init = [](auto str, auto len) { return String{str, Length_{len}...}; };
+        internal::init_str_len(strings.begin(), raw_strings, init);
+
+        auto str = strings.begin();
         for (size_t PE_idx = 0; PE_idx < intervals.size(); ++PE_idx) {
-            for (size_t str_idx = 0; str_idx < intervals[PE_idx]; ++str_idx) {
-                strings.emplace_back(
-                    raw_strings.data() + char_idx,
-                    StringIndex{offsets[PE_idx] + str_idx},
-                    PEIndex{PE_idx}
-                );
-                while (raw_strings[char_idx] != 0) ++char_idx;
-                ++char_idx;
+            for (size_t str_idx = 0; str_idx < intervals[PE_idx]; ++str_idx, ++str) {
+                str->stringIndex = offsets[PE_idx] + str_idx;
+                str->PEIndex = PE_idx;
             }
         }
         return strings;
     }
 
+    // todo this overload is still pretty poor
     std::vector<String> init_strings(
         std::vector<Char>& raw_strings,
         std::vector<size_t>&& PE_indices,
         std::vector<size_t>&& str_indices
     ) {
         std::vector<String> strings(PE_indices.size());
-        for (size_t offset = 0, idx = 0; auto& str: strings) {
-            str = {
-                raw_strings.data() + offset,
-                StringIndex{str_indices[idx]},
-                PEIndex{PE_indices[idx]}};
 
-            while (raw_strings[offset] != 0) ++offset;
-            ++offset, ++idx;
-        }
+        auto PE_it = PE_indices.cbegin(), str_it = str_indices.cbegin();
+        auto init = [&](auto str, auto len) mutable {
+            return String{str, Length_{len}..., PEIndex{*(PE_it++)}, StringIndex{*(str_it++)}};
+        };
+        internal::init_str_len(strings.begin(), raw_strings, init);
         return strings;
     }
 };
@@ -215,7 +227,8 @@ public:
             if (adressEndByteOfString < raw_strings_->data()
                 || adressEndByteOfString >= raw_strings_->data() + raw_strings_->size())
                 return false;
-            if (*adressEndByteOfString != 0) return false;
+            if (*adressEndByteOfString != 0)
+                return false;
         }
         return true;
     }
@@ -243,7 +256,8 @@ public:
 
         using Char = typename StringSet::Char;
 
-        if (ss.size() == 0u) return;
+        if (ss.size() == 0u)
+            return;
 
         size_t L = std::accumulate(first_lcp, last_lcp, static_cast<size_t>(0u));
         std::vector<Char> raw_strings(char_size() + L);
@@ -328,7 +342,8 @@ public:
     void update(std::vector<Char>&& raw_strings) {
         set(std::move(raw_strings));
         update_strings();
-        if (lcps_.size() != size()) lcps_.resize(size(), 0);
+        if (lcps_.size() != size())
+            lcps_.resize(size(), 0);
     }
 
     bool is_consistent() {
@@ -341,7 +356,8 @@ public:
         return std::all_of(strings_.begin(), strings_.end(), [this](const String str) -> bool {
             if (str < raw_strings_.data() || str > raw_strings_.data() + raw_strings_.size())
                 return false;
-            if (str == raw_strings_.data()) return true;
+            if (str == raw_strings_.data())
+                return true;
             return *(str - 1) == 0;
         });
     }
@@ -458,7 +474,8 @@ public:
     void update(std::vector<Char>&& raw_strings) {
         set(std::move(raw_strings));
         update_strings();
-        if (lcps_.size() != size()) lcps_.resize(size(), 0);
+        if (lcps_.size() != size())
+            lcps_.resize(size(), 0);
     }
 
 public:
@@ -513,7 +530,8 @@ public:
     std::vector<Char>&& releaseRawStrings() { return std::move(*raw_strings_); }
 
     std::vector<unsigned char> getRawString(int64_t i) {
-        if (i < 0 || static_cast<uint64_t>(i) > size()) return std::vector<unsigned char>(1, 0);
+        if (i < 0 || static_cast<uint64_t>(i) > size())
+            return std::vector<unsigned char>(1, 0);
 
         auto const length = strings_[i].length + 1;
         std::vector<unsigned char> rawString(length);
@@ -561,7 +579,8 @@ public:
             if (adressEndByteOfString < raw_strings_->data()
                 || adressEndByteOfString >= raw_strings_->data() + raw_strings_->size())
                 return false;
-            if (*adressEndByteOfString != 0) return false;
+            if (*adressEndByteOfString != 0)
+                return false;
         }
         return true;
     }
@@ -605,13 +624,6 @@ public:
 
     IndexStringContainer() : raw_strings_(std::make_unique<std::vector<Char>>()), strings_() {}
 
-    // IndexStringLcpContainer(std::vector<Char>&& raw_strings)
-    //    : raw_strings_(
-    //          std::make_unique<std::vector<Char>>(std::move(raw_strings))) {
-    //    update_strings();
-    //    lcps_.resize(size(), 0);
-    //}
-
     explicit IndexStringContainer(std::vector<Char>&& raw_strings, std::vector<uint64_t>& indices)
         : raw_strings_(std::make_unique<std::vector<Char>>(std::move(raw_strings))) {
         update_strings(indices);
@@ -628,7 +640,8 @@ public:
     std::vector<Char>& raw_strings() { return *raw_strings_; }
     std::vector<Char> const& raw_strings() const { return *raw_strings_; }
     std::vector<unsigned char> getRawString(int64_t i) {
-        if (i < 0 || static_cast<uint64_t>(i) > size()) return std::vector<unsigned char>(1, 0);
+        if (i < 0 || static_cast<uint64_t>(i) > size())
+            return std::vector<unsigned char>(1, 0);
 
         auto const length = strings_[i].length + 1;
         std::vector<unsigned char> rawString(length);
@@ -676,6 +689,7 @@ public:
     size_t sumOfCapacities() {
         return raw_strings_->capacity() * sizeof(Char) + strings_.capacity() * sizeof(String);
     }
+
     size_t sumOfSizes() {
         return raw_strings_->size() * sizeof(Char) + strings_.size() * sizeof(String);
     }
@@ -699,7 +713,8 @@ public:
             if (adressEndByteOfString < raw_strings_->data()
                 || adressEndByteOfString >= raw_strings_->data() + raw_strings_->size())
                 return false;
-            if (*adressEndByteOfString != 0) return false;
+            if (*adressEndByteOfString != 0)
+                return false;
         }
         return true;
     }

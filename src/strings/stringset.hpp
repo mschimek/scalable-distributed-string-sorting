@@ -151,7 +151,8 @@ public:
     get_char_uint8_simple(const typename Traits::String& s, typename Traits::CharIterator i) const {
         StringSet const& ss = *static_cast<StringSet const*>(this);
 
-        if (ss.is_end(s, i)) return 0;
+        if (ss.is_end(s, i))
+            return 0;
         return uint8_t(*i);
     }
 
@@ -163,10 +164,12 @@ public:
         StringSet const& ss = *static_cast<StringSet const*>(this);
 
         uint16_t v = 0;
-        if (ss.is_end(s, i)) return v;
+        if (ss.is_end(s, i))
+            return v;
         v = (uint16_t(*i) << 8);
         ++i;
-        if (ss.is_end(s, i)) return v;
+        if (ss.is_end(s, i))
+            return v;
         v |= (uint16_t(*i) << 0);
         return v;
     }
@@ -179,16 +182,20 @@ public:
         StringSet const& ss = *static_cast<StringSet const*>(this);
 
         uint32_t v = 0;
-        if (ss.is_end(s, i)) return v;
+        if (ss.is_end(s, i))
+            return v;
         v = (uint32_t(*i) << 24);
         ++i;
-        if (ss.is_end(s, i)) return v;
+        if (ss.is_end(s, i))
+            return v;
         v |= (uint32_t(*i) << 16);
         ++i;
-        if (ss.is_end(s, i)) return v;
+        if (ss.is_end(s, i))
+            return v;
         v |= (uint32_t(*i) << 8);
         ++i;
-        if (ss.is_end(s, i)) return v;
+        if (ss.is_end(s, i))
+            return v;
         v |= (uint32_t(*i) << 0);
         return v;
     }
@@ -201,28 +208,36 @@ public:
         StringSet const& ss = *static_cast<StringSet const*>(this);
 
         uint64_t v = 0;
-        if (ss.is_end(s, i)) return v;
+        if (ss.is_end(s, i))
+            return v;
         v = (uint64_t(*i) << 56);
         ++i;
-        if (ss.is_end(s, i)) return v;
+        if (ss.is_end(s, i))
+            return v;
         v |= (uint64_t(*i) << 48);
         ++i;
-        if (ss.is_end(s, i)) return v;
+        if (ss.is_end(s, i))
+            return v;
         v |= (uint64_t(*i) << 40);
         ++i;
-        if (ss.is_end(s, i)) return v;
+        if (ss.is_end(s, i))
+            return v;
         v |= (uint64_t(*i) << 32);
         ++i;
-        if (ss.is_end(s, i)) return v;
+        if (ss.is_end(s, i))
+            return v;
         v |= (uint64_t(*i) << 24);
         ++i;
-        if (ss.is_end(s, i)) return v;
+        if (ss.is_end(s, i))
+            return v;
         v |= (uint64_t(*i) << 16);
         ++i;
-        if (ss.is_end(s, i)) return v;
+        if (ss.is_end(s, i))
+            return v;
         v |= (uint64_t(*i) << 8);
         ++i;
-        if (ss.is_end(s, i)) return v;
+        if (ss.is_end(s, i))
+            return v;
         v |= (uint64_t(*i) << 0);
         return v;
     }
@@ -267,19 +282,23 @@ public:
         typename StringSet::CharIterator c1 = ss.get_chars(s1, 0);
         typename StringSet::CharIterator c2 = ss.get_chars(s2, 0);
 
-        while (ss.is_equal(s1, c1, s2, c2)) ++c1, ++c2;
+        while (ss.is_equal(s1, c1, s2, c2))
+            ++c1, ++c2;
 
-        if (!ss.is_leq(s1, c1, s2, c2)) return false;
+        if (!ss.is_leq(s1, c1, s2, c2))
+            return false;
 
         return true;
     }
 
     bool check_order() const {
         StringSet const& ss = *static_cast<StringSet const*>(this);
-        if (ss.size() == 0) return true;
+        if (ss.size() == 0)
+            return true;
 
         for (typename Traits::Iterator pi = ss.begin() + 1; pi != ss.end(); ++pi) {
-            if (!check_order(ss[pi - 1], ss[pi])) return false;
+            if (!check_order(ss[pi - 1], ss[pi]))
+                return false;
         }
 
         return true;
@@ -366,7 +385,7 @@ struct StringIndex {
 
     size_t value() const { return stringIndex; }
 
-    inline size_t getStringIndex() { return stringIndex; }
+    inline size_t getStringIndex() const { return stringIndex; }
 };
 
 template <typename String, typename... Args>
@@ -502,6 +521,7 @@ public:
         c.first = NULL;
     }
 
+    // todo the semantics of indexed comparisons are questionable
     //! check equality of two strings a and b at char iterators ai and bi.
     bool is_equal(String const& a, CharIterator const& ai, String const& b, CharIterator const& bi)
         const {
@@ -565,11 +585,13 @@ public:
         }
     }
 
+    //! This function is here for backwards compatibility
     template <typename S = String, typename = std::enable_if_t<has_member<S, StringIndex>>>
     size_t getIndex(String const& str) const {
         return str.stringIndex;
     }
 
+    //! This function is here for backwards compatibility
     template <typename S = String, typename = std::enable_if_t<has_member<S, PEIndex>>>
     size_t getPEIndex(String const& str) const {
         return str.PEIndex;
@@ -583,14 +605,8 @@ protected:
     Iterator begin_, end_;
 };
 
-
-// template <typename Char>
-// using GenericCharStringSet = GenericStringSet<Char, StringOnly>;
-
-// using CharStringSet = GenericCharStringSet<char>;
-// using UCharStringSet = GenericCharStringSet<unsigned char>;
-
 template <typename Char>
+
 using GenericCharLengthStringSet = GenericStringSet<Char, StringLength>;
 
 using CharLengthStringSet = GenericCharLengthStringSet<char>;
@@ -607,6 +623,10 @@ using GenericCharIndexPEIndexStringSet = GenericStringSet<Char, StringStringInde
 
 using CharIndexPEIndexStringSet = GenericCharIndexPEIndexStringSet<char>;
 using UCharIndexPEIndexStringSet = GenericCharIndexPEIndexStringSet<unsigned char>;
+
+template <typename Char>
+using GenericCharLengthIndexPEIndexStringSet =
+    GenericStringSet<Char, StringLengthStringIndexPEIndex>;
 
 using CharLengthIndexPEIndexStringSet = GenericStringSet<char, StringLengthStringIndexPEIndex>;
 using UCharLengthIndexPEIndexStringSet =

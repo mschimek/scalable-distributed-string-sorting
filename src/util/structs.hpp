@@ -1,4 +1,5 @@
 // (c) 2019 Matthias Schimek
+// (c) 2023 Pascal Mehnert
 // This code is licensed under BSD 2-Clause License (see LICENSE for details)
 
 #pragma once
@@ -9,17 +10,14 @@
 #include <numeric>
 #include <vector>
 
-#include "mpi/synchron.hpp"
+#include "mpi/environment.hpp"
 
 struct StringIndexPEIndex {
     size_t stringIndex;
     size_t PEIndex;
-    StringIndexPEIndex(const size_t stringIndex, const size_t PEIndex)
-        : stringIndex(stringIndex),
-          PEIndex(PEIndex) {}
 };
 
-std::ostream& operator<<(std::ostream& stream, StringIndexPEIndex const& indices) {
+inline std::ostream& operator<<(std::ostream& stream, StringIndexPEIndex const& indices) {
     return stream << "[" << indices.stringIndex << ", " << indices.PEIndex << "]";
 }
 

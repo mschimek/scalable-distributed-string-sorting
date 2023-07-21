@@ -20,7 +20,6 @@
 #include "mpi/environment.hpp"
 #include "mpi/type_mapper.hpp"
 #include "strings/stringcontainer.hpp"
-#include "strings/stringtools.hpp"
 #include "tlx/die.hpp"
 #include "util/measuringTool.hpp"
 #include "util/structs.hpp"
@@ -347,8 +346,7 @@ inline void setLcpAtStartOfInterval(
     LcpIterator lcpIt, const IntervalIterator begin, const IntervalIterator end
 ) {
     for (IntervalIterator it = begin; it != end; ++it) {
-        if (*it == 0)
-            continue;
+        if (*it == 0) continue;
         *lcpIt = 0;
         std::advance(lcpIt, *it);
     }
@@ -461,8 +459,7 @@ struct AllToAllStringImpl<
         const EmptyByteEncoderMemCpy byteEncoder;
         const StringSet ss = send_data.make_string_set();
 
-        if (send_data.size() == 0)
-            return dss_schimek::StringLcpContainer<StringSet>();
+        if (send_data.size() == 0) return dss_schimek::StringLcpContainer<StringSet>();
 
         std::vector<unsigned char> recv_buf_char;
         std::vector<size_t> send_counts_char(send_counts.size());
@@ -535,8 +532,7 @@ struct AllToAllStringImpl<
         const EmptyLcpByteEncoderMemCpy byteEncoder;
         const StringSet ss = send_data.make_string_set();
 
-        if (send_data.size() == 0)
-            return dss_schimek::StringLcpContainer<StringSet>();
+        if (send_data.size() == 0) return dss_schimek::StringLcpContainer<StringSet>();
 
         std::vector<unsigned char> recv_buf_char;
         std::vector<size_t> send_counts_char(send_counts.size());
@@ -614,8 +610,7 @@ struct AllToAllStringImplPrefixDoubling {
         StringLcpPtr string_ptr = send_data.make_string_lcp_ptr();
         const StringSet ss = string_ptr.active();
 
-        if (ss.size() == 0)
-            return dss_schimek::StringLcpContainer<StringPEIndexSet>{};
+        if (ss.size() == 0) return dss_schimek::StringLcpContainer<StringPEIndexSet>{};
 
         std::vector<unsigned char> recv_buf_char;
         std::vector<size_t> send_counts_char(send_counts.size());
@@ -696,8 +691,7 @@ struct AllToAllStringImplPrefixDoubling {
         auto string_ptr = send_data.make_string_lcp_ptr();
         auto ss = string_ptr.active();
 
-        if (ss.size() == 0)
-            return dss_schimek::StringLcpContainer<StringPEIndexSet>{};
+        if (ss.size() == 0) return dss_schimek::StringLcpContainer<StringPEIndexSet>{};
 
         std::vector<unsigned char> recv_buf_char;
         std::vector<size_t> send_counts_char(send_counts.size());
