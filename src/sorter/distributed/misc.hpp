@@ -46,7 +46,8 @@ struct IndexStringComparator {
             ++lhsChars;
             ++rhsChars;
         }
-        if (*lhsChars == 0 && *rhsChars == 0) return lhs.index < rhs.index;
+        if (*lhsChars == 0 && *rhsChars == 0)
+            return lhs.index < rhs.index;
         return *lhsChars < *rhsChars;
     }
 };
@@ -95,11 +96,11 @@ std::vector<unsigned char> getSplitters(
     // todo could this be replace with a prefix sum?
     auto const begin = std::begin(all_sample_sizes);
     auto const end = std::end(all_sample_sizes);
-    const size_t local_prefix = std::accumulate(begin, begin + comm.rank(), 0ull);
-    const size_t total_size = std::accumulate(begin + comm.rank(), end, local_prefix);
+    size_t const local_prefix = std::accumulate(begin, begin + comm.rank(), size_t{0});
+    size_t const total_size = std::accumulate(begin + comm.rank(), end, local_prefix);
 
-    const size_t nr_splitters = std::min(num_partitions - 1, total_size);
-    const size_t splitter_dist = total_size / (nr_splitters + 1);
+    size_t const nr_splitters = std::min(num_partitions - 1, total_size);
+    size_t const splitter_dist = total_size / (nr_splitters + 1);
 
     auto ss = sorted_local_sample.make_string_set();
     size_t splitter_size = 0u;
@@ -140,11 +141,11 @@ std::pair<std::vector<unsigned char>, std::vector<uint64_t>> getSplittersIndexed
     // todo could this be replace with a prefix sum?
     auto const begin = std::begin(all_sample_sizes);
     auto const end = std::end(all_sample_sizes);
-    const size_t local_prefix = std::accumulate(begin, begin + comm.rank(), 0ull);
-    const size_t total_size = std::accumulate(begin + comm.rank(), end, local_prefix);
+    size_t const local_prefix = std::accumulate(begin, begin + comm.rank(), size_t{0});
+    size_t const total_size = std::accumulate(begin + comm.rank(), end, local_prefix);
 
-    const size_t nr_splitters = std::min(num_partitions - 1, total_size);
-    const size_t splitter_dist = total_size / (nr_splitters + 1);
+    size_t const nr_splitters = std::min(num_partitions - 1, total_size);
+    size_t const splitter_dist = total_size / (nr_splitters + 1);
 
     auto ss = sorted_local_sample.make_string_set();
     size_t splitter_size = 0u;

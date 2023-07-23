@@ -119,7 +119,7 @@ public:
         std::vector<size_t> const& intervals,
         std::vector<size_t> const& offsets
     ) {
-        auto num_strs = std::accumulate(intervals.begin(), intervals.end(), 0);
+        auto num_strs = std::accumulate(intervals.begin(), intervals.end(), size_t{0});
         std::vector<String> strings(num_strs);
 
         auto init = [](auto str, auto len) { return String{str, Length_{len}...}; };
@@ -259,7 +259,7 @@ public:
         if (ss.size() == 0u)
             return;
 
-        size_t L = std::accumulate(first_lcp, last_lcp, static_cast<size_t>(0u));
+        size_t L = std::accumulate(first_lcp, last_lcp, size_t{0});
         std::vector<Char> raw_strings(char_size() + L);
 
         auto& fst_str = ss[ss.begin()];

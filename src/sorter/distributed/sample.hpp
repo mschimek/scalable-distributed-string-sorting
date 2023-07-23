@@ -64,10 +64,10 @@ inline size_t get_local_offset(size_t local_size, Communicator const& comm) {
 template <typename StringSet, typename Params>
 static size_t get_num_chars(StringSet const& ss, Params const& params) {
     if constexpr (Params::has_dist_prefixes) {
-        return std::accumulate(std::begin(params.prefixes), std::end(params.prefixes), 0);
+        return std::accumulate(std::begin(params.prefixes), std::end(params.prefixes), size_t{0});
     } else {
         auto op = [&ss](auto sum, auto const& str) { return sum + ss.get_length(str); };
-        return std::accumulate(std::begin(ss), std::end(ss), 0, op);
+        return std::accumulate(std::begin(ss), std::end(ss), size_t{0}, op);
     }
 }
 

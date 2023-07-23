@@ -89,7 +89,7 @@ inline std::vector<DataType> alltoallv_small(
         }
     }
     const size_t sentItems =
-        std::accumulate(real_send_counts.begin(), real_send_counts.end(), static_cast<size_t>(0u));
+        std::accumulate(real_send_counts.begin(), real_send_counts.end(), size_t{0});
     measuringTool.addRawCommunication(sentItems * sizeof(DataType), "alltoallv_small");
 
     data_type_mapper<DataType> dtm;
@@ -152,7 +152,7 @@ public:
         }
 
         const size_t elemToSend =
-            std::accumulate(send_counts.begin(), send_counts.end(), static_cast<size_t>(0u));
+            std::accumulate(send_counts.begin(), send_counts.end(), size_t{0});
         measuringTool.addRawCommunication(elemToSend * sizeof(DataType), "alltoallv_small");
 
         data_type_mapper<DataType> dtm;
@@ -192,9 +192,8 @@ public:
             receive_displacements[i] = receive_displacements[i - 1] + receive_counts[i - 1];
         }
 
-        const size_t elemToSend =
-            std::accumulate(send_counts.begin(), send_counts.end(), static_cast<size_t>(0u))
-            - send_counts[env.rank()];
+        const size_t elemToSend = std::accumulate(send_counts.begin(), send_counts.end(), size_t{0})
+                                  - send_counts[env.rank()];
         measuringTool.addRawCommunication(
             elemToSend * sizeof(DataType),
             "alltoallv_directMessages"
@@ -250,11 +249,11 @@ public:
         MeasuringTool& measuringTool = MeasuringTool::measuringTool();
 
         size_t local_send_count =
-            std::accumulate(send_counts.begin(), send_counts.end(), static_cast<size_t>(0u));
+            std::accumulate(send_counts.begin(), send_counts.end(), size_t{0});
 
         std::vector<size_t> receive_counts = alltoall(send_counts, env);
         size_t local_receive_count =
-            std::accumulate(receive_counts.begin(), receive_counts.end(), static_cast<size_t>(0u));
+            std::accumulate(receive_counts.begin(), receive_counts.end(), size_t{0});
 
         size_t local_max = std::max(local_send_count, local_receive_count);
         size_t global_max = allreduce_max(local_max, env);
@@ -272,7 +271,7 @@ public:
             }
 
             const size_t elemToSend =
-                std::accumulate(send_counts.begin(), send_counts.end(), static_cast<size_t>(0u));
+                std::accumulate(send_counts.begin(), send_counts.end(), size_t{0});
             measuringTool.addRawCommunication(elemToSend * sizeof(DataType), "alltoallv_combined");
 
             std::vector<MPI_Request> mpi_request(2 * env.size());
@@ -346,7 +345,8 @@ inline void setLcpAtStartOfInterval(
     LcpIterator lcpIt, const IntervalIterator begin, const IntervalIterator end
 ) {
     for (IntervalIterator it = begin; it != end; ++it) {
-        if (*it == 0) continue;
+        if (*it == 0)
+            continue;
         *lcpIt = 0;
         std::advance(lcpIt, *it);
     }
@@ -404,11 +404,8 @@ struct AllToAllStringImpl {
         std::vector<size_t> sendCountsTotal =
             computeSendCountsBytes<StringSet, ByteEncoderPolicy>(ss, send_counts, byteEncoder);
 
-        size_t totalNumberSendBytes = std::accumulate(
-            sendCountsTotal.begin(),
-            sendCountsTotal.end(),
-            static_cast<size_t>(0u)
-        );
+        size_t totalNumberSendBytes =
+            std::accumulate(sendCountsTotal.begin(), sendCountsTotal.end(), size_t{0});
 
         auto stringLcpPtr = container.make_string_lcp_ptr();
         setLcpAtStartOfInterval(stringLcpPtr.lcp(), send_counts.begin(), send_counts.end());
@@ -459,7 +456,8 @@ struct AllToAllStringImpl<
         const EmptyByteEncoderMemCpy byteEncoder;
         const StringSet ss = send_data.make_string_set();
 
-        if (send_data.size() == 0) return dss_schimek::StringLcpContainer<StringSet>();
+        if (send_data.size() == 0)
+            return dss_schimek::StringLcpContainer<StringSet>();
 
         std::vector<unsigned char> recv_buf_char;
         std::vector<size_t> send_counts_char(send_counts.size());
@@ -532,14 +530,15 @@ struct AllToAllStringImpl<
         const EmptyLcpByteEncoderMemCpy byteEncoder;
         const StringSet ss = send_data.make_string_set();
 
-        if (send_data.size() == 0) return dss_schimek::StringLcpContainer<StringSet>();
+        if (send_data.size() == 0)
+            return dss_schimek::StringLcpContainer<StringSet>();
 
         std::vector<unsigned char> recv_buf_char;
         std::vector<size_t> send_counts_char(send_counts.size());
 
         std::vector<size_t>& lcps = send_data.lcps();
         setLcpAtStartOfInterval(lcps.begin(), send_counts.begin(), send_counts.end());
-        const size_t L = std::accumulate(lcps.begin(), lcps.end(), 0);
+        const size_t L = std::accumulate(lcps.begin(), lcps.end(), size_t{0});
 
         const size_t numCharsToSend = send_data.char_size() - L;
         std::vector<unsigned char> buffer(numCharsToSend);
@@ -610,15 +609,17 @@ struct AllToAllStringImplPrefixDoubling {
         StringLcpPtr string_ptr = send_data.make_string_lcp_ptr();
         const StringSet ss = string_ptr.active();
 
-        if (ss.size() == 0) return dss_schimek::StringLcpContainer<StringPEIndexSet>{};
+        if (ss.size() == 0)
+            return dss_schimek::StringLcpContainer<StringPEIndexSet>{};
 
         std::vector<unsigned char> recv_buf_char;
         std::vector<size_t> send_counts_char(send_counts.size());
 
         setLcpAtStartOfInterval(string_ptr.lcp(), send_counts.begin(), send_counts.end());
 
-        const size_t L = std::accumulate(string_ptr.lcp(), string_ptr.lcp() + string_ptr.size(), 0);
-        const size_t D = std::accumulate(dist_prefixes.begin(), dist_prefixes.end(), 0u);
+        const size_t L =
+            std::accumulate(string_ptr.lcp(), string_ptr.lcp() + string_ptr.size(), size_t{0});
+        const size_t D = std::accumulate(dist_prefixes.begin(), dist_prefixes.end(), size_t{0});
         measuring_tool.add(L, "localL");
         measuring_tool.add(D, "localD");
 
@@ -691,14 +692,16 @@ struct AllToAllStringImplPrefixDoubling {
         auto string_ptr = send_data.make_string_lcp_ptr();
         auto ss = string_ptr.active();
 
-        if (ss.size() == 0) return dss_schimek::StringLcpContainer<StringPEIndexSet>{};
+        if (ss.size() == 0)
+            return dss_schimek::StringLcpContainer<StringPEIndexSet>{};
 
         std::vector<unsigned char> recv_buf_char;
         std::vector<size_t> send_counts_char(send_counts.size());
 
         setLcpAtStartOfInterval(string_ptr.lcp(), send_counts.begin(), send_counts.end());
 
-        const size_t L = std::accumulate(string_ptr.lcp(), string_ptr.lcp() + string_ptr.size(), 0);
+        const size_t L =
+            std::accumulate(string_ptr.lcp(), string_ptr.lcp() + string_ptr.size(), size_t{0});
         measuring_tool.add(L, "localL");
 
         const size_t numCharsToSend = send_data.char_size() - L;

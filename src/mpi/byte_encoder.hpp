@@ -34,7 +34,7 @@ public:
     template <typename CountIterator, typename InputIterator>
     static CompressedIntegersCounts
     writeRanges(CountIterator beginCounts, CountIterator endCounts, InputIterator dataInputBegin) {
-        const uint64_t sumOfLcpsToEncode = std::accumulate(beginCounts, endCounts, 0ull);
+        const uint64_t sumOfLcpsToEncode = std::accumulate(beginCounts, endCounts, uint64_t{0});
         CompressedIntegersCounts returnData;
         returnData.integers.resize(sumOfLcpsToEncode * sizeof(uint64_t));
         // just a guess that is far too conservative in most cases
@@ -65,7 +65,7 @@ public:
     template <typename CountIterator, typename InputIterator>
     static std::vector<uint64_t>
     readRanges(CountIterator beginCounts, CountIterator endCounts, InputIterator dataInputBegin) {
-        const uint64_t sumOfRecvLcpValues = std::accumulate(beginCounts, endCounts, 0ull);
+        const uint64_t sumOfRecvLcpValues = std::accumulate(beginCounts, endCounts, uint64_t{0});
         std::vector<uint64_t> output(sumOfRecvLcpValues);
         uint64_t curNumWrittenLcps = 0u;
         uint64_t curNumConsumedBytes = 0u;
