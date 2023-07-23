@@ -62,13 +62,16 @@ public:
         itToStart->second = Clock::now();
     }
 
-    void stop(Key const& key) {
+    void stop(Key const& key, Communicator const& comm) {
         if (!measurementEnabled) {
             return;
         }
 
-        const PointInTime endPoint = Clock::now();
-        // measurement stopped
+        const PointInTime before_barrier = Clock::now();
+        if (!disableBarrier) {
+            comm.barrier();
+        }
+        const PointInTime after_barrier = Clock::now();
 
         // check whether key is present
         auto it = keyToStart.find(key);
@@ -76,15 +79,15 @@ public:
             std::cout << "Key: " << key << " has no corresponding start" << std::endl;
             std::abort();
         }
-        const PointInTime startPoint = it->second;
+        const PointInTime start_time = it->second;
 
-        TimeIntervalDataType elapsedActiveTime =
-            std::chrono::duration_cast<TimeUnit>(endPoint - startPoint).count();
-        TimeIntervalDataType elapsedTotalTime =
-            std::chrono::duration_cast<TimeUnit>(endPoint - startPoint).count();
+        TimeIntervalDataType elapsed_active_time =
+            std::chrono::duration_cast<TimeUnit>(before_barrier - start_time).count();
+        TimeIntervalDataType elapsed_total_time =
+            std::chrono::duration_cast<TimeUnit>(after_barrier - start_time).count();
 
-        keyToActiveTime.emplace(key, elapsedActiveTime);
-        keyToTotalTime.emplace(key, elapsedTotalTime);
+        active_time_.emplace(key, elapsed_active_time);
+        total_time_.emplace(key, elapsed_total_time);
     }
 
     std::vector<OutputFormat> collect(Communicator const& comm) {
@@ -93,7 +96,7 @@ public:
         std::vector<OutputFormat> output;
         output.reserve(keyToValue.size());
         for (auto& [key, value]: keyToValue) {
-            auto time = expect_key(keyToActiveTime, key)->second;
+            auto time = expect_key(active_time_, key)->second;
             // todo loss is currently alwas 0
             auto loss = getLoss(key);
             auto size = comm.size();
@@ -135,15 +138,14 @@ private:
     }
 
     TimeIntervalDataType getLoss(Key const& key) {
-        auto active_time = expect_key(keyToActiveTime, key);
-        auto total_time = expect_key(keyToTotalTime, key);
+        auto active_time = expect_key(active_time_, key);
+        auto total_time = expect_key(total_time_, key);
         return total_time->second - active_time->second;
     }
 
     auto expect_key(auto const& map, auto const& key) {
         auto iter = map.find(key);
         if (iter == std::end(map)) {
-            // todo get kassert to work
             std::cout << "Key " << key << " not present" << std::endl;
             std::abort();
         }
@@ -153,8 +155,8 @@ private:
     std::map<Key, Value> keyToValue;
     std::map<PseudoKey, size_t> pseudoKeyToCounter;
     std::map<Key, PointInTime> keyToStart;
-    std::map<Key, TimeIntervalDataType> keyToActiveTime;
-    std::map<Key, TimeIntervalDataType> keyToTotalTime;
+    std::map<Key, TimeIntervalDataType> active_time_;
+    std::map<Key, TimeIntervalDataType> total_time_;
 };
 
 } // namespace measurement

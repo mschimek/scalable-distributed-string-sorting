@@ -26,7 +26,7 @@ public:
         Record record;
 
         friend std::ostream& operator<<(std::ostream& stream, OutputFormat const& output) {
-            return stream << "description=" << output.description << " " << Result << output.record;
+            return stream << "key=" << output.description << " " << Result << output.record;
         }
     };
 
@@ -49,9 +49,8 @@ public:
     }
 
     void add(Record const& record) {
-        auto it = std::find_if(records.begin(), records.end(), [&](Record const& other) {
-            return other.pseudoKey() == record.pseudoKey();
-        });
+        auto comp = [&](Record const& other) { return other.pseudoKey() == record.pseudoKey(); };
+        auto it = std::find_if(records.begin(), records.end(), comp);
         if (it == records.end()) {
             records.push_back(record);
         } else {
@@ -60,7 +59,7 @@ public:
     }
 
 private:
-    static const size_t allocationSize = 10000;
+    static const size_t allocationSize = 64;
 
     std::string description;
     std::vector<Record> records;

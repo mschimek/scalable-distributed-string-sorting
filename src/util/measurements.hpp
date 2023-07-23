@@ -33,7 +33,7 @@ struct PhaseValue {
     std::size_t getValue() const { return value; }
 
     friend std::ostream& operator<<(ostream_wrapper out, PhaseValue const& data) {
-        return out.stream << "phase=" << data.phase << "value=" << data.value;
+        return out.stream << "phase=" << data.phase << " value=" << data.value;
     }
 
     friend std::ostream& operator<<(std::ostream& stream, PhaseValue const& record) {
@@ -57,7 +57,7 @@ struct PhaseRoundDescription {
 
     friend std::ostream& operator<<(ostream_wrapper out, PhaseRoundDescription const& data) {
         return out.stream << "phase=" << data.phase << " round=" << data.round
-                          << " description=" << data.description;
+                          << " key=" << data.description;
     }
 
     friend std::ostream& operator<<(std::ostream& stream, PhaseRoundDescription const& record) {
@@ -77,9 +77,11 @@ struct PhaseCounterRoundDescription {
 
     void setPseudoKeyCounter(std::size_t counter) { counterPerPhase = counter; }
 
-    friend std::ostream& operator<<(ostream_wrapper out, PhaseCounterRoundDescription const& data) {
-        return out.stream << "phase=" << data.phase << " counter_per_phase=" << data.counterPerPhase
-                          << " round=" << data.round << " description=" << data.description;
+    friend std::ostream&
+    operator<<(ostream_wrapper out, PhaseCounterRoundDescription const& record) {
+        return out.stream << "phase=" << record.phase
+                          << " counter_per_phase=" << record.counterPerPhase
+                          << " round=" << record.round << " key=" << record.description;
     }
 
     friend std::ostream&
@@ -93,11 +95,27 @@ struct CounterPerPhase {
 
     void setPseudoKeyCounter(std::size_t counter) { counterPerPhase = counter; }
 
-    friend std::ostream& operator<<(ostream_wrapper out, CounterPerPhase const& data) {
-        return out.stream << "counter_per_phase=" << data.counterPerPhase;
+    friend std::ostream& operator<<(ostream_wrapper out, CounterPerPhase const& record) {
+        return out.stream << "counter_per_phase=" << record.counterPerPhase;
     }
 
     friend std::ostream& operator<<(std::ostream& stream, CounterPerPhase const& record) {
+        return stream << "{" << Result << record << "}";
+    }
+};
+
+struct SimpleValue {
+    std::size_t value;
+
+    size_t getValue() const { return value; }
+
+    void setValue(std::size_t value_) { value = value_; }
+
+    friend std::ostream& operator<<(ostream_wrapper out, SimpleValue const& record) {
+        return out.stream << "value=" << record.value;
+    }
+
+    friend std::ostream& operator<<(std::ostream& stream, SimpleValue const& record) {
         return stream << "{" << Result << record << "}";
     }
 };

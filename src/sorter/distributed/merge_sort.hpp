@@ -87,7 +87,6 @@ public:
 
             auto local_color = comm_group.rank() / group_size;
             auto global_color = comm.rank() / group_size;
-            measuring_tool_.add(global_color, "global_group");
 
             // todo use create_subcommunicators here
             measuring_tool_.start("split_communicator");
@@ -206,9 +205,10 @@ private:
         container.deleteAll();
         measuring_tool_.stop("all_to_all_strings");
 
-        auto num_received_chars = recv_string_container.char_size() - recv_string_container.size();
-        measuring_tool_.add(num_received_chars, "num_recv_chars", false);
-        measuring_tool_.add(recv_string_container.size(), "num_recv_strings", false);
+        auto size_strings = recv_string_container.size();
+        auto size_chars = recv_string_container.char_size() - size_strings;
+        measuring_tool_.add(size_strings, "local_num_strings", false);
+        measuring_tool_.add(size_chars, "local_num_chars", false);
 
         measuring_tool_.setPhase("merging");
         measuring_tool_.start("pruning_ranges");
@@ -225,11 +225,8 @@ private:
         measuring_tool_.stop("compute_ranges");
 
         measuring_tool_.start("merge_ranges");
-        size_t num_recv_elems = std::accumulate(
-            recv_interval_sizes.begin(),
-            recv_interval_sizes.end(),
-            static_cast<size_t>(0u)
-        );
+        size_t num_recv_elems =
+            std::accumulate(recv_interval_sizes.begin(), recv_interval_sizes.end(), size_t{0});
 
         auto sorted_container = choose_merge<AllToAllStringPolicy>(
             std::move(recv_string_container),

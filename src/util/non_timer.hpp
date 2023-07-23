@@ -25,12 +25,12 @@ class NonTimer {
 public:
     struct OutputFormat {
         Record record;
-        Value min, max, avg, sum;
+        size_t min, max, median, avg, sum;
 
         friend std::ostream& operator<<(std::ostream& stream, OutputFormat const& output) {
             return stream << Result << output.record << " min=" << output.min
-                          << " max=" << output.max << " avg=" << output.avg
-                          << " sum=" << output.sum;
+                          << " max=" << output.max << " median=" << output.median
+                          << " avg=" << output.avg << " sum=" << output.sum;
         }
     };
 
@@ -40,8 +40,8 @@ public:
         Value value;
 
         friend std::ostream& operator<<(std::ostream& stream, OutputFormatSingle const& output) {
-            return stream << Result << output.record << " process=" << output.process
-                          << " value=" << output.value;
+            return stream << Result << output.record << " process=" << output.process << " "
+                          << Result << output.value;
         }
     };
 
@@ -49,17 +49,24 @@ public:
 
     std::pair<std::vector<OutputFormat>, std::vector<OutputFormatSingle>>
     collect(Communicator const& comm) {
+        using namespace kamping;
         std::vector<OutputFormat> output;
         std::vector<OutputFormatSingle> output_single;
-        for (auto const& [record, value, collect]: entries) {
-            auto values = comm.allgather(kamping::send_buf(value)).extract_recv_buffer();
 
+        for (auto const& [record, value, collect]: entries) {
             if (collect) {
-                auto min = std::min_element(std::begin(values), std::end(values));
-                auto max = std::max_element(std::begin(values), std::end(values));
-                auto sum = std::accumulate(std::begin(values), std::end(values), 0);
-                output.emplace_back(record, *min, *max, sum / comm.size(), sum);
+                auto values = comm.allgather(send_buf(value.getValue())).extract_recv_buffer();
+                auto begin = std::begin(values), end = std::end(values);
+
+                auto min = std::min_element(begin, end);
+                auto max = std::max_element(begin, end);
+                auto sum = std::accumulate(begin, end, size_t{0});
+                auto median = begin + std::midpoint(size_t{0}, values.size());
+                std::nth_element(begin, median, end);
+                auto avg = sum / comm.size();
+                output.emplace_back(record, *min, *max, *median, avg, sum);
             } else {
+                auto values = comm.allgather(send_buf(value)).extract_recv_buffer();
                 for (auto proc = 0; auto const& proc_value: values) {
                     output_single.emplace_back(record, proc++, proc_value);
                 }
@@ -70,7 +77,7 @@ public:
 
     void add(Record const& record, Value value, bool collect) {
         auto& [entry, v, c] = entries.emplace_back(record, value, collect);
-        auto counter = pseudoKeyToCounter.try_emplace(entry.pseudoKey(), 0);
+        auto counter = key_counter_.try_emplace(entry.pseudoKey(), 0);
         entry.setPseudoKeyCounter(counter.first->second++);
     }
 
@@ -79,7 +86,7 @@ private:
     static const size_t allocationSize = 128;
 
     std::vector<std::tuple<Record, Value, bool>> entries;
-    std::map<PseudoKey, size_t> pseudoKeyToCounter;
+    std::map<PseudoKey, size_t> key_counter_;
 };
 
 } // namespace measurement

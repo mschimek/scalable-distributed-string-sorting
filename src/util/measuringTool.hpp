@@ -17,24 +17,11 @@ namespace dss_mehnert {
 namespace measurement {
 
 class MeasuringTool {
-    // Columns:
-    // Prefix | Phase | CounterPerPhase | Round | Description | Type |
-    // RawCommunication | SumUp |  Value
-    //
-    // NonTimer: Duplicates are allowed (but since counterPerPhase is
-    // incremented there are no duplicates if all fields are taken into account)
-    // Timer: Key = (Phase, Round, Description) Value = (CounterPerPhase, Type,
-    // RawCommunication, SumUp, Value)
-
-    // NonTimerRecord must contain type PseudoKey and functions pseudoKey() and
-    // setPseudoKeyCounter, setValue(), getValue()
+public:
     using NonTimerRecord = PhaseCounterRoundDescription;
-    // TimerKey must contain type PseudoKey and function pseudoKey()
     using TimerKey = PhaseRoundDescription;
-    // TimerValue must contain functions setPseudoKeyCounter()
     using TimerValue = CounterPerPhase;
 
-public:
     static MeasuringTool& measuringTool() {
         static MeasuringTool measuringTool;
         return measuringTool;
@@ -42,55 +29,49 @@ public:
 
     void reset() { state = {}; }
 
-    void add(size_t value) {
-        if (state.disabled)
-            return;
-        add(value, "unkown");
-    }
-
     // todo add back option to print value on every PE
     void add(size_t value, std::string_view description, bool collect = true) {
-        if (state.disabled)
-            return;
-        if (state.verbose && comm.is_root())
-            std::cout << description << std::endl;
-        state.nonTimer
-            .add({state.curPhase, 0u, state.curRound, std::string{description}}, value, collect);
+        if (!state.disabled) {
+            if (state.verbose && comm.is_root()) {
+                std::cout << description << std::endl;
+            }
+            NonTimerRecord record{state.phase, 0u, state.round, std::string{description}};
+            state.non_timer.add(record, {value}, collect);
+        }
     }
 
     void addRawCommunication(size_t value, std::string_view description) {
-        if (state.disabled)
-            return;
-        if (state.verbose && comm.is_root())
+        if (state.verbose && comm.is_root()) {
             std::cout << description << std::endl;
-
-        state.communicationVolume.add({state.curPhase, value});
+        }
+        state.comm_volume.add({state.phase, value});
     }
 
     void start(std::string_view description) {
-        if (state.disabled)
-            return;
-        if (state.verbose && comm.is_root())
-            std::cout << description << std::endl;
-
-        state.timer.start({state.curPhase, state.curRound, std::string{description}}, {});
+        if (!state.disabled) {
+            if (state.verbose && comm.is_root()) {
+                std::cout << description << std::endl;
+            }
+            state.timer.start({state.phase, state.round, std::string{description}}, {});
+        }
     }
 
     void stop(std::string_view description) {
-        if (state.disabled)
-            return;
-        if (state.verbose && comm.is_root())
-            std::cout << description << std::endl;
-
-        state.timer.stop({state.curPhase, state.curRound, std::string{description}});
+        if (!state.disabled) {
+            if (state.verbose && comm.is_root()) {
+                std::cout << description << std::endl;
+            }
+            // todo this shold probably not be the global communicator here
+            state.timer.stop({state.phase, state.round, std::string{description}}, comm);
+        }
     }
 
     void writeToStream(std::ostream& stream) {
         disable();
-        auto records = state.nonTimer.collect(comm);
+        auto records = state.non_timer.collect(comm);
         write_records(stream, records.first);
         write_records(stream, records.second);
-        write_records(stream, state.communicationVolume.collect(comm));
+        write_records(stream, state.comm_volume.collect(comm));
         write_records(stream, state.timer.collect(comm));
         enable();
     }
@@ -105,19 +86,19 @@ public:
 
     void setPrefix(std::string_view prefix_) { state.prefix = prefix_; }
 
-    void setPhase(std::string_view phase) { state.curPhase = phase; }
+    void setPhase(std::string_view phase) { state.phase = phase; }
 
-    void setRound(size_t round) { state.curRound = round; }
+    void setRound(size_t round) { state.round = round; }
 
 private:
     struct State {
         bool disabled = false;
         bool verbose = false;
         std::string prefix = "";
-        std::string curPhase = "none";
-        size_t curRound = 0;
-        NonTimer<NonTimerRecord, size_t> nonTimer;
-        LeanNonTimer<PhaseValue> communicationVolume = {"comm_volume"};
+        std::string phase = "none";
+        size_t round = 0;
+        NonTimer<NonTimerRecord, SimpleValue> non_timer;
+        LeanNonTimer<PhaseValue> comm_volume = {"comm_volume"};
         Timer<TimerKey, TimerValue> timer;
     };
 

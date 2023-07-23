@@ -74,7 +74,7 @@ size_t getAvgLcp(const StringLcpPtr string_lcp_ptr, dss_mehnert::Communicator co
 
     auto lcps = string_lcp_ptr.lcp();
     auto size = string_lcp_ptr.size();
-    size_t local_lcp_sum = std::accumulate(lcps, lcps + size, 0);
+    size_t local_lcp_sum = std::accumulate(lcps, lcps + size, size_t{0});
     Result local_result{local_lcp_sum, size};
 
     auto global_result = comm.allreduce(send_buf(local_result), op(ops::plus<>{}, ops::commutative))
