@@ -94,13 +94,19 @@ void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicat
     auto num_bytes = std::min<size_t>(args.num_strings * 5, 100000u);
     dss_schimek::mpi::randomDataAllToAllExchange(num_bytes, comm);
 
+    // require that at least one level is used if any are given
+    auto pred = [&](auto group_size) { return group_size < comm.size(); };
+    auto first_level = std::find_if(args.levels.begin(), args.levels.end(), pred);
+    tlx_die_if(!args.levels.empty() && first_level == args.levels.end());
+
     comm.barrier();
 
     measuring_tool.start("sorting_overall");
 
     Sorter merge_sort;
     StringLcpContainer<StringSet> sorted_string_cont =
-        merge_sort.template sort<>(rand_string_ptr, std::move(rand_container), args.levels, comm);
+        merge_sort
+            .sort(rand_string_ptr, std::move(rand_container), first_level, args.levels.end(), comm);
 
     measuring_tool.stop("sorting_overall");
 
@@ -383,7 +389,7 @@ int main(int argc, char* argv[]) {
     cp.add_opt_param_stringlist(
         "num-groups",
         levels_param,
-        "no. groups for each level of multi-level merge sort"
+        "size of groups for multi-level merge sort"
     );
 
     if (!cp.process(argc, argv)) {
@@ -413,6 +419,7 @@ int main(int argc, char* argv[]) {
     std::vector<size_t> levels(levels_param.size());
     auto stoi = [](auto& str) { return std::stoi(str); };
     std::transform(levels_param.begin(), levels_param.end(), levels.begin(), stoi);
+    tlx_die_unless(std::is_sorted(levels.begin(), levels.end(), std::greater<>{}));
 
     for (size_t i = 0; i < num_iterations; ++i) {
         SorterArgs args{

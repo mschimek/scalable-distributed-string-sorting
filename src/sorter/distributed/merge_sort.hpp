@@ -40,11 +40,12 @@ public:
     using StringLcpContainer = dss_schimek::StringLcpContainer<typename StringPtr::StringSet>;
 
     // todo why pass both string_ptr and container?
-    template <typename Levels>
+    template <typename LevelIt>
     StringLcpContainer sort(
         StringPtr& string_ptr,
         StringLcpContainer&& container,
-        Levels&& intermediate_levels,
+        LevelIt first_level,
+        LevelIt last_level,
         Communicator const& comm
     ) {
         using namespace kamping;
@@ -78,15 +79,11 @@ public:
         size_t round{0};
         Communicator comm_group{comm};
 
-        for (auto num_groups: intermediate_levels) {
-            tlx_die_unless(1 < num_groups && num_groups < comm_group.size());
+        for (auto level = first_level; level != last_level; ++level) {
+            container = sort_partial(std::move(container), *level, global_lcp_avg, comm_group);
 
-            size_t group_size;
-            std::tie(group_size, container) =
-                sort_partial(std::move(container), num_groups, global_lcp_avg, comm_group);
-
-            auto local_color = comm_group.rank() / group_size;
-            auto global_color = comm.rank() / group_size;
+            auto local_color = comm_group.rank() / *level;
+            auto global_color = comm.rank() / *level;
 
             // todo use create_subcommunicators here
             measuring_tool_.start("split_communicator");
@@ -125,16 +122,17 @@ private:
     static constexpr auto compute_partition =
         partition::compute_partition<StringPtr, SamplePolicy, SampleParams>;
 
-    std::pair<size_t, StringLcpContainer> sort_partial(
+    StringLcpContainer sort_partial(
         StringLcpContainer&& container,
-        size_t num_groups,
+        size_t group_size,
         size_t global_lcp_avg,
         Communicator const& comm
     ) {
-        tlx_die_unless(comm.size() % num_groups == 0);
+        tlx_die_unless(comm.size() % group_size == 0);
+        tlx_die_unless(1 < group_size && group_size < comm.size());
 
         auto string_ptr{container.make_string_lcp_ptr()};
-        auto group_size{comm.size() / num_groups};
+        auto num_groups{comm.size() / group_size};
 
         measuring_tool_.setPhase("sort_globally");
         measuring_tool_.start("partial_sorting");
@@ -163,7 +161,7 @@ private:
         measuring_tool_.setPhase("sort_globally");
         measuring_tool_.stop("partial_sorting");
 
-        return {group_size, std::move(sorted_container)};
+        return sorted_container;
     }
 
     StringLcpContainer sort_exhaustive(
