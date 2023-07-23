@@ -24,13 +24,13 @@
 #include "mpi/warmup.hpp"
 #include "sorter/distributed/bloomfilter.hpp"
 #include "sorter/distributed/merge_sort.hpp"
-#include "sorter/distributed/prefix_doubling.hpp"
 #include "util/measuringTool.hpp"
 #include "util/random_string_generator.hpp"
 #include "variant_selection.hpp"
 
 struct SorterArgs {
-    size_t size;
+    std::string experiment;
+    size_t num_strings;
     bool check;
     bool check_exhaustive;
     size_t iteration;
@@ -47,7 +47,7 @@ template <
     typename GolombEncoding,
     typename ByteEncoder,
     typename LcpCompression>
-void run_merge_sort(SorterArgs args) {
+void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicator const& comm) {
     using namespace dss_mehnert;
     using namespace dss_schimek;
 
@@ -59,24 +59,6 @@ void run_merge_sort(SorterArgs args) {
     using AllToAllPolicy =
         mpi::AllToAllStringImpl<lcp_compression, StringSet, MPIAllToAllRoutine, ByteEncoder>;
     using Sorter = sorter::DistributedMergeSort<StringLcpPtr, AllToAllPolicy, SamplePolicy>;
-
-    dss_mehnert::Communicator comm;
-
-    // clang-format off
-    std::string prefix = std::string("RESULT")
-        + " numberProcessors=" + std::to_string(comm.size()) 
-        + " samplePolicy=" + std::string(SamplePolicy::getName())
-        + " StringGenerator=" + StringGenerator::getName()
-        + " dToNRatio=" + std::to_string(args.generator_args.dToNRatio)
-        + " stringLength=" + std::to_string(args.generator_args.stringLength)
-        + " MPIAllToAllRoutine=" + MPIAllToAllRoutine::getName()
-        + " ByteEncoder=" + ByteEncoder::getName()
-        + " StringSet=" + StringSet::getName()
-        + " iteration=" + std::to_string(args.iteration)
-        + " numStrings=" + std::to_string(args.size)
-        + " strongScaling=" + std::to_string(args.strong_scaling)
-        + " numLevels=" + std::to_string(args.levels.size());
-    // clang-format on
 
     auto& measuring_tool = dss_mehnert::measurement::MeasuringTool::measuringTool();
     measuring_tool.setPrefix(prefix);
@@ -109,7 +91,7 @@ void run_merge_sort(SorterArgs args) {
     measuring_tool.add(num_gen_chars - num_gen_strs, "input_chars");
     measuring_tool.add(num_gen_strs, "input_strings");
 
-    auto num_bytes = std::min<size_t>(args.size * 5, 100000u);
+    auto num_bytes = std::min<size_t>(args.num_strings * 5, 100000u);
     dss_schimek::mpi::randomDataAllToAllExchange(num_bytes, comm);
 
     comm.barrier();
@@ -136,7 +118,7 @@ void run_merge_sort(SorterArgs args) {
 
         if (args.check_exhaustive) {
             bool const isSorted = checker.check(sorted_strptr, true);
-            die_verbose_unless(isSorted, "not sorted completely");
+            die_verbose_unless(isSorted, "output is not a permutation of the input");
         }
     }
 
@@ -148,13 +130,53 @@ void run_merge_sort(SorterArgs args) {
     measuring_tool.reset();
 }
 
+std::string get_result_prefix(SorterArgs const& args, dss_mehnert::Communicator const& comm) {
+    // clang-format off
+    return std::string("RESULT")
+           + (args.experiment.empty() ? "" : (" experiment=" + args.experiment))
+           + " num_procs=" + std::to_string(comm.size())
+           + " num_strings=" + std::to_string(args.num_strings)
+           + " len_strings=" + std::to_string(args.generator_args.stringLength)
+           + " iteration=" + std::to_string(args.iteration);
+    // clang-format on
+}
+
+template <
+    typename StringSet,
+    typename StringGenerator,
+    typename SamplePolicy,
+    typename MPIAllToAllRoutine,
+    typename GolombEncoding,
+    typename ByteEncoder,
+    typename LcpCompression>
+void print_config(
+    std::string_view prefix, SorterArgs const& args, PolicyEnums::CombinationKey const& key
+) {
+    std::cout << prefix << " key=configuration"
+              << " string_generator=" << StringGenerator::getName()
+              << " DN_ratio=" << std::to_string(args.generator_args.dToNRatio)
+              << " sampler=" << SamplePolicy::getName()
+              << " alltoall_routine=" << MPIAllToAllRoutine::getName()
+              << " golomb_encoding=" << GolombEncoding::getName()
+              << " prefix_compression=" << std::to_string(key.prefix_compression)
+              << " lcp_compression=" << std::to_string(key.lcp_compression)
+              << " prefix_doubling=" << std::to_string(key.prefix_doubling)
+              << " strong_scaling=" << std::to_string(args.strong_scaling)
+              << " num_levels=" << std::to_string(args.levels.size()) << "\n";
+}
+
 template <typename... Args>
 void arg7(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
+    dss_mehnert::Communicator comm;
+    auto prefix = get_result_prefix(args, comm);
+    if (comm.is_root()) {
+        print_config<Args...>(prefix, args, key);
+    }
+
     if (key.prefix_doubling) {
-        // todo implement golomb encoding option
         tlx_die("not yet implemented");
     } else {
-        run_merge_sort<Args...>(args);
+        run_merge_sort<Args...>(args, prefix, comm);
     }
 }
 
@@ -293,12 +315,14 @@ int main(int argc, char* argv[]) {
     size_t num_iterations = 5;
     size_t string_length = 50;
     double DN_ratio = 0.5;
-    std::string path = "";
+    std::string path;
+    std::string experiment;
     std::vector<std::string> levels_param;
 
     tlx::CmdlineParser cp;
     cp.set_description("a distributed string sorter");
     cp.set_author("Matthias Schimek, Pascal Mehnert");
+    cp.add_string('e', "experiment", experiment, "name to identify the experiment being run");
     cp.add_string('y', "path", path, "path to file");
     cp.add_unsigned(
         'k',
@@ -391,8 +415,15 @@ int main(int argc, char* argv[]) {
     std::transform(levels_param.begin(), levels_param.end(), levels.begin(), stoi);
 
     for (size_t i = 0; i < num_iterations; ++i) {
-        SorterArgs
-            args{num_strings, check, check_exhaustive, i, strong_scaling, generator_args, levels};
+        SorterArgs args{
+            .experiment = experiment,
+            .num_strings = num_strings,
+            .check = check,
+            .check_exhaustive = check_exhaustive,
+            .iteration = i,
+            .strong_scaling = strong_scaling,
+            .generator_args = generator_args,
+            .levels = levels};
         arg1<dss_schimek::UCharLengthStringSet>(key, args);
     }
 

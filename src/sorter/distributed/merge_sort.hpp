@@ -186,7 +186,7 @@ private:
         measuring_tool_.setPhase("sort_globally");
         measuring_tool_.stop("final_sorting");
 
-        return std::move(sorted_container);
+        return sorted_container;
     }
 
     StringLcpContainer exchange_and_merge(

@@ -115,33 +115,14 @@ inline MPIRoutineAllToAll getMPIRoutineAllToAll(size_t i) {
     }
 }
 
-enum class ByteEncoder {
-    emptyByteEncoderCopy = 0,
-    emptyByteEncoderMemCpy = 1,
-    emptyLcpByteEncoderMemCpy = 2,
-};
-
-inline ByteEncoder getByteEncoder(size_t i) {
-    switch (i) {
-        case 0:
-            return ByteEncoder::emptyByteEncoderCopy;
-        case 1:
-            return ByteEncoder::emptyByteEncoderMemCpy;
-        case 2:
-            return ByteEncoder::emptyLcpByteEncoderMemCpy;
-        default:
-            std::cout << "Enum ByteEncoder not defined" << std::endl;
-            std::abort();
-    }
-}
-
 struct CombinationKey {
-    GolombEncoding golombEncoding_;
-    StringGenerator stringGenerator_;
-    SampleString sampleStringPolicy_;
-    MPIRoutineAllToAll mpiRoutineAllToAll_;
-    ByteEncoder byteEncoder_;
-    bool compressLcps_;
+    GolombEncoding golomb_encoding;
+    StringGenerator string_generator;
+    SampleString sample_policy;
+    MPIRoutineAllToAll alltoall_routine;
+    bool prefix_compression;
+    bool lcp_compression;
+    bool prefix_doubling;
 
     auto operator<=>(CombinationKey const&) const = default;
 };

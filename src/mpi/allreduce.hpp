@@ -71,7 +71,7 @@ static inline DataType allreduce_sum(DataType& send_data, environment env) {
     );
 
     auto elems = dss_schimek::mpi::allgatherForAllReduce(send_data, env);
-    return std::accumulate(elems.begin(), elems.end(), {});
+    return std::accumulate(elems.begin(), elems.end(), static_cast<DataType>(0));
 }
 
 } // namespace dss_schimek::mpi

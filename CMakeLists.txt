@@ -52,7 +52,8 @@ add_subdirectory(external/tlx)
 
 add_subdirectory(external/kamping)
 
-set(IPS4O_DISABLE_PARALLEL ON)
+# IPS40 doesn't compiler wihtout linking to TBB
+set(IPS4O_DISABLE_PARALLEL OFF)
 add_subdirectory(external/ips4o)
 
 # Create a library containing all implementation, to be linked against by executables
