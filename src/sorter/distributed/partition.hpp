@@ -38,14 +38,14 @@ compute_partition(StringPtr string_ptr, Params const& params, Communicator const
     auto samples = Sampler::sample_splitters(ss, params, comm);
     measuring_tool.stop("sample_splitters");
 
-    measuring_tool.start("sort_splitter");
+    measuring_tool.start("sort_splitters");
     Comparator comp;
     std::mt19937_64 gen{3469931 + comm.rank()};
     RQuickData sample_data{std::move(samples), {}};
     measuring_tool.disable();
     StringContainer sorted_sample = splitterSort(std::move(sample_data), gen, comp, comm);
     measuring_tool.enable();
-    measuring_tool.stop("sort_splitter");
+    measuring_tool.stop("sort_splitters");
 
     measuring_tool.start("choose_splitters");
     auto chosen_splitters = getSplitters(sorted_sample, params.num_partitions, comm);

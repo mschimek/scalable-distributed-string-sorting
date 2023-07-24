@@ -72,7 +72,6 @@ public:
         measuring_tool_.stop("avg_lcp");
 
         if (comm.size() == 1) {
-            measuring_tool_.setPhase("none");
             return container;
         }
 
@@ -109,7 +108,6 @@ public:
         auto sorted_container = sort_exhaustive(std::move(container), global_lcp_avg, comm_group);
 
         measuring_tool_.setRound(0);
-        measuring_tool_.setPhase("none");
         return sorted_container;
     }
 
@@ -134,18 +132,20 @@ private:
         auto string_ptr{container.make_string_lcp_ptr()};
         auto num_groups{comm.size() / group_size};
 
-        measuring_tool_.setPhase("sort_globally");
-        measuring_tool_.start("partial_sorting");
+        measuring_tool_.start("sort_globally", "partial_sorting");
         measuring_tool_.add(num_groups, "num_groups");
         measuring_tool_.add(group_size, "group_size");
 
-        measuring_tool_.setPhase("bucket_computation");
-
         // todo why the *100 here
         // todo make sampling_factor variable
+        //
+        measuring_tool_.start("sort_globally", "compute_partition");
+        measuring_tool_.setPhase("bucket_computation");
         SampleParams params{num_groups, 2, {2 * 100 * global_lcp_avg}};
         auto interval_sizes{compute_partition(string_ptr, params, comm)};
+        measuring_tool_.stop("sort_globally", "compute_partition");
 
+        measuring_tool_.start("sort_globally", "exchange_and_merge");
         auto group_offset{comm.rank() / num_groups};
         std::vector<uint64_t> send_counts(comm.size());
 
@@ -157,9 +157,8 @@ private:
         }
 
         auto sorted_container = exchange_and_merge(std::move(container), send_counts, comm);
-
-        measuring_tool_.setPhase("sort_globally");
-        measuring_tool_.stop("partial_sorting");
+        measuring_tool_.stop("sort_globally", "exchange_and_merge");
+        measuring_tool_.stop("sort_globally", "partial_sorting");
 
         return sorted_container;
     }
@@ -169,20 +168,22 @@ private:
     ) {
         auto string_ptr = container.make_string_lcp_ptr();
 
-        measuring_tool_.setPhase("sort_globally");
-        measuring_tool_.start("final_sorting");
+        measuring_tool_.start("sort_globally", "final_sorting");
         measuring_tool_.add(container.size(), "num_strings");
-
-        measuring_tool_.setPhase("bucket_computation");
 
         // todo why the *100 here
         // todo make sampling_factor variable
+        measuring_tool_.start("sort_globally", "compute_partition");
+        measuring_tool_.setPhase("bucket_computation");
         SampleParams params{comm.size(), 2, sample::MaxLength{2 * 100 * global_lcp_avg}};
         auto interval_sizes = compute_partition(string_ptr, params, comm);
-        auto sorted_container = exchange_and_merge(std::move(container), interval_sizes, comm);
+        measuring_tool_.stop("sort_globally", "compute_partition");
 
-        measuring_tool_.setPhase("sort_globally");
-        measuring_tool_.stop("final_sorting");
+        measuring_tool_.start("sort_globally", "exchange_and_merge");
+        auto sorted_container = exchange_and_merge(std::move(container), interval_sizes, comm);
+        measuring_tool_.stop("sort_globally", "exchange_and_merge");
+
+        measuring_tool_.stop("sort_globally", "final_sorting");
 
         return sorted_container;
     }
@@ -210,7 +211,6 @@ private:
 
         measuring_tool_.setPhase("merging");
         measuring_tool_.start("pruning_ranges");
-        // todo maybe add option to not prune for exhaustive sort
         std::erase(interval_sizes, 0);
         measuring_tool_.stop("pruning_ranges");
 
@@ -234,7 +234,7 @@ private:
         measuring_tool_.stop("merge_ranges");
 
         measuring_tool_.start("prefix_decompression");
-        if (AllToAllStringPolicy::PrefixCompression && comm.size() > 1) {
+        if constexpr (AllToAllStringPolicy::PrefixCompression) {
             std::vector<size_t> saved_lcps = std::move(sorted_container.savedLcps());
             sorted_container.extendPrefix(
                 sorted_container.make_string_set(),

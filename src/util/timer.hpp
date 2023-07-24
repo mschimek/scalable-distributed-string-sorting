@@ -47,35 +47,35 @@ public:
     Timer() = default;
 
     void start(Key const& key, Value const& value) {
-        if (!measurementEnabled)
+        if (!enabled)
             return;
-        if (keyToValue.contains(key)) {
-            std::cout << keyToValue.find(key)->first;
+        if (key_value_.contains(key)) {
+            std::cout << key_value_.find(key)->first;
             std::cout << "Key: " << key << " already added" << std::endl;
             std::abort();
         }
-        auto const& itToValue = keyToValue.emplace(key, value);
+        auto const& itToValue = key_value_.emplace(key, value);
         itToValue.first->second.setPseudoKeyCounter(incrementCounterPerPseudoKey(key));
-        auto const& [itToStart, _] = keyToStart.emplace(key, PointInTime());
+        auto const& [itToStart, _] = key_start_.emplace(key, PointInTime());
 
         // Start measurement
         itToStart->second = Clock::now();
     }
 
-    void stop(Key const& key, Communicator const& comm) {
-        if (!measurementEnabled) {
+    void stop(Key const& key, bool barrier = false, Communicator const& comm = {}) {
+        if (!enabled) {
             return;
         }
 
         const PointInTime before_barrier = Clock::now();
-        if (!disableBarrier) {
+        if (barrier) {
             comm.barrier();
         }
         const PointInTime after_barrier = Clock::now();
 
         // check whether key is present
-        auto it = keyToStart.find(key);
-        if (it == keyToStart.end()) {
+        auto it = key_start_.find(key);
+        if (it == key_start_.end()) {
             std::cout << "Key: " << key << " has no corresponding start" << std::endl;
             std::abort();
         }
@@ -94,11 +94,11 @@ public:
         using namespace kamping;
 
         std::vector<OutputFormat> output;
-        output.reserve(keyToValue.size());
-        for (auto& [key, value]: keyToValue) {
+        output.reserve(key_value_.size());
+        for (auto& [key, value]: key_value_) {
             auto time = expect_key(active_time_, key)->second;
             // todo loss is currently alwas 0
-            auto loss = getLoss(key);
+            auto loss = get_loss(key);
             auto size = comm.size();
 
             output.push_back({
@@ -115,8 +115,6 @@ public:
         return output;
     }
 
-    void setDisableBarrier(bool value) { disableBarrier = value; }
-
 private:
     using Clock = std::chrono::high_resolution_clock;
     using PointInTime = std::chrono::time_point<Clock>;
@@ -124,20 +122,19 @@ private:
     using TimeIntervalDataType = uint64_t;
     using PseudoKey = typename Key::PseudoKey;
 
-    bool measurementEnabled = true;
-    bool disableBarrier = false;
+    static constexpr bool enabled = true;
 
     size_t incrementCounterPerPseudoKey(Key const& key) {
-        auto itCounter = pseudoKeyToCounter.find(key.pseudoKey());
-        if (itCounter == pseudoKeyToCounter.end()) {
-            pseudoKeyToCounter.emplace(key.pseudoKey(), 1u);
+        auto itCounter = key_counter_.find(key.pseudoKey());
+        if (itCounter == key_counter_.end()) {
+            key_counter_.emplace(key.pseudoKey(), 1u);
             return 0;
         } else {
             return itCounter->second++;
         }
     }
 
-    TimeIntervalDataType getLoss(Key const& key) {
+    TimeIntervalDataType get_loss(Key const& key) {
         auto active_time = expect_key(active_time_, key);
         auto total_time = expect_key(total_time_, key);
         return total_time->second - active_time->second;
@@ -152,9 +149,9 @@ private:
         return iter;
     }
 
-    std::map<Key, Value> keyToValue;
-    std::map<PseudoKey, size_t> pseudoKeyToCounter;
-    std::map<Key, PointInTime> keyToStart;
+    std::map<Key, Value> key_value_;
+    std::map<PseudoKey, size_t> key_counter_;
+    std::map<Key, PointInTime> key_start_;
     std::map<Key, TimeIntervalDataType> active_time_;
     std::map<Key, TimeIntervalDataType> total_time_;
 };

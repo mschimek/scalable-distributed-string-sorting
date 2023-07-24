@@ -56,13 +56,32 @@ public:
         }
     }
 
+    void start(std::string_view phase, std::string_view desc) {
+        setPhase(phase);
+        start(desc);
+    }
+
     void stop(std::string_view description) {
         if (!state.disabled) {
             if (state.verbose && comm.is_root()) {
                 std::cout << description << std::endl;
             }
-            // todo this shold probably not be the global communicator here
-            state.timer.stop({state.phase, state.round, std::string{description}}, comm);
+            state.timer.stop({state.phase, state.round, std::string{description}}, false, comm);
+        }
+    }
+
+    void stop(std::string_view phase, std::string_view desc) {
+        setPhase(phase);
+        stop(desc);
+    }
+
+    void stop(std::string_view phase, std::string_view desc, Communicator const& comm) {
+        setPhase(phase);
+        if (!state.disabled) {
+            if (state.verbose && comm.is_root()) {
+                std::cout << desc << std::endl;
+            }
+            state.timer.stop({state.phase, state.round, std::string{desc}}, true, comm);
         }
     }
 
@@ -75,8 +94,6 @@ public:
         write_records(stream, state.timer.collect(comm));
         enable();
     }
-
-    void disableBarrier(bool value) { state.timer.setDisableBarrier(value); }
 
     void enable() { state.disabled = false; }
 

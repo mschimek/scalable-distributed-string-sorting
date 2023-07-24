@@ -48,17 +48,15 @@ template <
     typename ByteEncoder,
     typename LcpCompression>
 void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicator const& comm) {
-    using namespace dss_mehnert;
     using namespace dss_schimek;
 
+    using dss_mehnert::sorter::DistributedMergeSort;
     using StringLcpPtr = typename tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
 
-    // todo implement this variable
     constexpr bool lcp_compression = LcpCompression();
 
     using AllToAllPolicy =
         mpi::AllToAllStringImpl<lcp_compression, StringSet, MPIAllToAllRoutine, ByteEncoder>;
-    using Sorter = sorter::DistributedMergeSort<StringLcpPtr, AllToAllPolicy, SamplePolicy>;
 
     auto& measuring_tool = dss_mehnert::measurement::MeasuringTool::measuringTool();
     measuring_tool.setPrefix(prefix);
@@ -91,24 +89,20 @@ void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicat
     measuring_tool.add(num_gen_chars - num_gen_strs, "input_chars");
     measuring_tool.add(num_gen_strs, "input_strings");
 
-    auto num_bytes = std::min<size_t>(args.num_strings * 5, 100000u);
-    dss_schimek::mpi::randomDataAllToAllExchange(num_bytes, comm);
-
-    // require that at least one level is used if any are given
+    // skip unused levels for multi-level merge sort
     auto pred = [&](auto group_size) { return group_size < comm.size(); };
     auto first_level = std::find_if(args.levels.begin(), args.levels.end(), pred);
-    tlx_die_if(!args.levels.empty() && first_level == args.levels.end());
 
     comm.barrier();
 
-    measuring_tool.start("sorting_overall");
+    measuring_tool.start("none", "sorting_overall");
 
-    Sorter merge_sort;
+    DistributedMergeSort<StringLcpPtr, AllToAllPolicy, SamplePolicy> merge_sort;
     StringLcpContainer<StringSet> sorted_string_cont =
         merge_sort
             .sort(rand_string_ptr, std::move(rand_container), first_level, args.levels.end(), comm);
 
-    measuring_tool.stop("sorting_overall");
+    measuring_tool.stop("none", "sorting_overall", comm);
 
     if (args.check || args.check_exhaustive) {
         const StringLcpPtr sorted_strptr = sorted_string_cont.make_string_lcp_ptr();
@@ -143,6 +137,7 @@ std::string get_result_prefix(SorterArgs const& args, dss_mehnert::Communicator 
            + " num_procs=" + std::to_string(comm.size())
            + " num_strings=" + std::to_string(args.num_strings)
            + " len_strings=" + std::to_string(args.generator_args.stringLength)
+           + " num_levels=" + std::to_string(args.levels.size())
            + " iteration=" + std::to_string(args.iteration);
     // clang-format on
 }
@@ -158,17 +153,15 @@ template <
 void print_config(
     std::string_view prefix, SorterArgs const& args, PolicyEnums::CombinationKey const& key
 ) {
-    std::cout << prefix << " key=configuration"
-              << " string_generator=" << StringGenerator::getName()
-              << " DN_ratio=" << std::to_string(args.generator_args.dToNRatio)
-              << " sampler=" << SamplePolicy::getName()
-              << " alltoall_routine=" << MPIAllToAllRoutine::getName()
-              << " golomb_encoding=" << GolombEncoding::getName()
-              << " prefix_compression=" << std::to_string(key.prefix_compression)
-              << " lcp_compression=" << std::to_string(key.lcp_compression)
-              << " prefix_doubling=" << std::to_string(key.prefix_doubling)
-              << " strong_scaling=" << std::to_string(args.strong_scaling)
-              << " num_levels=" << std::to_string(args.levels.size()) << "\n";
+    std::cout << prefix << " key=string_generator name=" << StringGenerator::getName() << "\n";
+    std::cout << prefix << " key=DN_ratio value=" << args.generator_args.dToNRatio << "\n";
+    std::cout << prefix << " key=sampler name=" << SamplePolicy::getName() << "\n";
+    std::cout << prefix << " key=alltoall_routine name=" << MPIAllToAllRoutine::getName() << "\n";
+    std::cout << prefix << " key=golomb_encoding name=" << GolombEncoding::getName() << "\n";
+    std::cout << prefix << " key=prefix_compression value=" << key.prefix_compression << "\n";
+    std::cout << prefix << " key=lcp_compression value=" << key.lcp_compression << "\n";
+    std::cout << prefix << " key=prefix_doubling value=" << key.prefix_doubling << "\n";
+    std::cout << prefix << " key=strong_scaling value=" << args.strong_scaling << "\n";
 }
 
 template <typename... Args>
@@ -420,6 +413,9 @@ int main(int argc, char* argv[]) {
     auto stoi = [](auto& str) { return std::stoi(str); };
     std::transform(levels_param.begin(), levels_param.end(), levels.begin(), stoi);
     tlx_die_unless(std::is_sorted(levels.begin(), levels.end(), std::greater<>{}));
+
+    auto num_bytes = std::min<size_t>(num_strings * 5, 100000u);
+    dss_schimek::mpi::randomDataAllToAllExchange(num_bytes);
 
     for (size_t i = 0; i < num_iterations; ++i) {
         SorterArgs args{
