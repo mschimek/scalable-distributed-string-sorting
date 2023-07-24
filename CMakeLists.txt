@@ -52,7 +52,7 @@ add_subdirectory(external/tlx)
 
 add_subdirectory(external/kamping)
 
-# IPS40 doesn't compiler wihtout linking to TBB
+# IPS40 doesn't compile wihtout linking to TBB
 set(IPS4O_DISABLE_PARALLEL OFF)
 add_subdirectory(external/ips4o)
 

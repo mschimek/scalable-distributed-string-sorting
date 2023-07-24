@@ -5,7 +5,6 @@ target_sources(dss_base
         non_timer.hpp
         measurements.hpp
         random_string_generator.hpp
-        string.hpp
         structs.hpp
         timer.hpp
 )
