@@ -597,7 +597,7 @@ public:
         return str.PEIndex;
     }
 
-    // todo include name of String Type
+    // todo change to include contained data types
     static std::string getName() { return "GenericStringSet"; }
 
 protected:
@@ -606,7 +606,6 @@ protected:
 };
 
 template <typename Char>
-
 using GenericCharLengthStringSet = GenericStringSet<Char, StringLength>;
 
 using CharLengthStringSet = GenericCharLengthStringSet<char>;

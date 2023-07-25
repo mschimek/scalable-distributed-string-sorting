@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
+#include <functional>
 #include <map>
 #include <string>
 #include <string_view>
@@ -153,6 +154,7 @@ template <
 void print_config(
     std::string_view prefix, SorterArgs const& args, PolicyEnums::CombinationKey const& key
 ) {
+    // todo add some of this back to prefix
     std::cout << prefix << " key=string_generator name=" << StringGenerator::getName() << "\n";
     std::cout << prefix << " key=DN_ratio value=" << args.generator_args.dToNRatio << "\n";
     std::cout << prefix << " key=sampler name=" << SamplePolicy::getName() << "\n";
@@ -313,6 +315,8 @@ int main(int argc, char* argv[]) {
     size_t num_strings = 100000;
     size_t num_iterations = 5;
     size_t string_length = 50;
+    size_t min_string_length = string_length;
+    size_t max_string_length = string_length + 10;
     double DN_ratio = 0.5;
     std::string path;
     std::string experiment;
@@ -322,16 +326,19 @@ int main(int argc, char* argv[]) {
     cp.set_description("a distributed string sorter");
     cp.set_author("Matthias Schimek, Pascal Mehnert");
     cp.add_string('e', "experiment", experiment, "name to identify the experiment being run");
-    cp.add_string('y', "path", path, "path to file");
     cp.add_unsigned(
         'k',
         "generator",
         generator,
-        "type of string generation to use (0 = skewed, 1 = DNGen)"
+        "type of string generation to use "
+        "(0=skewed, [1]=DNGen, 2=file, 3=skewedDNGen, 4=suffixGen)"
     );
+    cp.add_string('y', "path", path, "path to file");
     cp.add_double('r', "DN-ratio", DN_ratio, "D/N ratio of generated strings");
     cp.add_size_t('n', "num-strings", num_strings, "number of strings to be generated");
     cp.add_size_t('m', "len-strings", string_length, "length of generated strings");
+    cp.add_size_t('b', "min-len-strings", min_string_length, "minimum length of generated strings");
+    cp.add_size_t('B', "max-len-strings", max_string_length, "maximum length of generated strings");
     cp.add_size_t('i', "num-iterations", num_iterations, "numer of sorting iterations to run");
     cp.add_flag('x', "strong-scaling", strong_scaling, "perform a strong scaling experiment");
     cp.add_unsigned(
@@ -339,7 +346,7 @@ int main(int argc, char* argv[]) {
         "sample-policy",
         sample_policy,
         "strategy to use for splitter sampling "
-        "(0 = NumStrings, 1 = NumChars, 2 = IndexedNumStrings, 3 = IndexedNumChars)"
+        "([0]=strings, 1=chars, 2=indexedStrings, 3=indexedChars)"
     );
     cp.add_flag(
         'l',
@@ -355,17 +362,18 @@ int main(int argc, char* argv[]) {
     );
     cp.add_flag('d', "prefix-doubling", prefix_doubling, "use prefix doubling merge sort");
     cp.add_unsigned(
+        'g',
+        "golomb",
+        golomb_encoding,
+        "type of golomb encoding to use during prefix doubling "
+        "([0]=none, 1=sequential, 2=pipelined)"
+    );
+    cp.add_unsigned(
         'a',
         "alltoall-routine",
         alltoall_routine,
         "All-To-All routine to use during string exchange "
-        "(0 = small, 1 = directMessages, 2 = combined)"
-    );
-    cp.add_unsigned(
-        'g',
-        "golomb",
-        golomb_encoding,
-        "type of golomb encoding to use during prefix doubling"
+        "(0=small, 1=direct, [2]=combined)"
     );
     cp.add_flag(
         'c',
@@ -380,7 +388,7 @@ int main(int argc, char* argv[]) {
         "check that the the output exactly matches the input"
     );
     cp.add_opt_param_stringlist(
-        "num-groups",
+        "group-size",
         levels_param,
         "size of groups for multi-level merge sort"
     );
@@ -390,7 +398,6 @@ int main(int argc, char* argv[]) {
     }
 
     PolicyEnums::CombinationKey key{
-        // todo add parameter
         .golomb_encoding = PolicyEnums::getGolombEncoding(golomb_encoding),
         .string_generator = PolicyEnums::getStringGenerator(generator),
         .sample_policy = PolicyEnums::getSampleString(sample_policy),
@@ -403,8 +410,8 @@ int main(int argc, char* argv[]) {
     GeneratedStringsArgs generator_args{
         .numOfStrings = num_strings,
         .stringLength = string_length,
-        .minStringLength = string_length,
-        .maxStringLength = string_length + 10,
+        .minStringLength = min_string_length,
+        .maxStringLength = max_string_length,
         .dToNRatio = DN_ratio,
         .path = path,
     };
@@ -412,7 +419,10 @@ int main(int argc, char* argv[]) {
     std::vector<size_t> levels(levels_param.size());
     auto stoi = [](auto& str) { return std::stoi(str); };
     std::transform(levels_param.begin(), levels_param.end(), levels.begin(), stoi);
-    tlx_die_unless(std::is_sorted(levels.begin(), levels.end(), std::greater<>{}));
+
+    if (!std::is_sorted(levels.begin(), levels.end(), std::greater_equal<>{})) {
+        tlx_die("the given group sizes must be decreasing");
+    }
 
     auto num_bytes = std::min<size_t>(num_strings * 5, 100000u);
     dss_schimek::mpi::randomDataAllToAllExchange(num_bytes);

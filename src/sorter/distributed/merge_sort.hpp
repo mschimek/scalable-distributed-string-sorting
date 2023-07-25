@@ -66,14 +66,14 @@ public:
         tlx::sort_strings_detail::radixsort_CI3(string_ptr, 0, 0);
         measuring_tool_.stop("sort_locally");
 
+        if (comm.size() == 1) {
+            return container;
+        }
+
         measuring_tool_.start("avg_lcp");
         const size_t lcp_summand = 5u;
         auto global_lcp_avg = getAvgLcp(string_ptr, comm) + lcp_summand;
         measuring_tool_.stop("avg_lcp");
-
-        if (comm.size() == 1) {
-            return container;
-        }
 
         size_t round{0};
         Communicator comm_group{comm};
@@ -112,10 +112,10 @@ public:
     }
 
 private:
+    using SampleParams = sample::SampleParams<sample::MaxLength>;
     using MeasuringTool = measurement::MeasuringTool;
     MeasuringTool& measuring_tool_ = MeasuringTool::measuringTool();
 
-    using SampleParams = sample::SampleParams<sample::MaxLength>;
 
     static constexpr auto compute_partition =
         partition::compute_partition<StringPtr, SamplePolicy, SampleParams>;
@@ -136,9 +136,6 @@ private:
         measuring_tool_.add(num_groups, "num_groups");
         measuring_tool_.add(group_size, "group_size");
 
-        // todo why the *100 here
-        // todo make sampling_factor variable
-        //
         measuring_tool_.start("sort_globally", "compute_partition");
         measuring_tool_.setPhase("bucket_computation");
         SampleParams params{num_groups, 2, {2 * 100 * global_lcp_avg}};
@@ -171,8 +168,6 @@ private:
         measuring_tool_.start("sort_globally", "final_sorting");
         measuring_tool_.add(container.size(), "num_strings");
 
-        // todo why the *100 here
-        // todo make sampling_factor variable
         measuring_tool_.start("sort_globally", "compute_partition");
         measuring_tool_.setPhase("bucket_computation");
         SampleParams params{comm.size(), 2, sample::MaxLength{2 * 100 * global_lcp_avg}};
@@ -210,11 +205,11 @@ private:
         measuring_tool_.add(size_chars, "local_num_chars", false);
 
         measuring_tool_.setPhase("merging");
-        measuring_tool_.start("pruning_ranges");
-        std::erase(interval_sizes, 0);
-        measuring_tool_.stop("pruning_ranges");
-
+        measuring_tool_.start("merge_strings");
         measuring_tool_.start("compute_ranges");
+        // prune empty ranges, particularly useful for multi-level
+        std::erase(interval_sizes, 0);
+
         std::vector<std::pair<size_t, size_t>> ranges =
             compute_ranges_and_set_lcp_at_start_of_range(
                 recv_string_container,
@@ -243,6 +238,7 @@ private:
             );
         }
         measuring_tool_.stop("prefix_decompression");
+        measuring_tool_.stop("merge_strings");
 
         return sorted_container;
     }
