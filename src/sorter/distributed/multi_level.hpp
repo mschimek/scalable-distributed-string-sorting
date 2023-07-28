@@ -8,6 +8,8 @@
 #include <utility>
 #include <vector>
 
+#include <tlx/die.hpp>
+
 namespace dss_mehnert {
 namespace multi_level {
 
@@ -47,14 +49,19 @@ struct LevelIter {
 template <typename Communicator>
 class NoSplit {
 public:
-    using iterator = LevelIter<NoSplit<Communicator>, std::monostate>;
+    using iterator = LevelIter<NoSplit<Communicator>, Communicator>;
 
     NoSplit(Communicator const& comm) : comm_(comm) {}
 
     iterator begin() const { return {*this, 0}; }
     iterator end() const { return {*this, 0}; }
 
-    std::monostate level(size_t level) const { tlx_die("not allowed"); }
+    Level<Communicator> level(size_t level) const { tlx_die("not implemented"); };
+
+    static std::vector<size_t>
+    send_counts(std::vector<size_t> const& interval_sizes, Level<Communicator> const& level) {
+        tlx_die("not implemented");
+    };
 
     Communicator const& comm_root() const { return comm_; }
     Communicator const& comm_final() const { return comm_; }
