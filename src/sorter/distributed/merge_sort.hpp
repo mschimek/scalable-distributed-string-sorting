@@ -74,7 +74,7 @@ public:
         for (size_t round = 0; auto level: comms) {
             measuring_tool_.start("sort_globally", "partial_sorting");
 
-            container = sort_partial(std::move(container), level, avg_lcp, level.comm_orig);
+            container = sort_partial(std::move(container), level, avg_lcp);
 
             measuring_tool_.stop("sort_globally", "partial_sorting");
             measuring_tool_.setRound(++round);
@@ -117,8 +117,7 @@ private:
     StringLcpContainer sort_partial(
         StringLcpContainer&& container,
         multi_level::Level<Communicator> const& level,
-        size_t global_lcp_avg,
-        Communicator const& comm
+        size_t global_lcp_avg
     ) {
         auto string_ptr{container.make_string_lcp_ptr()};
         auto num_groups{level.num_groups()};
@@ -130,7 +129,7 @@ private:
         measuring_tool_.start("sort_globally", "compute_partition");
         measuring_tool_.setPhase("bucket_computation");
         SampleParams params{num_groups, 2, {2 * 100 * global_lcp_avg}};
-        auto interval_sizes{compute_partition(string_ptr, params, comm)};
+        auto interval_sizes{compute_partition(string_ptr, params, level.comm_orig)};
         measuring_tool_.stop("sort_globally", "compute_partition");
 
         measuring_tool_.start("sort_globally", "exchange_and_merge");

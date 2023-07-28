@@ -4,6 +4,7 @@
 #pragma once
 
 #include <algorithm>
+#include <iostream>
 #include <iterator>
 #include <utility>
 #include <vector>
@@ -19,7 +20,7 @@ struct Level {
     Communicator const& comm_exchange;
     Communicator const& comm_group;
 
-    size_t num_groups() const { return comm_exchange.size() / comm_group.size(); }
+    size_t num_groups() const { return comm_orig.size() / comm_group.size(); }
     size_t group_size() const { return comm_group.size(); }
 };
 
@@ -75,8 +76,21 @@ class NaiveSplit {
 public:
     using iterator = LevelIter<NaiveSplit<Communicator>, Communicator>;
 
-    NaiveSplit(auto first_level, auto last_level, Communicator const& root)
-        : communicators_(create_communicators(first_level, last_level, root)) {}
+    NaiveSplit(auto first_level, auto last_level, Communicator const& root) {
+        communicators_.reserve(std::distance(first_level, last_level) + 1);
+
+        // todo could use ranges here
+        Communicator comm{root};
+        for (auto level = first_level; level != last_level; ++level) {
+            auto group_size = *level;
+            tlx_die_unless(comm.size() % group_size == 0);
+            tlx_die_unless(1 < group_size && group_size < comm.size());
+
+            int color = static_cast<int>(comm.rank() / group_size);
+            communicators_.push_back(std::exchange(comm, comm.split(color)));
+        }
+        communicators_.push_back(std::move(comm));
+    }
 
     iterator begin() const { return {*this, 0}; }
     iterator end() const { return {*this, communicators_.size() - 1}; }
@@ -108,31 +122,55 @@ public:
 
 private:
     std::vector<Communicator> communicators_;
+};
 
-    static std::vector<Communicator>
-    create_communicators(auto first_level, auto last_level, Communicator const& root) {
-        std::vector<Communicator> comms;
-        comms.reserve(std::distance(first_level, last_level) + 1);
 
-        // todo could use ranges here
+template <typename Communicator>
+class GridwiseSplit {
+public:
+    using iterator = LevelIter<GridwiseSplit<Communicator>, Communicator>;
+
+    GridwiseSplit(auto first_level, auto last_level, Communicator const& root) {
+        comms_row_.reserve(std::distance(first_level, last_level) + 1);
+        comms_col_.reserve(std::distance(first_level, last_level));
+
         Communicator comm{root};
         for (auto level = first_level; level != last_level; ++level) {
             auto group_size = *level;
             tlx_die_unless(comm.size() % group_size == 0);
             tlx_die_unless(1 < group_size && group_size < comm.size());
 
-            int color = static_cast<int>(comm.rank() / group_size);
-            comms.push_back(std::exchange(comm, comm.split(color)));
+            // do NOT change the order of these two splits!
+            int col = static_cast<int>(comm.rank() % group_size);
+            comms_col_.push_back(comm.split(col));
+
+            // todo again, could use range based split
+            int row = static_cast<int>(comm.rank() / group_size);
+            comms_row_.push_back(std::exchange(comm, comm.split(row)));
         }
-        comms.push_back(std::move(comm));
-
-        return comms;
+        comms_row_.push_back(std::move(comm));
     }
-};
 
+    iterator begin() const { return {*this, 0}; }
+    iterator end() const { return {*this, comms_col_.size()}; }
 
-        return send_counts;
+    Communicator const& comm_root() const { return comms_row_.front(); }
+    Communicator const& comm_final() const { return comms_row_.back(); }
+
+    Level<Communicator> level(size_t level) const {
+        return {comms_row_[level], comms_col_[level], comms_row_[level + 1]};
     }
+
+    static std::vector<size_t>
+    send_counts(std::vector<size_t> const& interval_sizes, Level<Communicator> const& level) {
+        // nothing to do here, intervals are same shape as column communicator
+        tlx_assert_equal(interval_sizes.size(), level.comm_exchange.size());
+        return interval_sizes;
+    }
+
+private:
+    std::vector<Communicator> comms_row_;
+    std::vector<Communicator> comms_col_;
 };
 
 } // namespace multi_level
