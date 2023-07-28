@@ -52,7 +52,14 @@ class NoSplit {
 public:
     using iterator = LevelIter<NoSplit<Communicator>, Communicator>;
 
-    NoSplit(Communicator const& comm) : comm_(comm) {}
+    static constexpr std::string_view get_name() { return "no_split"; }
+
+    NoSplit(auto first_level, auto last_level, Communicator const& comm) : comm_(comm) {
+        tlx_die_verbose_unless(
+            first_level == last_level,
+            "you probably meant to use multi-level merge sort"
+        );
+    }
 
     iterator begin() const { return {*this, 0}; }
     iterator end() const { return {*this, 0}; }
@@ -75,6 +82,8 @@ template <typename Communicator>
 class NaiveSplit {
 public:
     using iterator = LevelIter<NaiveSplit<Communicator>, Communicator>;
+
+    static constexpr std::string_view get_name() { return "naive_split"; }
 
     NaiveSplit(auto first_level, auto last_level, Communicator const& root) {
         communicators_.reserve(std::distance(first_level, last_level) + 1);
@@ -129,6 +138,8 @@ template <typename Communicator>
 class GridwiseSplit {
 public:
     using iterator = LevelIter<GridwiseSplit<Communicator>, Communicator>;
+
+    static constexpr std::string_view get_name() { return "grid_split"; }
 
     GridwiseSplit(auto first_level, auto last_level, Communicator const& root) {
         comms_row_.reserve(std::distance(first_level, last_level) + 1);

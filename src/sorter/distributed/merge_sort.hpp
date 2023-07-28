@@ -149,7 +149,7 @@ private:
 
         measuring_tool_.start("sort_globally", "compute_partition");
         measuring_tool_.setPhase("bucket_computation");
-        SampleParams params{comm.size(), 2, sample::MaxLength{2 * 100 * global_lcp_avg}};
+        SampleParams params{comm.size(), 2, {2 * 100 * global_lcp_avg}};
         auto interval_sizes = compute_partition(string_ptr, params, comm);
         measuring_tool_.stop("sort_globally", "compute_partition");
 

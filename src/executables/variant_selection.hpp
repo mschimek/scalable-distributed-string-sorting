@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdlib>
+
 #include "util/random_string_generator.hpp"
 
 struct GeneratedStringsArgs {
@@ -115,11 +117,28 @@ inline MPIRoutineAllToAll getMPIRoutineAllToAll(size_t i) {
     }
 }
 
+enum class Subcommunicators { none = 0, naive = 1, grid = 2 };
+
+inline Subcommunicators getSubcommunicators(size_t i) {
+    switch (i) {
+        case 0:
+            return Subcommunicators::none;
+        case 1:
+            return Subcommunicators::naive;
+        case 2:
+            return Subcommunicators::grid;
+        default:
+            std::abort();
+    }
+};
+
+
 struct CombinationKey {
     GolombEncoding golomb_encoding;
     StringGenerator string_generator;
     SampleString sample_policy;
     MPIRoutineAllToAll alltoall_routine;
+    Subcommunicators subcomms;
     bool prefix_compression;
     bool lcp_compression;
     bool prefix_doubling;

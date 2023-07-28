@@ -47,6 +47,7 @@ template <
     typename SamplePolicy,
     typename MPIAllToAllRoutine,
     typename GolombEncoding,
+    typename Subcommunicators,
     typename ByteEncoder,
     typename LcpCompression>
 void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicator const& comm) {
@@ -103,12 +104,9 @@ void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicat
 
     measuring_tool.start("none", "sorting_overall");
 
-    using namespace dss_mehnert::multi_level;
-    // using Subcommunicators = NoSplit<dss_mehnert::Communicator>;
-    // Subcommunicators comms{comm};
-
-    using Subcommunicators = NaiveSplit<dss_mehnert::Communicator>;
+    measuring_tool.start("create_communicators");
     Subcommunicators comms{first_level, args.levels.end(), comm};
+    measuring_tool.stop("create_communicators");
 
     DistributedMergeSort<StringLcpPtr, Subcommunicators, AllToAllPolicy, SamplePolicy> merge_sort;
     StringLcpContainer<StringSet> sorted_string_cont =
@@ -160,17 +158,20 @@ template <
     typename SamplePolicy,
     typename MPIAllToAllRoutine,
     typename GolombEncoding,
+    typename Subcommunicators,
     typename ByteEncoder,
     typename LcpCompression>
 void print_config(
     std::string_view prefix, SorterArgs const& args, PolicyEnums::CombinationKey const& key
 ) {
+    // todo question: output all measurements in a single line?
     // todo add some of this back to prefix
     std::cout << prefix << " key=string_generator name=" << StringGenerator::getName() << "\n";
     std::cout << prefix << " key=DN_ratio value=" << args.generator_args.dToNRatio << "\n";
     std::cout << prefix << " key=sampler name=" << SamplePolicy::getName() << "\n";
     std::cout << prefix << " key=alltoall_routine name=" << MPIAllToAllRoutine::getName() << "\n";
     std::cout << prefix << " key=golomb_encoding name=" << GolombEncoding::getName() << "\n";
+    std::cout << prefix << " key=subcomms name=" << Subcommunicators::get_name() << "\n";
     std::cout << prefix << " key=prefix_compression value=" << key.prefix_compression << "\n";
     std::cout << prefix << " key=lcp_compression value=" << key.lcp_compression << "\n";
     std::cout << prefix << " key=prefix_doubling value=" << key.prefix_doubling << "\n";
@@ -178,7 +179,7 @@ void print_config(
 }
 
 template <typename... Args>
-void arg7(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
+void arg8(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
     dss_mehnert::Communicator comm;
     auto prefix = get_result_prefix(args, comm);
     if (comm.is_root()) {
@@ -193,22 +194,43 @@ void arg7(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
 }
 
 template <typename... Args>
-void arg6(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
+void arg7(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
     if (key.lcp_compression) {
-        arg7<Args..., std::true_type>(key, args);
+        arg8<Args..., std::true_type>(key, args);
     } else {
-        arg7<Args..., std::false_type>(key, args);
+        arg8<Args..., std::false_type>(key, args);
+    }
+}
+
+template <typename... Args>
+void arg6(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
+    using namespace dss_schimek;
+
+    if (key.prefix_compression) {
+        arg7<Args..., EmptyLcpByteEncoderMemCpy>(key, args);
+    } else {
+        arg7<Args..., EmptyByteEncoderMemCpy>(key, args);
     }
 }
 
 template <typename... Args>
 void arg5(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
-    using namespace dss_schimek;
+    using namespace dss_mehnert::multi_level;
+    using dss_mehnert::Communicator;
 
-    if (key.prefix_compression) {
-        arg6<Args..., EmptyLcpByteEncoderMemCpy>(key, args);
-    } else {
-        arg6<Args..., EmptyByteEncoderMemCpy>(key, args);
+    switch (key.subcomms) {
+        case PolicyEnums::Subcommunicators::none: {
+            arg6<Args..., NoSplit<Communicator>>(key, args);
+            break;
+        }
+        case PolicyEnums::Subcommunicators::naive: {
+            arg6<Args..., NaiveSplit<Communicator>>(key, args);
+            break;
+        }
+        case PolicyEnums::Subcommunicators::grid: {
+            arg6<Args..., GridwiseSplit<Communicator>>(key, args);
+            break;
+        }
     }
 }
 
@@ -323,6 +345,7 @@ int main(int argc, char* argv[]) {
     unsigned int sample_policy = static_cast<int>(PolicyEnums::SampleString::numStrings);
     unsigned int alltoall_routine = static_cast<int>(PolicyEnums::MPIRoutineAllToAll::combined);
     unsigned int golomb_encoding = static_cast<int>(PolicyEnums::GolombEncoding::noGolombEncoding);
+    unsigned int comm_split = static_cast<int>(PolicyEnums::Subcommunicators::none);
     size_t num_strings = 100000;
     size_t num_iterations = 5;
     size_t string_length = 50;
@@ -386,6 +409,13 @@ int main(int argc, char* argv[]) {
         "All-To-All routine to use during string exchange "
         "(0=small, 1=direct, [2]=combined)"
     );
+    cp.add_unsigned(
+        'u',
+        "subcomms",
+        comm_split,
+        "whether and how to create subcommunicators during merge sort "
+        "([0]=none, 1=naive, 2=grid)"
+    );
     cp.add_flag(
         'c',
         "check",
@@ -413,6 +443,7 @@ int main(int argc, char* argv[]) {
         .string_generator = PolicyEnums::getStringGenerator(generator),
         .sample_policy = PolicyEnums::getSampleString(sample_policy),
         .alltoall_routine = PolicyEnums::getMPIRoutineAllToAll(alltoall_routine),
+        .subcomms = PolicyEnums::getSubcommunicators(comm_split),
         .prefix_compression = prefix_compression,
         .lcp_compression = lcp_compression,
         .prefix_doubling = prefix_doubling,
