@@ -30,8 +30,9 @@ list(APPEND
   # "-Wunused"
 )
 
-set(CMAKE_CXX_FLAGS_DEBUG "-g")
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -flto -DNDEBUG -march=native")
+## todo maybe use -flto, but consider binary size (maybe strip?)
+set(CMAKE_CXX_FLAGS_DEBUG "-ggdb")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG -march=native")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -DDEBUG -march=native -ggdb")
 
 # Default to Release builds

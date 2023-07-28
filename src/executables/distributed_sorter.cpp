@@ -25,6 +25,7 @@
 #include "mpi/warmup.hpp"
 #include "sorter/distributed/bloomfilter.hpp"
 #include "sorter/distributed/merge_sort.hpp"
+#include "sorter/distributed/multi_level.hpp"
 #include "util/measuringTool.hpp"
 #include "util/random_string_generator.hpp"
 #include "variant_selection.hpp"
@@ -51,7 +52,9 @@ template <
 void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicator const& comm) {
     using namespace dss_schimek;
 
+    using dss_mehnert::Communicator;
     using dss_mehnert::sorter::DistributedMergeSort;
+
     using StringLcpPtr = typename tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
 
     constexpr bool lcp_compression = LcpCompression();
@@ -73,8 +76,10 @@ void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicat
     }
 
     comm.barrier();
+    measuring_tool.start("generate_strings");
     StringGenerator rand_container =
         getGeneratedStringContainer<StringGenerator, StringSet>(args.generator_args);
+    measuring_tool.stop("generate_strings");
     if (args.check || args.check_exhaustive) {
         checker.storeLocalInput(rand_container.raw_strings());
     }
@@ -98,10 +103,16 @@ void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicat
 
     measuring_tool.start("none", "sorting_overall");
 
-    DistributedMergeSort<StringLcpPtr, AllToAllPolicy, SamplePolicy> merge_sort;
+    using namespace dss_mehnert::multi_level;
+    // using Subcommunicators = NoSplit<dss_mehnert::Communicator>;
+    // Subcommunicators comms{comm};
+
+    using Subcommunicators = NaiveSplit<dss_mehnert::Communicator>;
+    Subcommunicators comms{first_level, args.levels.end(), comm};
+
+    DistributedMergeSort<StringLcpPtr, Subcommunicators, AllToAllPolicy, SamplePolicy> merge_sort;
     StringLcpContainer<StringSet> sorted_string_cont =
-        merge_sort
-            .sort(rand_string_ptr, std::move(rand_container), first_level, args.levels.end(), comm);
+        merge_sort.sort(rand_string_ptr, std::move(rand_container), comms);
 
     measuring_tool.stop("none", "sorting_overall", comm);
 

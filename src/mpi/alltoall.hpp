@@ -13,6 +13,7 @@
 #include <vector>
 
 #include <mpi.h>
+#include <tlx/die.hpp>
 
 #include "mpi/allreduce.hpp"
 #include "mpi/big_type.hpp"
@@ -20,7 +21,6 @@
 #include "mpi/environment.hpp"
 #include "mpi/type_mapper.hpp"
 #include "strings/stringcontainer.hpp"
-#include "tlx/die.hpp"
 #include "util/measuringTool.hpp"
 #include "util/structs.hpp"
 

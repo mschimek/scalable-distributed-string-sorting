@@ -5,6 +5,7 @@ target_sources(dss_base
         merge_sort.hpp
         merging.hpp
         misc.hpp
+        multi_level.hpp
         partition.hpp
         prefix_doubling.hpp
         sample.hpp

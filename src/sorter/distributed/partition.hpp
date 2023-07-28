@@ -24,7 +24,7 @@ namespace partition {
 using dss_mehnert::sample::SampleParams;
 
 template <typename StringPtr, typename Sampler, typename Params>
-std::enable_if_t<!Sampler::isIndexed, std::vector<uint64_t>>
+std::enable_if_t<!Sampler::isIndexed, std::vector<size_t>>
 compute_partition(StringPtr string_ptr, Params const& params, Communicator const& comm) {
     using namespace dss_schimek;
     using Comparator = StringComparator;
@@ -61,7 +61,7 @@ compute_partition(StringPtr string_ptr, Params const& params, Communicator const
 }
 
 template <typename StringPtr, typename Sampler, typename Params>
-std::enable_if_t<Sampler::isIndexed, std::vector<uint64_t>>
+std::enable_if_t<Sampler::isIndexed, std::vector<size_t>>
 compute_partition(StringPtr string_ptr, Params const& params, Communicator const& comm) {
     using namespace dss_schimek;
     using Comparator = IndexStringComparator;
@@ -103,7 +103,7 @@ compute_partition(StringPtr string_ptr, Params const& params, Communicator const
 }
 
 template <typename StringPtr, typename Sampler, typename Params>
-typename std::enable_if_t<!Sampler::isIndexed, std::vector<uint64_t>>
+typename std::enable_if_t<!Sampler::isIndexed, std::vector<size_t>>
 compute_partition_sequential(StringPtr string_ptr, Params const& params, Communicator const& comm) {
     auto& measuringTool = measurement::MeasuringTool::measuringTool();
     auto ss = string_ptr.active();
@@ -130,7 +130,7 @@ compute_partition_sequential(StringPtr string_ptr, Params const& params, Communi
 }
 
 template <typename Sampler, typename StringPtr, typename Params>
-typename std::enable_if<Sampler::isIndexed, std::vector<uint64_t>>::type
+typename std::enable_if_t<Sampler::isIndexed, std::vector<size_t>>
 compute_partition_sequential(StringPtr string_ptr, Params const& params, Communicator const& comm) {
     using StringSet = dss_schimek::UCharLengthIndexStringSet;
     using StringContainer = dss_schimek::IndexStringLcpContainer<StringSet>;
