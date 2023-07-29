@@ -244,7 +244,8 @@ void arg4(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
             break;
         }
         case PolicyEnums::GolombEncoding::sequentialGolombEncoding: {
-            arg5<Args..., AllToAllHashesGolomb>(key, args);
+            // arg5<Args..., AllToAllHashesGolomb>(key, args);
+            tlx_die("disabled for compile time");
             break;
         }
         case PolicyEnums::GolombEncoding::pipelinedGolombEncoding: {

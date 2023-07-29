@@ -4,11 +4,14 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <iostream>
 #include <iterator>
 #include <utility>
 #include <vector>
 
+#include <kamping/checking_casts.hpp>
+#include <kamping/rank_ranges.hpp>
 #include <tlx/die.hpp>
 
 namespace dss_mehnert {
@@ -28,23 +31,31 @@ template <typename Impl, typename Communicator>
 struct LevelIter {
     using iterator = LevelIter<Impl, Communicator>;
 
-    Impl const& impl;
-    size_t level;
+    LevelIter(Impl const& impl, size_t level) : impl_(impl), level_(level) {}
 
     iterator& operator++() {
-        ++level;
+        ++level_;
         return *this;
     }
 
-    Level<Communicator> operator*() const { return impl.level(level); }
+    Level<Communicator> operator*() const { return impl_.level(level_); }
 
     friend void swap(iterator& lhs, iterator& rhs) {
-        std::swap(lhs.impl, rhs.impl);
-        std::swap(lhs.level, rhs.level);
+        std::swap(lhs.impl_, rhs.impl_);
+        std::swap(lhs.level_, rhs.level_);
     }
 
-    bool operator==(iterator const& rhs) { return level == rhs.level; }
-    bool operator!=(iterator const& rhs) { return level != rhs.level; }
+    friend bool operator==(iterator const& lhs, iterator const& rhs) {
+        return lhs.level_ == rhs.level_;
+    }
+
+    friend bool operator!=(iterator const& lhs, iterator const& rhs) {
+        return lhs.level_ != rhs.level_;
+    }
+
+private:
+    Impl const& impl_;
+    size_t level_;
 };
 
 template <typename Communicator>
@@ -88,15 +99,18 @@ public:
     NaiveSplit(auto first_level, auto last_level, Communicator const& root) {
         communicators_.reserve(std::distance(first_level, last_level) + 1);
 
-        // todo could use ranges here
         Communicator comm{root};
         for (auto level = first_level; level != last_level; ++level) {
-            auto group_size = *level;
-            tlx_die_unless(comm.size() % group_size == 0);
-            tlx_die_unless(1 < group_size && group_size < comm.size());
+            auto group_size = kamping::asserting_cast<int>(*level);
+            tlx_die_unless(comm.size_signed() % group_size == 0);
+            tlx_die_unless(1 < group_size && group_size < comm.size_signed());
 
-            int color = static_cast<int>(comm.rank() / group_size);
-            communicators_.push_back(std::exchange(comm, comm.split(color)));
+            int first = (comm.rank_signed() / group_size) * group_size;
+            int last = first + group_size - 1;
+            kamping::RankRange range{first, last, 1};
+
+            auto comm_group = comm.create_subcommunicators({std::array{range}});
+            communicators_.push_back(std::exchange(comm, std::move(comm_group)));
         }
         communicators_.push_back(std::move(comm));
     }
@@ -147,17 +161,23 @@ public:
 
         Communicator comm{root};
         for (auto level = first_level; level != last_level; ++level) {
-            auto group_size = *level;
-            tlx_die_unless(comm.size() % group_size == 0);
-            tlx_die_unless(1 < group_size && group_size < comm.size());
+            auto group_size = kamping::asserting_cast<int>(*level);
+            tlx_die_unless(comm.size_signed() % group_size == 0);
+            tlx_die_unless(1 < group_size && group_size < comm.size_signed());
 
-            // do NOT change the order of these two splits!
-            int col = static_cast<int>(comm.rank() % group_size);
-            comms_col_.push_back(comm.split(col));
+            int col_first = comm.rank_signed() % group_size;
+            int col_last = comm.size_signed() - group_size + col_first;
+            kamping::RankRange col_range{col_first, col_last, group_size};
 
-            // todo again, could use range based split
-            int row = static_cast<int>(comm.rank() / group_size);
-            comms_row_.push_back(std::exchange(comm, comm.split(row)));
+            auto comm_col = comm.create_subcommunicators({std::array{col_range}});
+            comms_col_.push_back(std::move(comm_col));
+
+            int row_first = (comm.rank_signed() / group_size) * group_size;
+            int row_last = row_first + group_size - 1;
+            kamping::RankRange row_range{row_first, row_last, 1};
+
+            auto comm_row = comm.create_subcommunicators({std::array{row_range}});
+            comms_row_.push_back(std::exchange(comm, std::move(comm_row)));
         }
         comms_row_.push_back(std::move(comm));
     }
