@@ -23,7 +23,7 @@ namespace partition {
 
 using dss_mehnert::sample::SampleParams;
 
-template <typename StringPtr, typename Sampler, typename Params>
+template <typename Sampler, typename StringPtr, typename Params>
 std::enable_if_t<!Sampler::isIndexed, std::vector<size_t>>
 compute_partition(StringPtr string_ptr, Params const& params, Communicator const& comm) {
     using namespace dss_schimek;
@@ -60,7 +60,7 @@ compute_partition(StringPtr string_ptr, Params const& params, Communicator const
     return interval_sizes;
 }
 
-template <typename StringPtr, typename Sampler, typename Params>
+template <typename Sampler, typename StringPtr, typename Params>
 std::enable_if_t<Sampler::isIndexed, std::vector<size_t>>
 compute_partition(StringPtr string_ptr, Params const& params, Communicator const& comm) {
     using namespace dss_schimek;
@@ -102,7 +102,7 @@ compute_partition(StringPtr string_ptr, Params const& params, Communicator const
     return interval_sizes;
 }
 
-template <typename StringPtr, typename Sampler, typename Params>
+template <typename Sampler, typename StringPtr, typename Params>
 typename std::enable_if_t<!Sampler::isIndexed, std::vector<size_t>>
 compute_partition_sequential(StringPtr string_ptr, Params const& params, Communicator const& comm) {
     auto& measuringTool = measurement::MeasuringTool::measuringTool();

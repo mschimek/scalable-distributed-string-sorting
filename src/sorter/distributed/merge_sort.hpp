@@ -10,6 +10,7 @@
 #include <random>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -69,12 +70,14 @@ public:
         measuring_tool_.start("avg_lcp");
         const size_t lcp_summand = 5u;
         auto avg_lcp = getAvgLcp(string_ptr, comms.comm_root()) + lcp_summand;
+        // todo what is the justification for this value
+        sample::MaxLength max_length{2 * 100 * avg_lcp};
         measuring_tool_.stop("avg_lcp");
 
         for (size_t round = 0; auto level: comms) {
             measuring_tool_.start("sort_globally", "partial_sorting");
 
-            container = sort_partial(std::move(container), level, avg_lcp);
+            container = sort_partial(std::move(container), level, std::tuple{max_length});
 
             measuring_tool_.stop("sort_globally", "partial_sorting");
             measuring_tool_.setRound(++round);
@@ -99,7 +102,9 @@ public:
         }
 
         measuring_tool_.start("sort_globally", "final_sorting");
-        auto sorted_container = sort_exhaustive(std::move(container), avg_lcp, comms.comm_final());
+        auto const& comm_final = comms.comm_final();
+        auto sorted_container =
+            sort_exhaustive(std::move(container), comm_final, std::tuple{max_length});
         measuring_tool_.stop("sort_globally", "final_sorting");
 
         measuring_tool_.setRound(0);
@@ -107,50 +112,61 @@ public:
     }
 
 private:
-    using SampleParams = sample::SampleParams<sample::MaxLength>;
     using MeasuringTool = measurement::MeasuringTool;
     MeasuringTool& measuring_tool_ = MeasuringTool::measuringTool();
 
-    static constexpr auto compute_partition =
-        partition::compute_partition<StringPtr, SamplePolicy, SampleParams>;
-
+    template <typename... SampleArgs>
     StringLcpContainer sort_partial(
         StringLcpContainer&& container,
         multi_level::Level<Communicator> const& level,
-        size_t global_lcp_avg
+        std::tuple<SampleArgs...> extra_sample_args
     ) {
-        auto string_ptr{container.make_string_lcp_ptr()};
-        auto num_groups{level.num_groups()};
-        auto group_size{level.group_size()};
+        using partition::compute_partition;
+
+        auto string_ptr = container.make_string_lcp_ptr();
+        auto num_groups = level.num_groups();
+        auto group_size = level.group_size();
 
         measuring_tool_.add(num_groups, "num_groups");
         measuring_tool_.add(group_size, "group_size");
 
         measuring_tool_.start("sort_globally", "compute_partition");
         measuring_tool_.setPhase("bucket_computation");
-        SampleParams params{num_groups, 2, {2 * 100 * global_lcp_avg}};
-        auto interval_sizes{compute_partition(string_ptr, params, level.comm_orig)};
+        auto get_params = [=](auto const&... args) {
+            return sample::SampleParams{num_groups, 2, args...};
+        };
+        auto params = std::apply(get_params, extra_sample_args);
+        auto const& comm_orig = level.comm_orig;
+        auto interval_sizes = compute_partition<SamplePolicy>(string_ptr, params, comm_orig);
         measuring_tool_.stop("sort_globally", "compute_partition");
 
         measuring_tool_.start("sort_globally", "exchange_and_merge");
-        auto send_counts{Subcommunicators::send_counts(interval_sizes, level)};
-        auto const& comm_exchange{level.comm_exchange};
+        auto send_counts = Subcommunicators::send_counts(interval_sizes, level);
+        auto const& comm_exchange = level.comm_exchange;
         auto sorted_container{exchange_and_merge(std::move(container), send_counts, comm_exchange)};
         measuring_tool_.stop("sort_globally", "exchange_and_merge");
 
         return sorted_container;
     }
 
+    template <typename... SampleArgs>
     StringLcpContainer sort_exhaustive(
-        StringLcpContainer&& container, size_t global_lcp_avg, Communicator const& comm
+        StringLcpContainer&& container,
+        Communicator const& comm,
+        std::tuple<SampleArgs...> extra_sample_args
     ) {
+        using partition::compute_partition;
+
         auto string_ptr = container.make_string_lcp_ptr();
         measuring_tool_.add(container.size(), "num_strings");
 
         measuring_tool_.start("sort_globally", "compute_partition");
         measuring_tool_.setPhase("bucket_computation");
-        SampleParams params{comm.size(), 2, {2 * 100 * global_lcp_avg}};
-        auto interval_sizes = compute_partition(string_ptr, params, comm);
+        auto get_params = [&](auto... args) {
+            return sample::SampleParams{comm.size(), 2, args...};
+        };
+        auto params = std::apply(get_params, extra_sample_args);
+        auto interval_sizes = compute_partition<SamplePolicy>(string_ptr, params, comm);
         measuring_tool_.stop("sort_globally", "compute_partition");
 
         measuring_tool_.start("sort_globally", "exchange_and_merge");
