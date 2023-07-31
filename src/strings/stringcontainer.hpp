@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <cassert>
-#include <iostream>
 #include <iterator>
 #include <memory>
 #include <numeric>
@@ -20,7 +19,7 @@
 
 namespace dss_schimek {
 
-namespace internal {
+namespace _internal {
 
 template <typename OutIt, typename Char, typename Init>
 void init_str_len(OutIt out, std::vector<Char>& raw_strings, Init init) {
@@ -33,8 +32,6 @@ void init_str_len(OutIt out, std::vector<Char>& raw_strings, Init init) {
     }
 }
 
-} // namespace internal
-
 template <typename StringSet>
 class InitPolicy {
     using Char = typename StringSet::Char;
@@ -46,7 +43,7 @@ public:
         strings.reserve(raw_strings.size() / 100);
 
         auto init = [](auto str, auto) { return String{str}; };
-        internal::init_str_len(std::back_inserter(strings), raw_strings, init);
+        init_str_len(std::back_inserter(strings), raw_strings, init);
         return strings;
     }
 };
@@ -63,7 +60,7 @@ public:
         strings.reserve(raw_strings.size() / 100);
 
         auto init = [](auto str, auto len) { return String{str, Length{len}}; };
-        internal::init_str_len(std::back_inserter(strings), raw_strings, init);
+        init_str_len(std::back_inserter(strings), raw_strings, init);
         return strings;
     }
 };
@@ -82,19 +79,19 @@ public:
         auto init = [index = size_t{0}](auto str, auto len) mutable {
             return String{str, Length{len}, Index{index++}};
         };
-        internal::init_str_len(std::back_inserter(strings), raw_strings, init);
+        init_str_len(std::back_inserter(strings), raw_strings, init);
         return strings;
     }
 
     std::vector<String>
-    init_strings(std::vector<Char>& raw_strings, std::vector<uint64_t> const& string_idxs) {
+    init_strings(std::vector<Char>& raw_strings, std::vector<uint64_t> const& indices) {
         std::vector<String> strings;
         strings.reserve(raw_strings.size() / 100);
 
-        auto init = [index_it = string_idxs.cbegin()](auto str, auto len) mutable {
+        auto init = [index_it = indices.cbegin()](auto str, auto len) mutable {
             return String{str, Length{len}, Index{*(index_it++)}};
         };
-        internal::init_str_len(std::back_inserter(strings), raw_strings, init);
+        init_str_len(std::back_inserter(strings), raw_strings, init);
         return strings;
     }
 };
@@ -123,7 +120,7 @@ public:
         std::vector<String> strings(num_strs);
 
         auto init = [](auto str, auto len) { return String{str, Length_{len}...}; };
-        internal::init_str_len(strings.begin(), raw_strings, init);
+        init_str_len(strings.begin(), raw_strings, init);
 
         auto str = strings.begin();
         for (size_t PE_idx = 0; PE_idx < intervals.size(); ++PE_idx) {
@@ -147,90 +144,53 @@ public:
         auto init = [&](auto str, auto len) mutable {
             return String{str, Length_{len}..., PEIndex{*(PE_it++)}, StringIndex{*(str_it++)}};
         };
-        internal::init_str_len(strings.begin(), raw_strings, init);
+        init_str_len(strings.begin(), raw_strings, init);
         return strings;
     }
 };
 
-// TODO Think about better design (subclasses?) for different StringSets +
-// additional data like the saved LCP values when doing prefix compression
-template <typename StringSet_>
-class StringLcpContainer : private InitPolicy<StringSet_> {
+} // namespace _internal
+
+
+template <typename StringSet_, typename Container>
+class BaseStringContainer : private _internal::InitPolicy<StringSet_> {
 public:
     using StringSet = StringSet_;
-    using Char = typename StringSet::Char;
-    using CharIterator = typename StringSet::CharIterator;
-    using String = typename StringSet::String;
+    using StringPtr = tlx::sort_strings_detail::StringPtr<StringSet>;
+    using Char = StringSet::Char;
+    using CharIterator = StringSet::CharIterator;
+    using String = StringSet::String;
 
-    StringLcpContainer()
-        : raw_strings_(std::make_unique<std::vector<Char>>()),
-          strings_(),
-          lcps_(),
-          savedLcps_() {}
+    static constexpr bool isIndexed = false;
 
-    StringLcpContainer(std::vector<Char>&& raw_strings)
-        : raw_strings_(std::make_unique<std::vector<Char>>(std::move(raw_strings))) {
-        update_strings();
-        lcps_.resize(size(), 0);
-    }
-
-    explicit StringLcpContainer(std::vector<Char>&& raw_strings, std::vector<size_t>&& lcp)
-        : raw_strings_(std::make_unique<std::vector<Char>>(std::move(raw_strings))),
-          savedLcps_() {
-        update_strings();
-        lcps_ = std::move(lcp);
-    }
-
-    // To be used with GenericCharIndexPEIndexStringSet
-    explicit StringLcpContainer(
-        std::vector<Char>&& raw_strings,
-        std::vector<size_t>&& lcp,
-        std::vector<size_t> const& intervalSizes,
-        std::vector<size_t> const& offsets
-    )
-        : raw_strings_(std::make_unique<std::vector<Char>>(std::move(raw_strings))),
-          savedLcps_() {
-        update_strings(intervalSizes, offsets);
-        lcps_ = std::move(lcp);
-    }
-
-    // todo this overload is pretty horrendous
-    explicit StringLcpContainer(
-        std::vector<Char>&& raw_strings,
-        std::vector<size_t>&& lcp,
-        std::vector<size_t>&& PE_indices,
-        std::vector<size_t>&& str_indices
-    )
-        : raw_strings_(std::make_unique<std::vector<Char>>(std::move(raw_strings))),
-          savedLcps_() {
-        update_strings(std::move(PE_indices), std::move(str_indices));
-        lcps_ = std::move(lcp);
-    }
+    BaseStringContainer() : raw_strings_{std::make_unique<std::vector<Char>>()} {}
 
     String operator[](size_t i) { return strings_[i]; }
     String front() { return strings_.front(); }
     String back() { return strings_.back(); }
     String* strings() { return strings_.data(); }
-    std::vector<String>& getStrings() { return strings_; }
     size_t size() const { return strings_.size(); }
     bool empty() const { return strings_.empty(); }
     size_t char_size() const { return raw_strings_->size(); }
-    std::vector<size_t>& lcps() { return lcps_; }
-    std::vector<size_t>& savedLcps() { return savedLcps_; }
-    std::vector<size_t> const& lcps() const { return lcps_; }
-    size_t* lcp_array() { return lcps_.data(); }
+    std::vector<String>& getStrings() { return strings_; }
+    std::vector<String> const& getStrings() const { return strings_; }
     std::vector<Char>& raw_strings() { return *raw_strings_; }
     std::vector<Char> const& raw_strings() const { return *raw_strings_; }
+    std::vector<Char>&& releaseRawStrings() { return std::move(*raw_strings_); }
 
-    StringSet make_string_set() { return StringSet(strings(), strings() + size()); }
+    std::vector<unsigned char> getRawString(int64_t i) {
+        if (i < 0 || static_cast<uint64_t>(i) > size())
+            return std::vector<unsigned char>(1, 0);
 
-    tlx::sort_strings_detail::StringPtr<StringSet> make_string_ptr() {
-        return tlx::sort_strings_detail::StringPtr(make_string_set());
+        // todo should use StringSet::getLength here
+        auto const length = strings_[i].length + 1;
+        std::vector<unsigned char> rawString(length);
+        std::copy(strings_[i].string, strings_[i].string + length, rawString.begin());
+        return rawString;
     }
 
-    tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t> make_string_lcp_ptr() {
-        return tlx::sort_strings_detail::StringLcpPtr(make_string_set(), lcp_array());
-    }
+    StringSet make_string_set() { return {strings(), strings() + size()}; }
+    StringPtr make_string_ptr() { return {make_string_set()}; }
 
     void deleteRawStrings() {
         raw_strings_->clear();
@@ -242,21 +202,19 @@ public:
         strings_.shrink_to_fit();
     }
 
-    void deleteLcps() {
-        lcps_.clear();
-        lcps_.shrink_to_fit();
-    }
-
-    void deleteSavedLcps() {
-        savedLcps_.clear();
-        savedLcps_.shrink_to_fit();
-    }
-
     void deleteAll() {
-        deleteRawStrings();
-        deleteStrings();
-        deleteLcps();
-        deleteSavedLcps();
+        this->deleteRawStrings();
+        this->deleteStrings();
+    }
+
+    bool operator==(Container const& other) { return this->raw_strings() == other.raw_strings(); }
+
+    void set(std::vector<Char>&& raw_strings) { *raw_strings_ = std::move(raw_strings); }
+    void set(std::vector<String>&& strings) { strings_ = std::move(strings); }
+
+    void update(std::vector<Char>&& raw_strings) {
+        set(std::move(raw_strings));
+        update_strings();
     }
 
     void orderRawStrings() {
@@ -285,6 +243,76 @@ public:
         return true;
     }
 
+protected:
+    static constexpr size_t approx_string_length = 10;
+    std::unique_ptr<std::vector<Char>> raw_strings_;
+    std::vector<String> strings_;
+
+    template <typename... Args>
+    explicit BaseStringContainer(std::vector<Char>&& raw_strings, Args&&... args)
+        : raw_strings_(std::make_unique<std::vector<Char>>(std::move(raw_strings))),
+          strings_(_internal::InitPolicy<StringSet>::init_strings(
+              *raw_strings_, std::forward<Args>(args)...
+          )) {}
+
+    template <typename... Args>
+    void update_strings(Args&&... args) {
+        strings_ = _internal::InitPolicy<StringSet>::init_strings(
+            *raw_strings_,
+            std::forward<Args>(args)...
+        );
+    }
+};
+
+template <typename StringSet_, typename Container>
+class BaseStringLcpContainer : public BaseStringContainer<StringSet_, Container> {
+public:
+    using Base = BaseStringContainer<StringSet_, Container>;
+    using Char = Base::Char;
+    using String = Base::String;
+
+    using StringLcpPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet_, size_t>;
+
+    BaseStringLcpContainer() = default;
+
+    size_t* lcp_array() { return lcps_.data(); }
+    std::vector<size_t>& lcps() { return lcps_; }
+    std::vector<size_t> const& lcps() const { return lcps_; }
+    std::vector<size_t>& savedLcps() { return savedLcps_; }
+    std::vector<size_t> const& savedLcps() const { return savedLcps_; }
+
+    StringLcpPtr make_string_lcp_ptr() { return {this->make_string_set(), this->lcp_array()}; }
+
+    // todo these overloads cause problemns in combination with inheritance
+    void set(std::vector<Char>&& raw_strings) { Base::set(std::move(raw_strings)); }
+    void set(std::vector<String>&& strings) { Base::set(std::move(strings)); }
+    void set(std::vector<size_t>&& lcps) { lcps_ = std::move(lcps); }
+    void setSavedLcps(std::vector<size_t>&& savedLcps) { savedLcps_ = std::move(savedLcps); }
+
+    void update(std::vector<Char>&& raw_strings) {
+        set(std::move(raw_strings));
+        this->update_strings();
+        if (lcps_.size() != this->size())
+            lcps_.resize(this->size(), 0);
+    }
+
+    void deleteLcps() {
+        lcps_.clear();
+        lcps_.shrink_to_fit();
+    }
+
+    void deleteSavedLcps() {
+        savedLcps_.clear();
+        savedLcps_.shrink_to_fit();
+    }
+
+    void deleteAll() {
+        this->deleteRawStrings();
+        this->deleteStrings();
+        deleteLcps();
+        deleteSavedLcps();
+    }
+
     void saveLcps() { savedLcps_ = lcps_; }
 
     template <typename StringSet, typename LcpIt>
@@ -297,7 +325,7 @@ public:
             return;
 
         size_t L = std::accumulate(first_lcp, last_lcp, size_t{0});
-        std::vector<Char> raw_strings(char_size() + L);
+        std::vector<Char> raw_strings(this->char_size() + L);
 
         auto& fst_str = ss[ss.begin()];
         auto const fst_str_begin = ss.get_chars(fst_str, 0);
@@ -327,322 +355,49 @@ public:
             curr_chars += curr_str_len + lcp;
         }
 
-        *raw_strings_ = std::move(raw_strings);
+        *this->raw_strings_ = std::move(raw_strings);
     }
 
-    void set(std::vector<Char>&& raw_strings) { *raw_strings_ = std::move(raw_strings); }
-    void set(std::vector<String>&& strings) { strings_ = std::move(strings); }
-    void set(std::vector<size_t>&& lcps) { lcps_ = std::move(lcps); }
-    void setSavedLcps(std::vector<size_t>&& savedLcps) { savedLcps_ = std::move(savedLcps); }
-
-    bool operator==(StringLcpContainer<StringSet_> const& other) {
-        return (raw_strings() == other.raw_strings()) && (lcps() == other.lcps());
-    }
-
-    void update(std::vector<Char>&& raw_strings) {
-        set(std::move(raw_strings));
-        update_strings();
-        if (lcps_.size() != size())
-            lcps_.resize(size(), 0);
-    }
-
-    bool is_consistent() {
-        if (lcps_.size() != strings_.size()) {
-            LOG1 << "lcps.size() = " << lcps_.size() << " != " << strings_.size()
-                 << " = strings.size()";
-            return false;
-        }
-
-        return std::all_of(strings_.begin(), strings_.end(), [this](const String str) -> bool {
-            if (str < raw_strings_.data() || str > raw_strings_.data() + raw_strings_.size())
-                return false;
-            if (str == raw_strings_.data())
-                return true;
-            return *(str - 1) == 0;
-        });
-    }
-
-    size_t sumOfCapacities() {
-        return raw_strings_->capacity() * sizeof(Char) + strings_.capacity() * sizeof(String)
-               + lcps_.capacity() * sizeof(size_t) + savedLcps_.capacity() * sizeof(size_t);
-    }
-    size_t sumOfSizes() {
-        return raw_strings_->size() * sizeof(Char) + strings_.size() * sizeof(String)
-               + lcps_.size() * sizeof(size_t) + savedLcps_.size() * sizeof(size_t);
+    bool operator==(Container const& other) {
+        return (this->raw_strings() == other.raw_strings()) && (lcps() == other.lcps());
     }
 
 protected:
-    static constexpr size_t approx_string_length = 10;
-    std::unique_ptr<std::vector<Char>> raw_strings_;
-    std::vector<String> strings_;
     std::vector<size_t> lcps_;
+
+    // todo this should be removed entirely
     std::vector<size_t> savedLcps_; // only used for prefix compression, ->
                                     // lcp-values received from other PEs before
                                     // merging TODO think about better structure
 
-    void update_strings() { strings_ = InitPolicy<StringSet>::init_strings(*raw_strings_); }
-
-    void
-    update_strings(std::vector<size_t> const& intervalSizes, std::vector<size_t> const& offsets) {
-        strings_ = InitPolicy<StringSet>::init_strings(*raw_strings_, intervalSizes, offsets);
-    }
-
-    void update_strings(std::vector<size_t>&& PE_indices, std::vector<size_t>&& str_indices) {
-        strings_ = InitPolicy<StringSet>::init_strings(
-            *raw_strings_,
-            std::move(PE_indices),
-            std::move(str_indices)
-        );
-    }
-};
-
-template <typename StringSet_>
-class IndexStringLcpContainer : private InitPolicy<StringSet_> {
-public:
-    using StringSet = StringSet_;
-    using Char = typename StringSet::Char;
-    using CharIterator = typename StringSet::CharIterator;
-    using String = typename StringSet::String;
-
-    IndexStringLcpContainer()
-        : raw_strings_(std::make_unique<std::vector<Char>>()),
-          strings_(),
-          lcps_() {}
-
-    explicit IndexStringLcpContainer(
-        std::vector<Char>&& raw_strings, std::vector<uint64_t>& indices
+    template <typename... Args>
+    explicit BaseStringLcpContainer(
+        std::vector<Char>&& raw_strings, std::vector<size_t>&& lcps, Args&&... args
     )
-        : raw_strings_(std::make_unique<std::vector<Char>>(std::move(raw_strings))) {
-        update_strings(indices);
-        lcps_.resize(size(), 0);
-    }
-
-    String operator[](size_t i) { return strings_[i]; }
-    String front() { return strings_.front(); }
-    String back() { return strings_.back(); }
-    String* strings() { return strings_.data(); }
-    std::vector<String>& getStrings() { return strings_; }
-    size_t size() const { return strings_.size(); }
-    bool empty() const { return strings_.empty(); }
-    size_t char_size() const { return raw_strings_->size(); }
-    std::vector<size_t>& lcps() { return lcps_; }
-    std::vector<size_t> const& lcps() const { return lcps_; }
-    size_t* lcp_array() { return lcps_.data(); }
-    std::vector<Char>& raw_strings() { return *raw_strings_; }
-    std::vector<Char> const& raw_strings() const { return *raw_strings_; }
-
-    StringSet make_string_set() { return StringSet(strings(), strings() + size()); }
-
-    tlx::sort_strings_detail::StringPtr<StringSet> make_string_ptr() {
-        return tlx::sort_strings_detail::StringPtr(make_string_set());
-    }
-
-    tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t> make_string_lcp_ptr() {
-        return tlx::sort_strings_detail::StringLcpPtr(make_string_set(), lcp_array());
-    }
-
-    void deleteRawStrings() {
-        raw_strings_->clear();
-        raw_strings_->shrink_to_fit();
-    }
-
-    void deleteStrings() {
-        strings_.clear();
-        strings_.shrink_to_fit();
-    }
-
-    void deleteLcps() {
-        lcps_.clear();
-        lcps_.shrink_to_fit();
-    }
-
-    void deleteAll() {
-        deleteRawStrings();
-        deleteStrings();
-        deleteLcps();
-    }
-
-    void set(std::vector<Char>&& raw_strings) { *raw_strings_ = std::move(raw_strings); }
-    void set(std::vector<String>&& strings) { strings_ = std::move(strings); }
-    void set(std::vector<size_t>&& lcps) { lcps_ = std::move(lcps); }
-
-    bool operator==(StringLcpContainer<StringSet_> const& other) {
-        return (raw_strings() == other.raw_strings()) && (lcps() == other.lcps());
-    }
-
-    void update(std::vector<Char>&& raw_strings) {
-        set(std::move(raw_strings));
-        update_strings();
-        if (lcps_.size() != size())
-            lcps_.resize(size(), 0);
-    }
-
-    size_t sumOfCapacities() {
-        return raw_strings_->capacity() * sizeof(Char) + strings_.capacity() * sizeof(String)
-               + lcps_.capacity() * sizeof(size_t);
-    }
-    size_t sumOfSizes() {
-        return raw_strings_->size() * sizeof(Char) + strings_.size() * sizeof(String)
-               + lcps_.size() * sizeof(size_t);
-    }
-
-protected:
-    static constexpr size_t approx_string_length = 10;
-    std::unique_ptr<std::vector<Char>> raw_strings_;
-    std::vector<String> strings_;
-    std::vector<size_t> lcps_;
-
-    void update_strings() { strings_ = InitPolicy<StringSet>::init_strings(*raw_strings_); }
-
-    void update_strings(std::vector<uint64_t> const& indices) {
-        strings_ = InitPolicy<StringSet>::init_strings(*raw_strings_, indices);
-    }
+        : Base{std::move(raw_strings), std::forward<Args>(args)...},
+          lcps_(std::move(lcps)) {}
 };
 
-template <typename StringSet_>
-class BaseStringContainer : private InitPolicy<StringSet_> {
-public:
-    using StringSet = StringSet_;
-    using Char = typename StringSet::Char;
-    using CharIterator = typename StringSet::CharIterator;
-    using String = typename StringSet::String;
-    static constexpr bool isIndexed = false;
-
-    BaseStringContainer() : raw_strings_{std::make_unique<std::vector<Char>>()} {}
-
-    String operator[](size_t i) { return strings_[i]; }
-    String front() { return strings_.front(); }
-    String back() { return strings_.back(); }
-    String* strings() { return strings_.data(); }
-    std::vector<String>& getStrings() { return strings_; }
-    size_t size() const { return strings_.size(); }
-    bool empty() const { return strings_.empty(); }
-    size_t char_size() const { return raw_strings_->size(); }
-    std::vector<Char>& raw_strings() { return *raw_strings_; }
-    std::vector<Char> const& raw_strings() const { return *raw_strings_; }
-    std::vector<Char>&& releaseRawStrings() { return std::move(*raw_strings_); }
-
-    std::vector<unsigned char> getRawString(int64_t i) {
-        if (i < 0 || static_cast<uint64_t>(i) > size())
-            return std::vector<unsigned char>(1, 0);
-
-        // todo should use StringSet::getLength here
-        auto const length = strings_[i].length + 1;
-        std::vector<unsigned char> rawString(length);
-        std::copy(strings_[i].string, strings_[i].string + length, rawString.begin());
-        return rawString;
-    }
-
-    StringSet make_string_set() { return StringSet(strings(), strings() + size()); }
-
-    tlx::sort_strings_detail::StringPtr<StringSet> make_string_ptr() {
-        return tlx::sort_strings_detail::StringPtr(make_string_set());
-    }
-
-    void deleteRawStrings() {
-        raw_strings_->clear();
-        raw_strings_->shrink_to_fit();
-    }
-
-    void deleteStrings() {
-        strings_.clear();
-        strings_.shrink_to_fit();
-    }
-
-    void deleteAll() {
-        deleteRawStrings();
-        deleteStrings();
-    }
-
-    // todo make this private??
-    void set(std::vector<Char>&& raw_strings) { *raw_strings_ = std::move(raw_strings); }
-    void set(std::vector<String>&& strings) { strings_ = std::move(strings); }
-
-    bool operator==(StringLcpContainer<StringSet_> const& other) {
-        return raw_strings() == other.raw_strings();
-    }
-
-    void update(std::vector<Char>&& raw_strings) {
-        set(std::move(raw_strings));
-        update_strings();
-    }
-
-    void orderRawStrings() {
-        auto orderedRawStrings = new std::vector<unsigned char>(char_size());
-        uint64_t curPos = 0;
-        for (size_t i = 0; i < size(); ++i) {
-            auto chars = strings_[i].getChars();
-            auto length = strings_[i].getLength();
-            auto curAdress = orderedRawStrings->data() + curPos;
-            std::copy_n(chars, length + 1, curAdress);
-            strings_[i].setChars(curAdress);
-            curPos += length + 1;
-        }
-        raw_strings_.reset(orderedRawStrings);
-    }
-
-    bool isConsistent() {
-        for (size_t i = 0; i < strings_.size(); ++i) {
-            auto const adressEndByteOfString = strings_[i].getChars() + strings_[i].getLength();
-            if (adressEndByteOfString < raw_strings_->data()
-                || adressEndByteOfString >= raw_strings_->data() + raw_strings_->size())
-                return false;
-            if (*adressEndByteOfString != 0)
-                return false;
-        }
-        return true;
-    }
-
-    size_t sumOfCapacities() {
-        return raw_strings_->capacity() * sizeof(Char) + strings_.capacity() * sizeof(String);
-    }
-
-    size_t sumOfSizes() {
-        return raw_strings_->size() * sizeof(Char) + strings_.size() * sizeof(String);
-    }
-
-protected:
-    static constexpr size_t approx_string_length = 10;
-    std::unique_ptr<std::vector<Char>> raw_strings_;
-    std::vector<String> strings_;
-
-    explicit BaseStringContainer(std::vector<Char>&& raw_strings, auto&&... args)
-        : raw_strings_(std::make_unique<std::vector<Char>>(std::move(raw_strings))),
-          strings_(InitPolicy<StringSet>::init_strings(
-              *raw_strings_, std::forward<decltype(args)>(args)...
-          )) {}
-
-    void update_strings(auto&&... args) {
-        strings_ = InitPolicy<StringSet>::init_strings(
-            *raw_strings_,
-            std::forward<decltype(args)>(args)...
-        );
-    }
-};
 
 template <typename StringSet_>
-class StringContainer : public BaseStringContainer<StringSet_> {
+class StringContainer : public BaseStringContainer<StringSet_, StringContainer<StringSet_>> {
 public:
-    using StringSet = BaseStringContainer<StringSet_>::StringSet;
-    using Char = BaseStringContainer<StringSet_>::Char;
-    using CharIterator = BaseStringContainer<StringSet_>::CharIterator;
-    using String = BaseStringContainer<StringSet_>::String;
+    using Base = BaseStringContainer<StringSet_, StringContainer<StringSet_>>;
 
     static constexpr bool isIndexed = false;
 
     StringContainer() = default;
 
-    explicit StringContainer(std::vector<Char>&& raw_strings)
-        : BaseStringContainer<StringSet_>{std::move(raw_strings)} {};
+    explicit StringContainer(std::vector<typename Base::Char>&& raw_strings)
+        : Base{std::move(raw_strings)} {};
 };
 
 template <typename StringSet_>
-class IndexStringContainer : public BaseStringContainer<StringSet_> {
+class IndexStringContainer
+    : public BaseStringContainer<StringSet_, IndexStringContainer<StringSet_>> {
 public:
-    using StringSet = BaseStringContainer<StringSet_>::StringSet;
-    using Char = BaseStringContainer<StringSet_>::Char;
-    using CharIterator = BaseStringContainer<StringSet_>::CharIterator;
-    using String = BaseStringContainer<StringSet_>::String;
+    using Base = BaseStringContainer<StringSet_, IndexStringContainer<StringSet_>>;
+    using Char = Base::Char;
 
     static constexpr bool isIndexed = true;
 
@@ -651,12 +406,72 @@ public:
     explicit IndexStringContainer(
         std::vector<Char>&& raw_strings, std::vector<uint64_t> const& indices
     )
-        : BaseStringContainer<StringSet_>{std::move(raw_strings), indices} {};
+        : Base{std::move(raw_strings), indices} {};
 
     void update(std::vector<Char>&& raw_strings, std::vector<uint64_t> indices) {
         this->set(std::move(raw_strings));
         this->update_strings(indices);
     }
+};
+
+template <typename StringSet_>
+class StringLcpContainer
+    : public BaseStringLcpContainer<StringSet_, StringLcpContainer<StringSet_>> {
+public:
+    using Base = BaseStringLcpContainer<StringSet_, StringLcpContainer<StringSet_>>;
+    using Char = Base::Char;
+
+    static constexpr bool isIndexed = false;
+
+    StringLcpContainer() = default;
+
+    explicit StringLcpContainer(std::vector<Char>&& raw_strings)
+        : Base{std::move(raw_strings), {}} {
+        this->lcps_.resize(this->size(), 0);
+    }
+
+    explicit StringLcpContainer(std::vector<Char>&& raw_strings, std::vector<size_t>&& lcps)
+        : Base{std::move(raw_strings), std::move(lcps)} {}
+
+    // To be used with GenericCharIndexPEIndexStringSet
+    // todo maybe convert this to a named static method?
+    explicit StringLcpContainer(
+        std::vector<Char>&& raw_strings,
+        std::vector<size_t>&& lcps,
+        std::vector<size_t> const& interval_sizes,
+        std::vector<size_t> const& offsets
+    )
+        : Base{std::move(raw_strings), std::move(lcps), interval_sizes, offsets} {}
+
+    // todo this overload is pretty horrendous
+    explicit StringLcpContainer(
+        std::vector<Char>&& raw_strings,
+        std::vector<size_t>&& lcps,
+        std::vector<size_t>&& PE_indices,
+        std::vector<size_t>&& str_indices
+    )
+        : Base{
+            std::move(raw_strings),
+            std::move(lcps),
+            std::move(PE_indices),
+            std::move(str_indices)} {}
+};
+
+template <typename StringSet_>
+class IndexStringLcpContainer
+    : public BaseStringLcpContainer<StringSet_, IndexStringLcpContainer<StringSet_>> {
+public:
+    using Base = BaseStringLcpContainer<StringSet_, IndexStringLcpContainer<StringSet_>>;
+    using Char = Base::Char;
+
+    static constexpr bool isIndexed = true;
+
+    IndexStringLcpContainer() = default;
+
+    explicit IndexStringLcpContainer(
+        std::vector<Char>&& raw_strings, std::vector<uint64_t> const& indices
+    )
+        : Base{std::move(raw_strings), std::vector(indices.size(), 0), indices} {}
 };
 
 } // namespace dss_schimek
