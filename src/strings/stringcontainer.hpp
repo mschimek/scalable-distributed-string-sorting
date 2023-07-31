@@ -207,6 +207,58 @@ public:
         lcps_ = std::move(lcp);
     }
 
+    String operator[](size_t i) { return strings_[i]; }
+    String front() { return strings_.front(); }
+    String back() { return strings_.back(); }
+    String* strings() { return strings_.data(); }
+    std::vector<String>& getStrings() { return strings_; }
+    size_t size() const { return strings_.size(); }
+    bool empty() const { return strings_.empty(); }
+    size_t char_size() const { return raw_strings_->size(); }
+    std::vector<size_t>& lcps() { return lcps_; }
+    std::vector<size_t>& savedLcps() { return savedLcps_; }
+    std::vector<size_t> const& lcps() const { return lcps_; }
+    size_t* lcp_array() { return lcps_.data(); }
+    std::vector<Char>& raw_strings() { return *raw_strings_; }
+    std::vector<Char> const& raw_strings() const { return *raw_strings_; }
+
+    StringSet make_string_set() { return StringSet(strings(), strings() + size()); }
+
+    tlx::sort_strings_detail::StringPtr<StringSet> make_string_ptr() {
+        return tlx::sort_strings_detail::StringPtr(make_string_set());
+    }
+
+    tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t> make_string_lcp_ptr() {
+        return tlx::sort_strings_detail::StringLcpPtr(make_string_set(), lcp_array());
+    }
+
+    void deleteRawStrings() {
+        raw_strings_->clear();
+        raw_strings_->shrink_to_fit();
+    }
+
+    void deleteStrings() {
+        strings_.clear();
+        strings_.shrink_to_fit();
+    }
+
+    void deleteLcps() {
+        lcps_.clear();
+        lcps_.shrink_to_fit();
+    }
+
+    void deleteSavedLcps() {
+        savedLcps_.clear();
+        savedLcps_.shrink_to_fit();
+    }
+
+    void deleteAll() {
+        deleteRawStrings();
+        deleteStrings();
+        deleteLcps();
+        deleteSavedLcps();
+    }
+
     void orderRawStrings() {
         auto orderedRawStrings = new std::vector<unsigned char>(char_size());
         uint64_t curPos = 0;
@@ -232,21 +284,6 @@ public:
         }
         return true;
     }
-
-    String operator[](size_t i) { return strings_[i]; }
-    String front() { return strings_.front(); }
-    String back() { return strings_.back(); }
-    String* strings() { return strings_.data(); }
-    std::vector<String>& getStrings() { return strings_; }
-    size_t size() const { return strings_.size(); }
-    bool empty() const { return strings_.empty(); }
-    size_t char_size() const { return raw_strings_->size(); }
-    std::vector<size_t>& lcps() { return lcps_; }
-    std::vector<size_t>& savedLcps() { return savedLcps_; }
-    std::vector<size_t> const& lcps() const { return lcps_; }
-    size_t* lcp_array() { return lcps_.data(); }
-    std::vector<Char>& raw_strings() { return *raw_strings_; }
-    std::vector<Char> const& raw_strings() const { return *raw_strings_; }
 
     void saveLcps() { savedLcps_ = lcps_; }
 
@@ -293,43 +330,6 @@ public:
         *raw_strings_ = std::move(raw_strings);
     }
 
-    StringSet make_string_set() { return StringSet(strings(), strings() + size()); }
-
-    tlx::sort_strings_detail::StringPtr<StringSet> make_string_ptr() {
-        return tlx::sort_strings_detail::StringPtr(make_string_set());
-    }
-
-    tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t> make_string_lcp_ptr() {
-        return tlx::sort_strings_detail::StringLcpPtr(make_string_set(), lcp_array());
-    }
-
-    void deleteRawStrings() {
-        raw_strings_->clear();
-        raw_strings_->shrink_to_fit();
-    }
-
-    void deleteStrings() {
-        strings_.clear();
-        strings_.shrink_to_fit();
-    }
-
-    void deleteLcps() {
-        lcps_.clear();
-        lcps_.shrink_to_fit();
-    }
-
-    void deleteSavedLcps() {
-        savedLcps_.clear();
-        savedLcps_.shrink_to_fit();
-    }
-
-    void deleteAll() {
-        deleteRawStrings();
-        deleteStrings();
-        deleteLcps();
-        deleteSavedLcps();
-    }
-
     void set(std::vector<Char>&& raw_strings) { *raw_strings_ = std::move(raw_strings); }
     void set(std::vector<String>&& strings) { strings_ = std::move(strings); }
     void set(std::vector<size_t>&& lcps) { lcps_ = std::move(lcps); }
@@ -362,7 +362,6 @@ public:
         });
     }
 
-public:
     size_t sumOfCapacities() {
         return raw_strings_->capacity() * sizeof(Char) + strings_.capacity() * sizeof(String)
                + lcps_.capacity() * sizeof(size_t) + savedLcps_.capacity() * sizeof(size_t);
@@ -375,8 +374,8 @@ public:
 protected:
     static constexpr size_t approx_string_length = 10;
     std::unique_ptr<std::vector<Char>> raw_strings_;
-    std::vector<String> strings_;   // strings
-    std::vector<size_t> lcps_;      // lcp-values
+    std::vector<String> strings_;
+    std::vector<size_t> lcps_;
     std::vector<size_t> savedLcps_; // only used for prefix compression, ->
                                     // lcp-values received from other PEs before
                                     // merging TODO think about better structure
@@ -478,7 +477,6 @@ public:
             lcps_.resize(size(), 0);
     }
 
-public:
     size_t sumOfCapacities() {
         return raw_strings_->capacity() * sizeof(Char) + strings_.capacity() * sizeof(String)
                + lcps_.capacity() * sizeof(size_t);
@@ -491,8 +489,8 @@ public:
 protected:
     static constexpr size_t approx_string_length = 10;
     std::unique_ptr<std::vector<Char>> raw_strings_;
-    std::vector<String> strings_; // strings
-    std::vector<size_t> lcps_;    // lcp-values
+    std::vector<String> strings_;
+    std::vector<size_t> lcps_;
 
     void update_strings() { strings_ = InitPolicy<StringSet>::init_strings(*raw_strings_); }
 
