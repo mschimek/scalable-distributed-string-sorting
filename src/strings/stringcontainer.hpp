@@ -533,6 +533,7 @@ public:
         if (i < 0 || static_cast<uint64_t>(i) > size())
             return std::vector<unsigned char>(1, 0);
 
+        // todo should use StringSet::getLength here
         auto const length = strings_[i].length + 1;
         std::vector<unsigned char> rawString(length);
         std::copy(strings_[i].string, strings_[i].string + length, rawString.begin());
@@ -560,6 +561,18 @@ public:
         deleteStrings();
     }
 
+    void set(std::vector<Char>&& raw_strings) { *raw_strings_ = std::move(raw_strings); }
+    void set(std::vector<String>&& strings) { strings_ = std::move(strings); }
+
+    bool operator==(StringLcpContainer<StringSet_> const& other) {
+        return (raw_strings() == other.raw_strings());
+    }
+
+    void update(std::vector<Char>&& raw_strings) {
+        set(std::move(raw_strings));
+        update_strings();
+    }
+
     void orderRawStrings() {
         auto orderedRawStrings = new std::vector<unsigned char>(char_size());
         uint64_t curPos = 0;
@@ -573,6 +586,7 @@ public:
         }
         raw_strings_.reset(orderedRawStrings);
     }
+
     bool isConsistent() {
         for (size_t i = 0; i < strings_.size(); ++i) {
             auto const adressEndByteOfString = strings_[i].getChars() + strings_[i].getLength();
@@ -585,22 +599,11 @@ public:
         return true;
     }
 
-    void set(std::vector<Char>&& raw_strings) { *raw_strings_ = std::move(raw_strings); }
-    void set(std::vector<String>&& strings) { strings_ = std::move(strings); }
-
-    bool operator==(StringLcpContainer<StringSet_> const& other) {
-        return (raw_strings() == other.raw_strings());
-    }
-
-    void update(std::vector<Char>&& raw_strings) {
-        set(std::move(raw_strings));
-        update_strings();
-    }
-
 public:
     size_t sumOfCapacities() {
         return raw_strings_->capacity() * sizeof(Char) + strings_.capacity() * sizeof(String);
     }
+
     size_t sumOfSizes() {
         return raw_strings_->size() * sizeof(Char) + strings_.size() * sizeof(String);
     }
@@ -608,7 +611,7 @@ public:
 protected:
     static constexpr size_t approx_string_length = 10;
     std::unique_ptr<std::vector<Char>> raw_strings_;
-    std::vector<String> strings_; // strings
+    std::vector<String> strings_;
 
     void update_strings() { strings_ = InitPolicy<StringSet>::init_strings(*raw_strings_); }
 };
@@ -639,15 +642,19 @@ public:
     size_t char_size() const { return raw_strings_->size(); }
     std::vector<Char>& raw_strings() { return *raw_strings_; }
     std::vector<Char> const& raw_strings() const { return *raw_strings_; }
+    std::vector<Char>&& releaseRawStrings() { return std::move(*raw_strings_); }
+
     std::vector<unsigned char> getRawString(int64_t i) {
         if (i < 0 || static_cast<uint64_t>(i) > size())
             return std::vector<unsigned char>(1, 0);
 
+        // todo should use StringSet::getLength here
         auto const length = strings_[i].length + 1;
         std::vector<unsigned char> rawString(length);
         std::copy(strings_[i].string, strings_[i].string + length, rawString.begin());
         return rawString;
     }
+
     StringSet make_string_set() { return StringSet(strings(), strings() + size()); }
 
     tlx::sort_strings_detail::StringPtr<StringSet> make_string_ptr() {
@@ -680,18 +687,10 @@ public:
         set(std::move(raw_strings));
         update_strings();
     }
+
     void update(std::vector<Char>&& raw_strings, std::vector<uint64_t> const& indices) {
         set(std::move(raw_strings));
         update_strings(indices);
-    }
-
-public:
-    size_t sumOfCapacities() {
-        return raw_strings_->capacity() * sizeof(Char) + strings_.capacity() * sizeof(String);
-    }
-
-    size_t sumOfSizes() {
-        return raw_strings_->size() * sizeof(Char) + strings_.size() * sizeof(String);
     }
 
     void orderRawStrings() {
@@ -707,6 +706,7 @@ public:
         }
         raw_strings_.reset(orderedRawStrings);
     }
+
     bool isConsistent() {
         for (size_t i = 0; i < strings_.size(); ++i) {
             auto const adressEndByteOfString = strings_[i].getChars() + strings_[i].getLength();
@@ -719,10 +719,19 @@ public:
         return true;
     }
 
+public:
+    size_t sumOfCapacities() {
+        return raw_strings_->capacity() * sizeof(Char) + strings_.capacity() * sizeof(String);
+    }
+
+    size_t sumOfSizes() {
+        return raw_strings_->size() * sizeof(Char) + strings_.size() * sizeof(String);
+    }
+
 protected:
     static constexpr size_t approx_string_length = 10;
     std::unique_ptr<std::vector<Char>> raw_strings_;
-    std::vector<String> strings_; // strings
+    std::vector<String> strings_;
 
     void update_strings() { strings_ = InitPolicy<StringSet>::init_strings(*raw_strings_); }
 
