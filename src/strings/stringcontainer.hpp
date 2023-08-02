@@ -96,17 +96,9 @@ public:
     }
 };
 
-// just a helper for the template specialization below
-template <typename... Length_>
-struct StringIndexPEIndex_ {
-    template <typename String>
-    using type = StringData<String, Length_..., StringIndex, PEIndex>;
-};
-
-// this specialization may be going a bit far in the pursuit of avoiding code duplication ^^
-template <typename CharType, typename... Length_>
-class InitPolicy<GenericStringSet<CharType, StringIndexPEIndex_<Length_...>::template type>> {
-    using StringSet = GenericStringSet<CharType, StringIndexPEIndex_<Length_...>::template type>;
+template <typename CharType>
+class InitPolicy<GenericCharLengthIndexPEIndexStringSet<CharType>> {
+    using StringSet = GenericCharLengthIndexPEIndexStringSet<CharType>;
     using Char = typename StringSet::Char;
     using String = typename StringSet::String;
 
@@ -119,7 +111,7 @@ public:
         auto num_strs = std::accumulate(intervals.begin(), intervals.end(), size_t{0});
         std::vector<String> strings(num_strs);
 
-        auto init = [](auto str, auto len) { return String{str, Length_{len}...}; };
+        auto init = [](auto str, auto len) { return String{str, Length{len}}; };
         init_str_len(strings.begin(), raw_strings, init);
 
         auto str = strings.begin();
@@ -142,7 +134,7 @@ public:
 
         auto PE_it = PE_indices.cbegin(), str_it = str_indices.cbegin();
         auto init = [&](auto str, auto len) mutable {
-            return String{str, Length_{len}..., PEIndex{*(PE_it++)}, StringIndex{*(str_it++)}};
+            return String{str, Length{len}, PEIndex{*(PE_it++)}, StringIndex{*(str_it++)}};
         };
         init_str_len(strings.begin(), raw_strings, init);
         return strings;

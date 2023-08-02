@@ -590,12 +590,12 @@ struct AllToAllStringImpl<
 template <bool compressLcps, typename StringLcpPtr, typename AllToAllPolicy>
 struct AllToAllStringImplPrefixDoubling {
     using StringSet = typename StringLcpPtr::StringSet;
-    using StringPEIndexSet = dss_schimek::UCharIndexPEIndexStringSet;
+    using StringPEIndexSet = dss_schimek::UCharLengthIndexPEIndexStringSet;
     static constexpr bool Lcps = true;
     static constexpr bool PrefixCompression = true;
 
-    dss_schimek::StringLcpContainer<StringPEIndexSet> alltoallv(
-        dss_schimek::StringLcpContainer<StringSet>&& send_data,
+    StringLcpContainer<StringPEIndexSet> alltoallv(
+        StringLcpContainer<StringSet>& send_data,
         std::vector<size_t> const& send_counts,
         std::vector<size_t> const& dist_prefixes,
         environment env
@@ -629,8 +629,8 @@ struct AllToAllStringImplPrefixDoubling {
         unsigned char* curPos = buffer.data();
         for (size_t interval = 0, strs_written = 0; interval < send_counts.size(); ++interval) {
             auto begin = ss.begin() + strs_written;
-            size_t chars_written = 0;
 
+            size_t chars_written = 0;
             std::tie(curPos, chars_written) = byteEncoder.write(
                 curPos,
                 ss.sub(begin, begin + send_counts[interval]),
@@ -678,8 +678,8 @@ struct AllToAllStringImplPrefixDoubling {
         return recv_container;
     }
 
-    dss_schimek::StringLcpContainer<StringPEIndexSet> alltoallv(
-        dss_schimek::StringLcpContainer<StringPEIndexSet>&& send_data,
+    StringLcpContainer<StringPEIndexSet> alltoallv(
+        StringLcpContainer<StringPEIndexSet>& send_data,
         std::vector<size_t> const& send_counts,
         environment env
     ) {
@@ -688,14 +688,13 @@ struct AllToAllStringImplPrefixDoubling {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
         measuring_tool.start("all_to_all_strings_intern_copy");
-        const EmptyLcpByteEncoderMemCpy byteEncoder;
+        EmptyLcpByteEncoderMemCpy byteEncoder;
         auto string_ptr = send_data.make_string_lcp_ptr();
         auto ss = string_ptr.active();
 
-        if (ss.size() == 0)
-            return dss_schimek::StringLcpContainer<StringPEIndexSet>{};
+        if (ss.empty())
+            return {};
 
-        std::vector<unsigned char> recv_buf_char;
         std::vector<size_t> send_counts_char(send_counts.size());
 
         setLcpAtStartOfInterval(string_ptr.lcp(), send_counts.begin(), send_counts.end());
@@ -719,9 +718,11 @@ struct AllToAllStringImplPrefixDoubling {
             send_counts_char[interval] = chars_written;
             strs_written += send_counts[interval];
         }
-        die_unequal(numCharsToSend, std::distance(send_buf_char.data(), curPos));
+        die_unequal(
+            numCharsToSend,
+            static_cast<size_t>(std::distance(send_buf_char.data(), curPos))
+        );
 
-        // todo should maybe switch to sep. buffers for PE/str index in StringSet
         std::vector<size_t> send_buf_PE_idx(ss.size());
         std::vector<size_t> send_buf_str_idx(ss.size());
 
@@ -736,16 +737,19 @@ struct AllToAllStringImplPrefixDoubling {
 
         measuring_tool.stop("all_to_all_strings_intern_copy");
         measuring_tool.start("all_to_all_strings_mpi");
-        recv_buf_char = AllToAllPolicy::alltoallv(send_buf_char.data(), send_counts_char, env);
+        std::vector<unsigned char> recv_buf_char =
+            AllToAllPolicy::alltoallv(send_buf_char.data(), send_counts_char, env);
 
-        auto recv_counts = dss_schimek::mpi::alltoall(send_counts, env);
+        auto recv_counts = mpi::alltoall(send_counts, env);
         auto send_lcps = sendLcps<compressLcps, AllToAllPolicy>;
         auto recv_buf_lcp = send_lcps(send_data.lcps(), send_counts, recv_counts, env);
+        send_data.deleteAll();
 
         // todo this is pretty hacky
         auto recv_buf_PE_idx = send_lcps(send_buf_PE_idx, send_counts, recv_counts, env);
         auto recv_buf_str_idx = send_lcps(send_buf_str_idx, send_counts, recv_counts, env);
-        send_data.deleteAll();
+
+        measuring_tool.stop("all_to_all_strings_mpi");
 
         measuring_tool.start("all_to_all_strings_read");
         measuring_tool.stop("all_to_all_strings_read");
