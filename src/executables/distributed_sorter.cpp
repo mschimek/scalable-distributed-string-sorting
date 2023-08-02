@@ -26,6 +26,7 @@
 #include "sorter/distributed/bloomfilter.hpp"
 #include "sorter/distributed/merge_sort.hpp"
 #include "sorter/distributed/multi_level.hpp"
+#include "sorter/distributed/prefix_doubling.hpp"
 #include "util/measuringTool.hpp"
 #include "util/random_string_generator.hpp"
 #include "variant_selection.hpp"
@@ -56,7 +57,7 @@ void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicat
     using dss_mehnert::Communicator;
     using dss_mehnert::sorter::DistributedMergeSort;
 
-    using StringLcpPtr = typename tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
+    using StringLcpPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
 
     constexpr bool lcp_compression = LcpCompression();
 
@@ -115,8 +116,8 @@ void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicat
     measuring_tool.stop("none", "sorting_overall", comm);
 
     if (args.check || args.check_exhaustive) {
-        const StringLcpPtr sorted_strptr = sorted_string_cont.make_string_lcp_ptr();
-        bool const is_complete_and_sorted = dss_schimek::is_complete_and_sorted(
+        StringLcpPtr sorted_strptr = sorted_string_cont.make_string_lcp_ptr();
+        bool is_complete_and_sorted = dss_schimek::is_complete_and_sorted(
             sorted_strptr,
             num_gen_chars,
             sorted_string_cont.char_size(),
@@ -129,6 +130,146 @@ void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicat
         if (args.check_exhaustive) {
             bool const isSorted = checker.check(sorted_strptr, true);
             die_verbose_unless(isSorted, "output is not a permutation of the input");
+        }
+    }
+
+    std::stringstream buffer;
+    measuring_tool.writeToStream(buffer);
+    if (comm.is_root()) {
+        std::cout << buffer.str() << std::endl;
+    }
+    measuring_tool.reset();
+}
+
+// todo this function simply serves to discard the Golomb template parameter
+// template <
+//     typename StringSet,
+//     typename StringGenerator,
+//     typename SamplePolicy,
+//     typename MPIAllToAllRoutine,
+//     typename GolombEncoding,
+//     typename Subcommunicators,
+//     typename ByteEncoder,
+//     typename LcpCompression>
+// void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicator const& comm) {
+//     run_merge_sort_<StringSet, StringGenerator, SamplePolicy, MPIAllToAllRoutine,
+//     Subcommunicators, ByteEncoder, LcpCompression>()
+// }
+
+
+template <
+    typename StringSet,
+    typename StringGenerator,
+    typename SamplePolicy,
+    typename MPIAllToAllRoutine,
+    typename GolombEncoding,
+    typename Subcommunicators,
+    typename ByteEncoder,
+    typename LcpCompression>
+void run_prefix_doubling(
+    SorterArgs args, std::string prefix, dss_mehnert::Communicator const& comm
+) {
+    using namespace dss_schimek;
+
+    using dss_mehnert::Communicator;
+    using dss_mehnert::sorter::PrefixDoublingMergeSort;
+
+    using StringLcpPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
+
+    constexpr bool lcp_compression = LcpCompression();
+
+    using AllToAllPolicy =
+        mpi::AllToAllStringImplPrefixDoubling<lcp_compression, StringLcpPtr, MPIAllToAllRoutine>;
+
+    auto& measuring_tool = dss_mehnert::measurement::MeasuringTool::measuringTool();
+    measuring_tool.setPrefix(prefix);
+    measuring_tool.setVerbose(false);
+
+    CheckerWithCompleteExchange<StringLcpPtr> checker;
+
+    if (!args.strong_scaling) {
+        args.generator_args.numOfStrings *= comm.size();
+    }
+    if (comm.is_root()) {
+        std::cout << "string generation started " << std::endl;
+    }
+
+    comm.barrier();
+    measuring_tool.start("generate_strings");
+    StringGenerator rand_container =
+        getGeneratedStringContainer<StringGenerator, StringSet>(args.generator_args);
+    measuring_tool.stop("generate_strings");
+    if (args.check || args.check_exhaustive) {
+        checker.storeLocalInput(rand_container.raw_strings());
+    }
+
+    comm.barrier();
+    if (comm.is_root()) {
+        std::cout << "string generation completed " << std::endl;
+    }
+
+    StringLcpPtr rand_string_ptr = rand_container.make_string_lcp_ptr();
+    const size_t num_gen_chars = rand_container.char_size();
+    const size_t num_gen_strs = rand_container.size();
+
+    measuring_tool.add(num_gen_chars - num_gen_strs, "input_chars");
+    measuring_tool.add(num_gen_strs, "input_strings");
+
+    // skip unused levels for multi-level merge sort
+    // todo this does not belong here
+    auto pred = [&](auto group_size) { return group_size < comm.size(); };
+    auto first_level = std::find_if(args.levels.begin(), args.levels.end(), pred);
+
+    comm.barrier();
+
+    measuring_tool.start("none", "sorting_overall");
+
+    measuring_tool.start("create_communicators");
+    Subcommunicators comms{first_level, args.levels.end(), comm};
+    measuring_tool.stop("create_communicators");
+
+    PrefixDoublingMergeSort<
+        StringLcpPtr,
+        Subcommunicators,
+        AllToAllPolicy,
+        SamplePolicy,
+        GolombEncoding>
+        merge_sort;
+    auto permutation = merge_sort.sort(std::move(rand_container), rand_string_ptr, comms);
+
+    measuring_tool.stop("none", "sorting_overall", comm);
+
+    if (args.check || args.check_exhaustive) {
+        if (comm.size() > 1) {
+            StringLcpContainer<StringSet> original_input{checker.getLocalInput()};
+            auto original_input_ptr = original_input.make_string_lcp_ptr();
+            tlx::sort_strings_detail::radixsort_CI3(original_input_ptr, 0, 0);
+
+            auto complete_strings_cont = dss_schimek::mpi::getStrings(
+                permutation.begin(),
+                permutation.end(),
+                original_input.make_string_set(),
+                comm
+            );
+            auto complete_strings = complete_strings_cont.make_string_set();
+            reorder(complete_strings, permutation.begin(), permutation.end());
+
+            StringLcpPtr sorted_strptr = complete_strings_cont.make_string_lcp_ptr();
+            bool is_complete_and_sorted = dss_schimek::is_complete_and_sorted(
+                sorted_strptr,
+                num_gen_chars,
+                complete_strings_cont.char_size(),
+                num_gen_strs,
+                complete_strings_cont.size(),
+                comm
+            );
+
+            die_verbose_unless(is_complete_and_sorted, "not sorted");
+
+            if (args.check_exhaustive) {
+                bool const isSorted = checker.check(sorted_strptr, false);
+                die_verbose_unless(isSorted, "output is not a permutation of the input");
+            }
         }
     }
 
@@ -187,7 +328,7 @@ void arg8(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
     }
 
     if (key.prefix_doubling) {
-        tlx_die("not yet implemented");
+        run_prefix_doubling<Args...>(args, prefix, comm);
     } else {
         run_merge_sort<Args...>(args, prefix, comm);
     }
@@ -346,7 +487,7 @@ int main(int argc, char* argv[]) {
     unsigned int sample_policy = static_cast<int>(PolicyEnums::SampleString::numStrings);
     unsigned int alltoall_routine = static_cast<int>(PolicyEnums::MPIRoutineAllToAll::combined);
     unsigned int golomb_encoding = static_cast<int>(PolicyEnums::GolombEncoding::noGolombEncoding);
-    unsigned int comm_split = static_cast<int>(PolicyEnums::Subcommunicators::none);
+    unsigned int comm_split = static_cast<int>(PolicyEnums::Subcommunicators::grid);
     size_t num_strings = 100000;
     size_t num_iterations = 5;
     size_t string_length = 50;
@@ -415,7 +556,7 @@ int main(int argc, char* argv[]) {
         "subcomms",
         comm_split,
         "whether and how to create subcommunicators during merge sort "
-        "([0]=none, 1=naive, 2=grid)"
+        "(0=none, 1=naive, [2]=grid)"
     );
     cp.add_flag(
         'c',
