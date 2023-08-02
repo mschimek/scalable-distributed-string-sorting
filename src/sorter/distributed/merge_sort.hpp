@@ -73,12 +73,12 @@ public:
         auto avg_lcp = getAvgLcp(string_ptr, comms.comm_root()) + lcp_summand;
         // todo what is the justification for this value
         sample::MaxLength max_length{2 * 100 * avg_lcp};
-        std::tuple sampler_args{max_length};
+        std::tuple extra_sample_args{max_length};
         measuring_tool_.stop("avg_lcp");
 
         for (size_t round = 0; auto level: comms) {
             measuring_tool_.start("sort_globally", "partial_sorting");
-            container = sort_partial(std::move(container), level, sampler_args, {});
+            container = sort_partial(std::move(container), level, extra_sample_args, {});
             measuring_tool_.stop("sort_globally", "partial_sorting", comms.comm_root());
             measuring_tool_.setRound(++round);
 
@@ -103,7 +103,8 @@ public:
 
         measuring_tool_.start("sort_globally", "final_sorting");
         auto const& comm_final = comms.comm_final();
-        auto sorted_container = sort_exhaustive(std::move(container), comm_final, sampler_args, {});
+        auto sorted_container =
+            sort_exhaustive(std::move(container), comm_final, extra_sample_args, {});
         measuring_tool_.stop("sort_globally", "final_sorting");
 
         measuring_tool_.setRound(0);
@@ -115,7 +116,7 @@ private:
     MeasuringTool& measuring_tool_ = MeasuringTool::measuringTool();
 
     template <typename... SampleArgs, typename... AllToAllArgs>
-    StringLcpContainer sort_partial(
+    auto sort_partial(
         StringLcpContainer&& container,
         multi_level::Level<Communicator> const& level,
         std::tuple<SampleArgs...> extra_sample_args,
@@ -143,15 +144,19 @@ private:
         measuring_tool_.start("sort_globally", "exchange_and_merge");
         auto send_counts = Subcommunicators::send_counts(interval_sizes, level);
         auto const& comm_exchange = level.comm_exchange;
-        auto sorted_container =
-            exchange_and_merge(std::move(container), send_counts, comm_exchange, extra_sample_args);
+        auto sorted_container = exchange_and_merge(
+            std::move(container),
+            send_counts,
+            comm_exchange,
+            extra_all_to_all_args
+        );
         measuring_tool_.stop("sort_globally", "exchange_and_merge");
 
         return sorted_container;
     }
 
     template <typename... SampleArgs, typename... AllToAllArgs>
-    StringLcpContainer sort_exhaustive(
+    auto sort_exhaustive(
         StringLcpContainer&& container,
         Communicator const& comm,
         std::tuple<SampleArgs...> extra_sample_args,
@@ -173,14 +178,14 @@ private:
 
         measuring_tool_.start("sort_globally", "exchange_and_merge");
         auto sorted_container =
-            exchange_and_merge(std::move(container), interval_sizes, comm, extra_sample_args);
+            exchange_and_merge(std::move(container), interval_sizes, comm, extra_all_to_all_args);
         measuring_tool_.stop("sort_globally", "exchange_and_merge");
 
         return sorted_container;
     }
 
     template <typename... AllToAllArgs>
-    StringLcpContainer exchange_and_merge(
+    auto exchange_and_merge(
         StringLcpContainer&& container,
         std::vector<size_t>& send_counts,
         Communicator const& comm,
@@ -192,7 +197,10 @@ private:
         auto alltoall_result = comm.alltoall(kamping::send_buf(send_counts));
         auto recv_counts = alltoall_result.extract_recv_buffer();
 
-        auto recv_string_container = AllToAllStringPolicy::alltoallv(container, send_counts, comm);
+        auto alltoallv = [&, this](auto... args) {
+            return AllToAllStringPolicy::alltoallv(container, send_counts, args..., comm);
+        };
+        auto recv_string_container = std::apply(alltoallv, extra_all_to_all_args);
         container.deleteAll();
         measuring_tool_.stop("all_to_all_strings");
 
