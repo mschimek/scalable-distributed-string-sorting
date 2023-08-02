@@ -17,15 +17,9 @@
 
 #include "encoding/golomb_encoding.hpp"
 #include "hash/xxhash.hpp"
-#include "merge/bingmann-lcp_losertree.hpp"
-#include "merge/stringtools.hpp"
 #include "mpi/allgather.hpp"
 #include "mpi/alltoall.hpp"
-#include "mpi/byte_encoder.hpp"
-#include "mpi/is_sorted.hpp"
-#include "mpi/synchron.hpp"
-#include "strings/stringptr.hpp"
-#include "strings/stringset.hpp"
+#include "mpi/environment.hpp"
 #include "strings/stringtools.hpp"
 #include "util/measuringTool.hpp"
 
@@ -73,7 +67,8 @@ struct StringTriple {
 
     bool operator<(StringTriple const& rhs) const {
         size_t i = 0;
-        while (string[i] != 0 && string[i] == rhs.string[i]) ++i;
+        while (string[i] != 0 && string[i] == rhs.string[i])
+            ++i;
         return string[i] < rhs.string[i];
     }
 
@@ -130,17 +125,24 @@ struct HashPEIndex {
 
 struct AllToAllHashesNaive {
     template <typename DataType>
-    static inline std::vector<DataType>
-    alltoallv(std::vector<DataType>& sendData, std::vector<size_t> const& intervalSizes, std::vector<size_t> const&) {
-        return alltoallv(sendData, intervalSizes);
+    static inline std::vector<DataType> alltoallv(
+        std::vector<DataType>& sendData,
+        std::vector<size_t> const& intervalSizes,
+        std::vector<size_t> const&,
+        mpi::environment env
+    ) {
+        return alltoallv(sendData, intervalSizes, env);
     }
 
     template <typename DataType>
-    static inline std::vector<DataType>
-    alltoallv(std::vector<DataType>& sendData, std::vector<size_t> const& intervalSizes) {
+    static inline std::vector<DataType> alltoallv(
+        std::vector<DataType>& sendData,
+        std::vector<size_t> const& intervalSizes,
+        mpi::environment env
+    ) {
         using AllToAllv = dss_schimek::mpi::AllToAllvCombined<dss_schimek::mpi::AllToAllvSmall>;
 
-        auto result = AllToAllv::alltoallv(sendData.data(), intervalSizes);
+        auto result = AllToAllv::alltoallv(sendData.data(), intervalSizes, env);
         return result;
     }
     static std::string getName() { return "noGolombEncoding"; }
@@ -151,13 +153,13 @@ struct AllToAllHashesGolomb {
     static inline std::vector<DataType> alltoallv(
         std::vector<DataType>& sendData,
         std::vector<size_t> const& intervalSizes,
+        mpi::environment env,
         const size_t bloomFilterSize,
         const size_t b = 1048576
     ) {
-        using AllToAllv = dss_schimek::mpi::AllToAllvCombined<dss_schimek::mpi::AllToAllvSmall>;
+        using AllToAllv = mpi::AllToAllvCombined<dss_schimek::mpi::AllToAllvSmall>;
         using namespace dss_schimek::measurement;
         MeasuringTool& measuringTool = MeasuringTool::measuringTool();
-        dss_schimek::mpi::environment env;
         measuringTool.start("bloomfilter_golombEncoding");
         std::vector<size_t> encodedValuesSizes;
         std::vector<size_t> encodedValues;
@@ -231,12 +233,11 @@ struct AllToAllHashesGolomb {
     static inline std::vector<DataType> alltoallv(
         std::vector<DataType>& sendData,
         std::vector<size_t> const& intervalSizes,
-        std::vector<size_t> const& intervalRange
+        std::vector<size_t> const& intervalRange,
+        mpi::environment env
     ) {
         using AllToAllv = dss_schimek::mpi::AllToAllvCombined<dss_schimek::mpi::AllToAllvSmall>;
         using namespace dss_schimek::measurement;
-        MeasuringTool& measuringTool = MeasuringTool::measuringTool();
-        dss_schimek::mpi::environment env;
         std::vector<size_t> encodedValuesSizes;
         std::vector<size_t> encodedValues;
         encodedValues.reserve(sendData.size() + 2 + env.size());
@@ -365,10 +366,11 @@ private:
 
 public:
     static inline std::vector<std::vector<size_t>> alltoallv(
-        std::vector<size_t>& sendData, std::vector<size_t>& intervalSizes, const size_t b = 1048576
+        std::vector<size_t>& sendData,
+        std::vector<size_t>& intervalSizes,
+        mpi::environment env,
+        const size_t b = 1048576
     ) {
-        dss_schimek::mpi::environment env;
-
         using namespace dss_schimek::measurement;
 
         const size_t maxRecvSize = 1000000000u;
@@ -527,7 +529,7 @@ public:
     static std::string getName() { return "GolombPipelined"; }
 };
 
-std::vector<size_t> computeIntervalSizes(
+inline std::vector<size_t> computeIntervalSizes(
     std::vector<size_t> const& hashes, const size_t bloomFilterSize, mpi::environment env
 ) {
     std::vector<size_t> indices;
@@ -607,7 +609,7 @@ struct SendOnlyHashesToFilter : private SendPolicy {
         measuringTool.stop("bloomfilter_sendToFilterSetup");
         if constexpr (std::is_same<SendPolicy, dss_schimek::AllToAllHashValuesPipeline>::value) {
             measuringTool.start("bloomfilter_sendEncodedValuesOverall");
-            auto const& unflattenedResult = SendPolicy::alltoallv(sendValues, intervalSizes);
+            auto const& unflattenedResult = SendPolicy::alltoallv(sendValues, intervalSizes, env);
             measuringTool.stop("bloomfilter_sendEncodedValuesOverall");
             std::vector<size_t> result = flatten(unflattenedResult);
             return RecvData(std::move(result), std::move(recvIntervalSizes), std::move(offsets));
@@ -615,13 +617,13 @@ struct SendOnlyHashesToFilter : private SendPolicy {
         if constexpr (std::is_same<SendPolicy, dss_schimek::AllToAllHashesGolomb>::value) {
             measuringTool.start("bloomfilter_sendEncodedValuesOverall");
             std::vector<size_t> result =
-                SendPolicy::alltoallv(sendValues, intervalSizes, bloomfilterSize);
+                SendPolicy::alltoallv(sendValues, intervalSizes, bloomfilterSize, env);
             measuringTool.stop("bloomfilter_sendEncodedValuesOverall");
             return RecvData(std::move(result), std::move(recvIntervalSizes), std::move(offsets));
         }
         if constexpr (std::is_same<SendPolicy, dss_schimek::AllToAllHashesNaive>::value) {
             measuringTool.start("bloomfilter_sendEncodedValuesOverall");
-            std::vector<size_t> result = SendPolicy::alltoallv(sendValues, intervalSizes);
+            std::vector<size_t> result = SendPolicy::alltoallv(sendValues, intervalSizes, env);
             measuringTool.stop("bloomfilter_sendEncodedValuesOverall");
             return RecvData(std::move(result), std::move(recvIntervalSizes), std::move(offsets));
         }
@@ -634,7 +636,8 @@ struct SendOnlyHashesToFilter : private SendPolicy {
         size_t curPE = 0;
         size_t curBoundary = recvData.intervalSizes[0];
         for (size_t i = 0; i < recvData.data.size(); ++i) {
-            while (i == curBoundary) curBoundary += recvData.intervalSizes[++curPE];
+            while (i == curBoundary)
+                curBoundary += recvData.intervalSizes[++curPE];
             hashesPEIndex.emplace_back(recvData.data[i], curPE);
         }
         return hashesPEIndex;
@@ -740,7 +743,8 @@ struct FindDuplicates {
         //    duplicates = dss_schimek::mpi::AllToAllvSmall::alltoallv(
         //        sendBuffer.data(), sendCounts_);
         if (dupsToSend) {
-            duplicates = GolombPolicy::alltoallv(sendBuffer, sendCounts_, recvData.intervalSizes);
+            duplicates =
+                GolombPolicy::alltoallv(sendBuffer, sendCounts_, recvData.intervalSizes, env);
             // duplicates = dss_schimek::mpi::AllToAllvSmall::alltoallv(
             //     sendBuffer.data(), sendCounts_);
         }
@@ -848,8 +852,6 @@ class ExcatDistinguishingPrefix {
             return;
 
         std::stable_sort(stringTriples.begin(), stringTriples.end());
-        StringTriple prevHashTriple = stringTriples[0];
-        bool duplicate = false;
 
         for (size_t i = 1; i < stringTriples.size(); ++i) {
             const StringTriple prevStringTriple = stringTriples[i - 1];
@@ -966,8 +968,6 @@ class BloomfilterTest {
             return;
 
         std::stable_sort(stringTriples.begin(), stringTriples.end());
-        StringTriple prevHashTriple = stringTriples[0];
-        bool duplicate = false;
 
         for (size_t i = 1; i < stringTriples.size(); ++i) {
             const StringTriple prevStringTriple = stringTriples[i - 1];
@@ -1365,7 +1365,8 @@ public:
     ) {
         // eosCandidates is subset of candidates whose length is <= depth
         StringSet ss = strptr.active();
-        for (size_t candidate = 0; candidate < ss.size(); ++candidate) results[candidate] = depth;
+        for (size_t candidate = 0; candidate < ss.size(); ++candidate)
+            results[candidate] = depth;
 
         for (const size_t curEOSCandidate: eosCandidates) {
             String str = ss[ss.begin() + curEOSCandidate];
@@ -1383,7 +1384,8 @@ public:
     ) {
         // eosCandidates is subset of candidates whose length is <= depth
         StringSet ss = strptr.active();
-        for (const size_t curCandidate: candidates) results[curCandidate] = depth;
+        for (const size_t curCandidate: candidates)
+            results[curCandidate] = depth;
 
         for (const size_t curEOSCandidate: eosCandidates) {
             String str = ss[ss.begin() + curEOSCandidate];
@@ -1406,7 +1408,7 @@ public:
         //    hashStringIndicesEOSCandidates =
         //        generateHashStringIndices(strptr.active(), depth);
         GeneratedHashesLocalDupsEOSCandidates<HashStringIndex> hashStringIndicesEOSCandidates =
-            generateHashStringIndices(strptr.active(), depth, strptr.get_lcp());
+            generateHashStringIndices(strptr.active(), depth, strptr.lcp());
 
         std::vector<size_t>& localLcpDuplicates = hashStringIndicesEOSCandidates.localDups;
         std::vector<HashStringIndex>& hashStringIndices = hashStringIndicesEOSCandidates.data;
@@ -1483,7 +1485,7 @@ public:
 
         measuringTool.start("bloomfilter_generateHashStringIndices");
         GeneratedHashesLocalDupsEOSCandidates<HashStringIndex> hashStringIndicesEOSCandidates =
-            generateHashStringIndices(strptr.active(), candidates, depth, strptr.get_lcp());
+            generateHashStringIndices(strptr.active(), candidates, depth, strptr.lcp());
 
         std::vector<size_t>& localLcpDuplicates = hashStringIndicesEOSCandidates.localDups;
         std::vector<HashStringIndex>& hashStringIndices = hashStringIndicesEOSCandidates.data;
