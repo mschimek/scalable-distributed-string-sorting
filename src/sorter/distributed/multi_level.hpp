@@ -45,13 +45,8 @@ struct LevelIter {
         std::swap(lhs.level_, rhs.level_);
     }
 
-    friend bool operator==(iterator const& lhs, iterator const& rhs) {
-        return lhs.level_ == rhs.level_;
-    }
-
-    friend bool operator!=(iterator const& lhs, iterator const& rhs) {
-        return lhs.level_ != rhs.level_;
-    }
+    bool operator==(iterator const& rhs) { return level_ == rhs.level_; }
+    bool operator!=(iterator const& rhs) { return level_ != rhs.level_; }
 
 private:
     Impl const& impl_;
@@ -129,8 +124,8 @@ public:
     send_counts(std::vector<size_t> const& interval_sizes, Level<Communicator> const& level) {
         auto const& comm = level.comm_orig;
         auto const group_size = level.group_size();
-        auto const num_groups{comm.size() / group_size};
-        auto const group_offset{comm.rank() / num_groups};
+        auto const num_groups = comm.size() / group_size;
+        auto const group_offset = comm.rank() / num_groups;
 
         // PE `i` sends strings to the `i * p' / p`th member of each group on the next level
         std::vector<size_t> send_counts(comm.size());

@@ -183,6 +183,7 @@ public:
 
     using StringLcpContainer = dss_schimek::StringLcpContainer<typename StringPtr::StringSet>;
 
+    // todo could simply pass Container by auto here
     StringLcpContainer
     sort(StringPtr& string_ptr, StringLcpContainer&& container, Subcommunicators const& comms) {
         using namespace kamping;
@@ -192,10 +193,8 @@ public:
         this->measuring_tool_.setPhase("local_sorting");
 
         if constexpr (debug) {
-            size_t chars_in_set = 0;
-            for (auto const& str: ss) {
-                chars_in_set += ss.get_length(str) + 1;
-            }
+            auto op = [&ss](auto sum, auto const& str) { return sum + ss.get_length(str) + 1; };
+            size_t chars_in_set = std::accumulate(std::begin(ss), std::end(ss), size_t{0}, op);
             this->measuring_tool_.add(chars_in_set, "chars_in_set");
         }
 
@@ -232,9 +231,8 @@ public:
         }
 
         this->measuring_tool_.start("sort_globally", "final_sorting");
-        auto const& comm_final = comms.comm_final();
         auto sorted_container =
-            this->sort_exhaustive(std::move(container), comm_final, extra_sample_args, {});
+            this->sort_exhaustive(std::move(container), comms.comm_final(), extra_sample_args, {});
         this->measuring_tool_.stop("sort_globally", "final_sorting");
 
         this->measuring_tool_.setRound(0);

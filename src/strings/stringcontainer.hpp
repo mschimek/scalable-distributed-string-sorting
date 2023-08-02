@@ -103,6 +103,18 @@ class InitPolicy<GenericCharLengthIndexPEIndexStringSet<CharType>> {
     using String = typename StringSet::String;
 
 public:
+    // todo
+    template <typename String_>
+    std::vector<String>
+    init_strings(std::vector<Char>& raw_strings, std::vector<String_> const& ss, size_t rank) {
+        std::vector<String> strings(ss.size());
+        auto op = [=, idx = size_t{0}](auto const& str) mutable {
+            return String{str.string, Length{str.length}, StringIndex{idx++}, PEIndex{rank}};
+        };
+        std::transform(std::cbegin(ss), std::cend(ss), std::begin(strings), op);
+        return strings;
+    }
+
     std::vector<String> init_strings(
         std::vector<Char>& raw_strings,
         std::vector<size_t> const& intervals,
@@ -134,7 +146,7 @@ public:
 
         auto PE_it = PE_indices.cbegin(), str_it = str_indices.cbegin();
         auto init = [&](auto str, auto len) mutable {
-            return String{str, Length{len}, PEIndex{*(PE_it++)}, StringIndex{*(str_it++)}};
+            return String{str, Length{len}, StringIndex{*(str_it++)}, PEIndex{*(PE_it++)}};
         };
         init_str_len(strings.begin(), raw_strings, init);
         return strings;
@@ -168,7 +180,8 @@ public:
     std::vector<String> const& getStrings() const { return strings_; }
     std::vector<Char>& raw_strings() { return *raw_strings_; }
     std::vector<Char> const& raw_strings() const { return *raw_strings_; }
-    std::vector<Char>&& releaseRawStrings() { return std::move(*raw_strings_); }
+    std::vector<Char>&& release_raw_strings() { return std::move(*raw_strings_); }
+    std::vector<String>&& release_strings() { return std::move(strings_); }
 
     std::vector<unsigned char> getRawString(int64_t i) {
         if (i < 0 || static_cast<uint64_t>(i) > size())
@@ -272,6 +285,7 @@ public:
     std::vector<size_t> const& lcps() const { return lcps_; }
     std::vector<size_t>& savedLcps() { return savedLcps_; }
     std::vector<size_t> const& savedLcps() const { return savedLcps_; }
+    std::vector<size_t>&& release_lcps() { return std::move(lcps_); }
 
     StringLcpPtr make_string_lcp_ptr() { return {this->make_string_set(), this->lcp_array()}; }
 
@@ -434,6 +448,10 @@ public:
         std::vector<size_t> const& offsets
     )
         : Base{std::move(raw_strings), std::move(lcps), interval_sizes, offsets} {}
+
+    template <typename StringSet>
+    explicit StringLcpContainer(StringLcpContainer<StringSet>&& cont, size_t rank)
+        : Base{cont.release_raw_strings(), cont.release_lcps(), cont.getStrings(), rank} {}
 
     // todo this overload is pretty horrendous
     explicit StringLcpContainer(
