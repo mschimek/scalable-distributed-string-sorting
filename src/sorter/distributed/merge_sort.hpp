@@ -35,9 +35,6 @@ namespace sorter {
 // todo remove defaulted environments (dss_schimek::mpi::environment env;)
 template <typename Subcommunicators, typename AllToAllStringPolicy, typename SamplePolicy>
 class BaseDistributedMergeSort : private AllToAllStringPolicy {
-public:
-    static constexpr bool debug = false;
-
 protected:
     using MeasuringTool = measurement::MeasuringTool;
     MeasuringTool& measuring_tool_ = MeasuringTool::measuringTool();
@@ -169,6 +166,9 @@ protected:
 
         return sorted_container;
     }
+
+private:
+    static constexpr bool debug = false;
 };
 
 template <
@@ -179,16 +179,14 @@ template <
 class DistributedMergeSort
     : private BaseDistributedMergeSort<Subcommunicators, AllToAllStringPolicy, SamplePolicy> {
 public:
-    static constexpr bool debug = false;
-
     using StringLcpContainer = dss_schimek::StringLcpContainer<typename StringPtr::StringSet>;
 
     // todo could simply pass Container by auto here
-    StringLcpContainer
-    sort(StringPtr& string_ptr, StringLcpContainer&& container, Subcommunicators const& comms) {
+    StringLcpContainer sort(StringLcpContainer&& container, Subcommunicators const& comms) {
         using namespace kamping;
 
         // todo make phase names consistent
+        auto string_ptr = container.make_string_lcp_ptr();
         auto const& ss = string_ptr.active();
         this->measuring_tool_.setPhase("local_sorting");
 
@@ -238,6 +236,9 @@ public:
         this->measuring_tool_.setRound(0);
         return sorted_container;
     }
+
+private:
+    static constexpr bool debug = false;
 };
 
 } // namespace sorter

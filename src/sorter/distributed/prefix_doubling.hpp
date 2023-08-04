@@ -35,14 +35,14 @@ class PrefixDoublingMergeSort
     : private BaseDistributedMergeSort<Subcommunicators, AllToAllStringPolicy, SamplePolicy> {
 public:
     using StringLcpContainer = dss_schimek::StringLcpContainer<typename StringPtr::StringSet>;
-    // todo need to remove this
     using StringPEIndexContainer =
         dss_schimek::StringLcpContainer<dss_schimek::UCharLengthIndexPEIndexStringSet>;
 
     std::vector<StringIndexPEIndex>
-    sort(StringLcpContainer&& container, StringPtr& string_ptr, Subcommunicators const& comms) {
+    sort(StringLcpContainer&& container, Subcommunicators const& comms) {
         using namespace kamping;
 
+        auto string_ptr = container.make_string_lcp_ptr();
         auto const& ss = string_ptr.active();
         this->measuring_tool_.setPhase("local_sorting");
 
@@ -104,7 +104,8 @@ public:
     }
 
 private:
-    static constexpr bool debug = true;
+    static constexpr bool debug = false;
+    static constexpr uint64_t start_depth = 8;
 
     std::vector<StringIndexPEIndex> writeback_permutation(auto& sorted_container) {
         this->measuring_tool_.start("writeback_permutation");
@@ -112,9 +113,8 @@ private:
         auto ss = sorted_container.make_string_set();
         std::vector<StringIndexPEIndex> permutation(ss.size());
 
-        // todo should use different API here
-        auto op = [&ss](auto const& str) {
-            return StringIndexPEIndex{ss.getIndex(str), ss.getPEIndex(str)};
+        auto op = [&ss](auto const& str) -> StringIndexPEIndex {
+            return {ss.getIndex(str), ss.getPEIndex(str)};
         };
         std::transform(std::cbegin(ss), std::cend(ss), std::begin(permutation), op);
 
@@ -134,8 +134,7 @@ private:
             dss_schimek::SendOnlyHashesToFilter<GolombPolicy>,
             dss_schimek::XXHasher>;
 
-        const uint64_t start_depth = 8;
-
+        // todo disable measurements for bloomfilter
         this->measuring_tool_.start("bloomfilter_init");
         StringSet ss = local_string_ptr.active();
         BloomFilter bloom_filter{ss.size(), start_depth};
@@ -147,7 +146,6 @@ private:
         std::vector<size_t> candidates =
             bloom_filter.filter(local_string_ptr, start_depth, results);
 
-        // todo why 8, 8 + 16, 8 + 32, ...???
         for (size_t i = (start_depth * 2); i < std::numeric_limits<size_t>::max(); i *= 2) {
             this->measuring_tool_.add(candidates.size(), "bloomfilter_numberCandidates", false);
             this->measuring_tool_.start("bloomfilter_allreduce");
@@ -161,8 +159,7 @@ private:
             }
 
             this->measuring_tool_.setRound(++current_round);
-            candidates =
-                bloom_filter.filter(local_string_ptr, start_depth + i, candidates, results);
+            candidates = bloom_filter.filter(local_string_ptr, i, candidates, results);
         }
         this->measuring_tool_.setRound(0);
         return results;

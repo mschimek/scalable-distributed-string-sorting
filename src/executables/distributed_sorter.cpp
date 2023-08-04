@@ -96,7 +96,6 @@ void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicat
     measuring_tool.setVerbose(false);
 
     auto input_container = generate_strings<StringGenerator, StringSet>(args, comm);
-    auto input_str_ptr = input_container.make_string_lcp_ptr();
     auto num_input_chars = input_container.char_size();
     auto num_input_strs = input_container.size();
 
@@ -120,8 +119,7 @@ void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicat
     using dss_mehnert::sorter::DistributedMergeSort;
     DistributedMergeSort<StringLcpPtr, Subcommunicators, AllToAllPolicy, SamplePolicy> merge_sort;
 
-    StringLcpContainer<StringSet> sorted_container =
-        merge_sort.sort(input_str_ptr, std::move(input_container), comms);
+    auto sorted_container = merge_sort.sort(std::move(input_container), comms);
 
     measuring_tool.stop("none", "sorting_overall", comm);
 
@@ -179,7 +177,6 @@ void run_prefix_doubling(
     measuring_tool.setVerbose(false);
 
     auto input_container = generate_strings<StringGenerator, StringSet>(args, comm);
-    auto input_str_ptr = input_container.make_string_lcp_ptr();
     auto num_input_chars = input_container.char_size();
     auto num_input_strs = input_container.size();
 
@@ -207,7 +204,7 @@ void run_prefix_doubling(
         SamplePolicy,
         GolombEncoding>
         merge_sort;
-    auto permutation = merge_sort.sort(std::move(input_container), input_str_ptr, comms);
+    auto permutation = merge_sort.sort(std::move(input_container), comms);
 
     measuring_tool.stop("none", "sorting_overall", comm);
 
