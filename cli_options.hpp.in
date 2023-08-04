@@ -1,0 +1,16 @@
+// (c) 2023 Pascal Mehnert
+// This code is licensed under BSD 2-Clause License (see LICENSE for details)
+
+#pragma once
+
+#cmakedefine01 CLI_ENABLE_GOLOMB
+#cmakedefine01 CLI_ENABLE_SPLIT
+#cmakedefine01 CLI_ENABLE_PREFIX_DOUBLING
+#cmakedefine01 CLI_ENABLE_ALLTOALL
+
+struct CliOptions {
+    static constexpr bool enable_golomb = static_cast<bool>(CLI_ENABLE_GOLOMB);
+    static constexpr bool enable_split = static_cast<bool>(CLI_ENABLE_SPLIT);
+    static constexpr bool enable_prefix_doubling = static_cast<bool>(CLI_ENABLE_PREFIX_DOUBLING);
+    static constexpr bool enable_alltoall = static_cast<bool>(CLI_ENABLE_ALLTOALL);
+};

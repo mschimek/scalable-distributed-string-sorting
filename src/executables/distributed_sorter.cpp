@@ -19,6 +19,7 @@
 #include <tlx/die/core.hpp>
 #include <tlx/sort/strings/string_ptr.hpp>
 
+#include "cli_options.hpp"
 #include "mpi/alltoall.hpp"
 #include "mpi/communicator.hpp"
 #include "mpi/is_sorted.hpp"
@@ -254,7 +255,11 @@ void run_prefix_doubling(
     measuring_tool.reset();
 }
 
-std::string get_result_prefix(SorterArgs const& args, dss_mehnert::Communicator const& comm) {
+std::string get_result_prefix(
+    SorterArgs const& args,
+    PolicyEnums::CombinationKey const& key,
+    dss_mehnert::Communicator const& comm
+) {
     // clang-format off
     return std::string("RESULT")
            + (args.experiment.empty() ? "" : (" experiment=" + args.experiment))
@@ -262,7 +267,12 @@ std::string get_result_prefix(SorterArgs const& args, dss_mehnert::Communicator 
            + " num_strings=" + std::to_string(args.num_strings)
            + " len_strings=" + std::to_string(args.generator_args.stringLength)
            + " num_levels=" + std::to_string(args.levels.size())
-           + " iteration=" + std::to_string(args.iteration);
+           + " iteration=" + std::to_string(args.iteration)
+           + " strong_scaling=" + std::to_string(args.strong_scaling)
+           + " lcp_compression=" + std::to_string(key.lcp_compression)
+           + " prefix_compression=" + std::to_string(key.prefix_compression)
+           + " prefix_doubling=" + std::to_string(key.prefix_doubling)
+           + " DN_ratio=" + std::to_string(args.generator_args.dToNRatio);
     // clang-format on
 }
 
@@ -279,29 +289,31 @@ void print_config(
     std::string_view prefix, SorterArgs const& args, PolicyEnums::CombinationKey const& key
 ) {
     // todo question: output all measurements in a single line?
-    // todo add some of this back to prefix
     std::cout << prefix << " key=string_generator name=" << StringGenerator::getName() << "\n";
-    std::cout << prefix << " key=DN_ratio value=" << args.generator_args.dToNRatio << "\n";
     std::cout << prefix << " key=sampler name=" << SamplePolicy::getName() << "\n";
     std::cout << prefix << " key=alltoall_routine name=" << MPIAllToAllRoutine::getName() << "\n";
     std::cout << prefix << " key=golomb_encoding name=" << GolombEncoding::getName() << "\n";
     std::cout << prefix << " key=subcomms name=" << Subcommunicators::get_name() << "\n";
-    std::cout << prefix << " key=prefix_compression value=" << key.prefix_compression << "\n";
-    std::cout << prefix << " key=lcp_compression value=" << key.lcp_compression << "\n";
-    std::cout << prefix << " key=prefix_doubling value=" << key.prefix_doubling << "\n";
-    std::cout << prefix << " key=strong_scaling value=" << args.strong_scaling << "\n";
+}
+
+void die_with_feature(std::string_view feature) {
+    tlx_die("feature disabled for compile time; enable with '-D" << feature << "=On'");
 }
 
 template <typename... Args>
 void arg8(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
     dss_mehnert::Communicator comm;
-    auto prefix = get_result_prefix(args, comm);
+    auto prefix = get_result_prefix(args, key, comm);
     if (comm.is_root()) {
         print_config<Args...>(prefix, args, key);
     }
 
     if (key.prefix_doubling) {
-        run_prefix_doubling<Args...>(args, prefix, comm);
+        if constexpr (CliOptions::enable_prefix_doubling) {
+            run_prefix_doubling<Args...>(args, prefix, comm);
+        } else {
+            die_with_feature("CLI_ENABLE_PREFIX_DOUBLING");
+        }
     } else {
         run_merge_sort<Args...>(args, prefix, comm);
     }
@@ -334,11 +346,19 @@ void arg5(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
 
     switch (key.subcomms) {
         case PolicyEnums::Subcommunicators::none: {
-            arg6<Args..., NoSplit<Communicator>>(key, args);
+            if constexpr (CliOptions::enable_split) {
+                arg6<Args..., NoSplit<Communicator>>(key, args);
+            } else {
+                die_with_feature("CLI_ENABLE_SPLIT");
+            }
             break;
         }
         case PolicyEnums::Subcommunicators::naive: {
-            arg6<Args..., NaiveSplit<Communicator>>(key, args);
+            if constexpr (CliOptions::enable_split) {
+                arg6<Args..., NaiveSplit<Communicator>>(key, args);
+            } else {
+                die_with_feature("CLI_ENABLE_SPLIT");
+            }
             break;
         }
         case PolicyEnums::Subcommunicators::grid: {
@@ -358,15 +378,18 @@ void arg4(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
             break;
         }
         case PolicyEnums::GolombEncoding::sequentialGolombEncoding: {
-            // arg5<Args..., AllToAllHashesGolomb>(key, args);
-            tlx_die("disabled for compile time");
+            if constexpr (CliOptions::enable_golomb) {
+                arg5<Args..., AllToAllHashesGolomb>(key, args);
+            } else {
+                die_with_feature("CLI_ENABLE_GOLOMB");
+            }
             break;
         }
         case PolicyEnums::GolombEncoding::pipelinedGolombEncoding: {
             // todo this implementation seems to be broken
             // arg5<Args..., AllToAllHashValuesPipeline>(key, args);
+            // break;
             tlx_die("not implemented");
-            break;
         }
     }
 }
@@ -377,13 +400,19 @@ void arg3(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
 
     switch (key.alltoall_routine) {
         case PolicyEnums::MPIRoutineAllToAll::small: {
-            // arg4<Args..., AllToAllvSmall>(key, args);
-            tlx_die("not implemented");
+            if constexpr (CliOptions::enable_alltoall) {
+                arg4<Args..., AllToAllvSmall>(key, args);
+            } else {
+                die_with_feature("CLI_ENABLE_ALLTOALL");
+            }
             break;
         }
         case PolicyEnums::MPIRoutineAllToAll::directMessages: {
-            // arg4<Args..., AllToAllvDirectMessages>(key, args);
-            tlx_die("not implemented");
+            if constexpr (CliOptions::enable_alltoall) {
+                arg4<Args..., AllToAllvDirectMessages>(key, args);
+            } else {
+                die_with_feature("CLI_ENABLE_ALLTOALL");
+            }
             break;
         }
         case PolicyEnums::MPIRoutineAllToAll::combined: {

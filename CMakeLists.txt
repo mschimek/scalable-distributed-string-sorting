@@ -11,6 +11,24 @@ project(distributed_string_sorting)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_COLOR_DIAGNOSTICS ON)
 
+option(CLI_ENABLE_PREFIX_DOUBLING "enable prefix doubling merge sort" On)
+option(CLI_ENABLE_GOLOMB "enable support for golomb encoding during prefix doubling" Off)
+option(CLI_ENABLE_SPLIT "enable support for different communicator split strategies" Off)
+option(CLI_ENABLE_ALLTOALL "enable support for different AllToAll routines" Off)
+option(CLI_ENABLE_ALL "enable all optional command line features" Off)
+
+if(CLI_ENABLE_ALL)
+  set(CLI_ENABLE_PREFIX_DOUBLING On)
+  set(CLI_ENABLE_GOLOMB On)
+  set(CLI_ENABLE_SPLIT On)
+  set(CLI_ENABLE_ALLTOALL On)
+endif()
+
+message(STATUS "Prefix Doubling Enabled: ${CLI_ENABLE_PREFIX_DOUBLING}")
+message(STATUS "Golomb Encoding Enabled: ${CLI_ENABLE_GOLOMB}")
+message(STATUS "Split Strategies Enabled: ${CLI_ENABLE_SPLIT}")
+message(STATUS "All-To-All Routines Enabled: ${CLI_ENABLE_ALLTOALL}")
+
 list(APPEND
   DSS_MEHNERT_WARNING_FLAGS
   "-Wall"
@@ -33,7 +51,7 @@ list(APPEND
 ## todo maybe use -flto, but consider binary size (maybe strip?)
 set(CMAKE_CXX_FLAGS_DEBUG "-ggdb")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG -march=native")
-set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -DDEBUG -march=native -ggdb")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -DDEBUG -march=native -ggdb")
 
 # Default to Release builds
 if(NOT CMAKE_BUILD_TYPE)
@@ -70,7 +88,15 @@ target_link_libraries(dss_base INTERFACE ips4o)
 
 add_subdirectory(src)
 
-add_executable(distributed_sorter src/executables/distributed_sorter.cpp src/executables/variant_selection.hpp)
+configure_file("cli_options.hpp.in" "include/cli_options.hpp")
+add_executable(distributed_sorter
+  src/executables/distributed_sorter.cpp
+  src/executables/variant_selection.hpp
+   )
+
+target_include_directories(distributed_sorter PRIVATE
+  "${CMAKE_CURRENT_BINARY_DIR}/include")
+
 target_compile_options(distributed_sorter PRIVATE ${DSS_MEHNERT_WARNING_FLAGS})
 target_link_libraries(distributed_sorter kamping)
 target_link_libraries(distributed_sorter dss_base)
