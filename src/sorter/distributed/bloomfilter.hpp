@@ -153,8 +153,8 @@ struct AllToAllHashesGolomb {
     static inline std::vector<DataType> alltoallv(
         std::vector<DataType>& sendData,
         std::vector<size_t> const& intervalSizes,
-        mpi::environment env,
         const size_t bloomFilterSize,
+        mpi::environment env,
         const size_t b = 1048576
     ) {
         using AllToAllv = mpi::AllToAllvCombined<dss_schimek::mpi::AllToAllvSmall>;
