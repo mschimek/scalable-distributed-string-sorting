@@ -80,15 +80,16 @@ template <
     typename MPIAllToAllRoutine,
     typename GolombEncoding,
     typename Subcommunicators,
-    typename ByteEncoder,
-    typename LcpCompression>
+    typename LcpCompression,
+    typename PrefixCompression>
 void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicator const& comm) {
     using namespace dss_schimek;
 
     constexpr bool lcp_compression = LcpCompression();
+    constexpr bool prefix_compression = PrefixCompression();
     using StringLcpPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
     using AllToAllPolicy =
-        mpi::AllToAllStringImpl<lcp_compression, StringSet, MPIAllToAllRoutine, ByteEncoder>;
+        mpi::AllToAllStringImpl<lcp_compression, prefix_compression, StringSet, MPIAllToAllRoutine>;
 
     using dss_mehnert::measurement::MeasuringTool;
     auto& measuring_tool = MeasuringTool::measuringTool();
@@ -159,14 +160,16 @@ template <
     typename MPIAllToAllRoutine,
     typename GolombEncoding,
     typename Subcommunicators,
-    typename ByteEncoder,
-    typename LcpCompression>
+    typename LcpCompression,
+    typename PrefixCompression>
 void run_prefix_doubling(
     SorterArgs args, std::string prefix, dss_mehnert::Communicator const& comm
 ) {
     using namespace dss_schimek;
 
     constexpr bool lcp_compression = LcpCompression();
+    // todo
+    constexpr bool prefix_compression [[maybe_unused]] = PrefixCompression();
     using StringLcpPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
     using AllToAllPolicy =
         mpi::AllToAllStringImplPrefixDoubling<lcp_compression, StringLcpPtr, MPIAllToAllRoutine>;
@@ -280,8 +283,8 @@ template <
     typename MPIAllToAllRoutine,
     typename GolombEncoding,
     typename Subcommunicators,
-    typename ByteEncoder,
-    typename LcpCompression>
+    typename LcpCompression,
+    typename PrefixCompression>
 void print_config(
     std::string_view prefix, SorterArgs const& args, PolicyEnums::CombinationKey const& key
 ) {
@@ -318,7 +321,9 @@ void arg8(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
 
 template <typename... Args>
 void arg7(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
-    if (key.lcp_compression) {
+    using namespace dss_schimek;
+
+    if (key.prefix_compression) {
         arg8<Args..., std::true_type>(key, args);
     } else {
         arg8<Args..., std::false_type>(key, args);
@@ -327,12 +332,10 @@ void arg7(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
 
 template <typename... Args>
 void arg6(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
-    using namespace dss_schimek;
-
-    if (key.prefix_compression) {
-        arg7<Args..., EmptyLcpByteEncoderMemCpy>(key, args);
+    if (key.lcp_compression) {
+        arg7<Args..., std::true_type>(key, args);
     } else {
-        arg7<Args..., EmptyByteEncoderMemCpy>(key, args);
+        arg7<Args..., std::false_type>(key, args);
     }
 }
 

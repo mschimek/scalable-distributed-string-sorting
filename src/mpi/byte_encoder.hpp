@@ -81,30 +81,6 @@ public:
     }
 };
 
-class EmptyByteEncoderMemCpy {
-public:
-    static std::string getName() { return "EmptyByteEncoderMemCpy"; }
-
-    template <typename StringSet>
-    std::pair<unsigned char*, size_t> write(unsigned char* buffer, const StringSet ss) const {
-        using String = typename StringSet::String;
-
-        const size_t size = ss.size();
-        size_t chars_written = 0;
-
-        auto begin = ss.begin();
-        for (size_t i = 0; i < size; ++i) {
-            String str = ss[begin + i];
-            size_t str_length = ss.get_length(str) + 1;
-
-            chars_written += str_length;
-            memcpy(buffer, ss.get_chars(str, 0), str_length);
-            buffer += str_length;
-        }
-        return {buffer, chars_written};
-    }
-};
-
 class EmptyLcpByteEncoderMemCpy {
 public:
     static std::string getName() { return "EmptyLcpByteEncoderMemCpy"; }
