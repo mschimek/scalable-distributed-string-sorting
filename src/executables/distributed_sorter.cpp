@@ -172,7 +172,7 @@ void run_prefix_doubling(
     constexpr bool prefix_compression [[maybe_unused]] = PrefixCompression();
     using StringLcpPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
     using AllToAllPolicy =
-        mpi::AllToAllStringImplPrefixDoubling<lcp_compression, StringLcpPtr, MPIAllToAllRoutine>;
+        mpi::AllToAllStringImplPrefixDoubling<lcp_compression, StringSet, MPIAllToAllRoutine>;
 
     using dss_mehnert::measurement::MeasuringTool;
     auto& measuring_tool = MeasuringTool::measuringTool();
