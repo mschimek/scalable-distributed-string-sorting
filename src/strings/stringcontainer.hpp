@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <iostream>
 #include <iterator>
 #include <memory>
 #include <numeric>
@@ -144,9 +145,10 @@ public:
     ) {
         std::vector<String> strings(PE_indices.size());
 
-        auto PE_it = PE_indices.cbegin(), str_it = str_indices.cbegin();
-        auto init = [&](auto str, auto len) mutable {
-            return String{str, Length{len}, StringIndex{*(str_it++)}, PEIndex{*(PE_it++)}};
+        auto str_it = str_indices.cbegin();
+        auto PE_it = PE_indices.cbegin();
+        auto init = [&](auto str, auto len) -> String {
+            return {str, Length{len}, StringIndex{*str_it++}, PEIndex{*PE_it++}};
         };
         init_str_len(strings.begin(), raw_strings, init);
         return strings;
@@ -289,9 +291,9 @@ public:
 
     StringLcpPtr make_string_lcp_ptr() { return {this->make_string_set(), this->lcp_array()}; }
 
-    // todo these overloads cause problemns in combination with inheritance
-    void set(std::vector<Char>&& raw_strings) { Base::set(std::move(raw_strings)); }
-    void set(std::vector<String>&& strings) { Base::set(std::move(strings)); }
+    // pull in `set` overlaods from `BaseStringcontainer`
+    using Base::set;
+
     void set(std::vector<size_t>&& lcps) { lcps_ = std::move(lcps); }
     void setSavedLcps(std::vector<size_t>&& savedLcps) { savedLcps_ = std::move(savedLcps); }
 

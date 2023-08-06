@@ -26,7 +26,8 @@
 #include "util/measuringTool.hpp"
 #include "util/structs.hpp"
 
-namespace dss_schimek::mpi {
+namespace dss_schimek {
+namespace mpi {
 
 static constexpr bool debug_alltoall = false;
 
@@ -344,7 +345,7 @@ write_interval(unsigned char* buffer, auto const& ss, size_t const* lcps) {
         memcpy(dest, ss.get_chars(str, str_depth), actual_len);
         dest += actual_len;
     }
-    return {buffer, static_cast<size_t>(dest - buffer)};
+    return {dest, static_cast<size_t>(dest - buffer)};
 }
 
 template <bool compress_prefixes>
@@ -362,10 +363,10 @@ write_interval(unsigned char* buffer, auto const& ss, size_t const* lcps, size_t
         auto str_len = *prefixes++;
         auto actual_len = str_len - str_depth;
         memcpy(dest, ss.get_chars(str, str_depth), actual_len);
-        buffer += actual_len;
-        *buffer++ = 0;
+        dest += actual_len;
+        *dest++ = 0;
     }
-    return {buffer, static_cast<size_t>(dest - buffer)};
+    return {dest, static_cast<size_t>(dest - buffer)};
 }
 
 template <bool compress_prefixes>
@@ -397,7 +398,7 @@ write_send_buf(auto& container, std::vector<size_t> const& send_counts, auto con
     auto& lcps = container.lcps();
     setLcpAtStartOfInterval(lcps.begin(), send_counts.begin(), send_counts.end());
 
-    auto num_send_chars = get_num_send_chars(container, prefixes...);
+    auto num_send_chars = get_num_send_chars<compress_prefixes>(container, prefixes...);
     std::vector<unsigned char> send_buf_char(num_send_chars);
     std::vector<size_t> send_counts_char(send_counts.size());
 
@@ -406,13 +407,11 @@ write_send_buf(auto& container, std::vector<size_t> const& send_counts, auto con
 
     for (size_t interval = 0, strs_written = 0; interval < send_counts.size(); ++interval) {
         auto begin = ss.begin() + strs_written;
-        auto end = begin + send_counts[interval];
-        auto subset = ss.sub(begin, end);
 
         size_t chars_written = 0;
         std::tie(pos, chars_written) = write_interval<compress_prefixes>(
             pos,
-            subset,
+            ss.sub(begin, begin + send_counts[interval]),
             lcps.data() + strs_written,
             (prefixes.data() + strs_written)...
         );
@@ -420,6 +419,8 @@ write_send_buf(auto& container, std::vector<size_t> const& send_counts, auto con
         send_counts_char[interval] = chars_written;
         strs_written += send_counts[interval];
     }
+
+    return {std::move(send_buf_char), std::move(send_counts_char)};
 }
 
 
@@ -565,92 +566,58 @@ public:
 
 // Method for the All-To-All exchange of the reduced strings, i.e. only
 // distinguishing prefix - common prefix, in the prefix-doubling-algorithm
-// todo implement optional prefix compression
-template <bool compress_lcps, typename StringSet, typename AllToAllPolicy>
-struct AllToAllStringImplPrefixDoubling
-    : public AllToAllStringImpl<compress_lcps, true, StringSet, AllToAllPolicy> {
+template <bool compress_lcps, bool compress_prefixes, typename StringSet, typename AllToAllPolicy>
+struct AllToAllStringImplPrefixDoubling : public AllToAllStringImpl<
+                                              compress_lcps,
+                                              compress_prefixes,
+                                              UCharLengthIndexPEIndexStringSet,
+                                              AllToAllPolicy> {
     using StringPEIndexSet = dss_schimek::UCharLengthIndexPEIndexStringSet;
     static constexpr bool Lcps = true;
-    static constexpr bool PrefixCompression = true;
+    static constexpr bool PrefixCompression = compress_prefixes;
+
+    using AllToAllStringImpl<
+        compress_lcps,
+        compress_prefixes,
+        UCharLengthIndexPEIndexStringSet,
+        AllToAllPolicy>::alltoallv;
 
     StringLcpContainer<StringPEIndexSet> alltoallv(
-        StringLcpContainer<StringSet>& send_data,
+        StringLcpContainer<StringSet>& container,
         std::vector<size_t> const& send_counts,
-        std::vector<size_t> const& dist_prefixes,
+        std::vector<size_t> const& prefixes,
         environment env
     ) {
-        using namespace dss_schimek;
+        using dss_mehnert::measurement::MeasuringTool;
+        auto& measuring_tool = MeasuringTool::measuringTool();
 
-        auto& measuring_tool = measurement::MeasuringTool::measuringTool();
+        if (container.empty()) {
+            return {};
+        }
 
         measuring_tool.start("all_to_all_strings_intern_copy");
-        const EmptyPrefixDoublingLcpByteEncoderMemCpy byteEncoder;
-        auto string_ptr = send_data.make_string_lcp_ptr();
-        const StringSet ss = string_ptr.active();
-
-        if (ss.size() == 0)
-            return dss_schimek::StringLcpContainer<StringPEIndexSet>{};
-
-        std::vector<unsigned char> recv_buf_char;
-        std::vector<size_t> send_counts_char(send_counts.size());
-
-        _internal::setLcpAtStartOfInterval(
-            string_ptr.lcp(),
-            send_counts.begin(),
-            send_counts.end()
-        );
-
-        const size_t L =
-            std::accumulate(string_ptr.lcp(), string_ptr.lcp() + string_ptr.size(), size_t{0});
-        const size_t D = std::accumulate(dist_prefixes.begin(), dist_prefixes.end(), size_t{0});
-        measuring_tool.add(L, "localL");
-        measuring_tool.add(D, "localD");
-
-        const size_t numCharsToSend = string_ptr.size() + D - L;
-        std::vector<unsigned char> buffer(numCharsToSend);
-
-        unsigned char* curPos = buffer.data();
-        for (size_t interval = 0, strs_written = 0; interval < send_counts.size(); ++interval) {
-            auto begin = ss.begin() + strs_written;
-
-            size_t chars_written = 0;
-            std::tie(curPos, chars_written) = byteEncoder.write(
-                curPos,
-                ss.sub(begin, begin + send_counts[interval]),
-                string_ptr.lcp() + strs_written,
-                dist_prefixes.data() + strs_written
-            );
-
-            send_counts_char[interval] = chars_written;
-            strs_written += send_counts[interval];
-        }
-        send_data.deleteRawStrings();
-        send_data.deleteStrings();
-
+        auto [send_buf_char, send_counts_char] =
+            _internal::write_send_buf<compress_prefixes>(container, send_counts, prefixes);
+        container.deleteRawStrings();
         measuring_tool.stop("all_to_all_strings_intern_copy");
-        measuring_tool.start("all_to_all_strings_mpi");
-        recv_buf_char = AllToAllPolicy::alltoallv(buffer.data(), send_counts_char, env);
 
-        auto recv_counts = dss_schimek::mpi::alltoall(send_counts, env);
+
+        measuring_tool.start("all_to_all_strings_mpi");
+        auto recv_buf_char = AllToAllPolicy::alltoallv(send_buf_char.data(), send_counts_char, env);
+
+        auto recv_counts = mpi::alltoall(send_counts, env);
         auto send_lcps = _internal::send_u64s<compress_lcps, AllToAllPolicy>;
-        auto recv_buf_lcp = send_lcps(send_data.lcps(), send_counts, recv_counts, env);
-        send_data.deleteAll();
+        auto recv_buf_lcp = send_lcps(container.lcps(), send_counts, recv_counts, env);
+        container.deleteAll();
 
         std::vector<size_t> offsets(send_counts.size());
         std::exclusive_scan(send_counts.begin(), send_counts.end(), offsets.begin(), 0);
 
-        auto recv_offsets = dss_schimek::mpi::alltoall(offsets, env);
+        auto recv_offsets = mpi::alltoall(offsets, env);
         measuring_tool.stop("all_to_all_strings_mpi");
-        measuring_tool.add(
-            numCharsToSend + string_ptr.size() * sizeof(size_t),
-            "string_exchange_bytes_sent"
-        );
-
-        measuring_tool.start("all_to_all_strings_read");
-        measuring_tool.stop("all_to_all_strings_read");
 
         measuring_tool.start("container_construction");
-        dss_schimek::StringLcpContainer<StringPEIndexSet> recv_container{
+        StringLcpContainer<StringPEIndexSet> recv_container{
             std::move(recv_buf_char),
             std::move(recv_buf_lcp),
             recv_counts,
@@ -675,13 +642,13 @@ struct AllToAllStringImplPrefixDoubling
         }
 
         measuring_tool.start("all_to_all_strings_intern_copy");
-        // todo add compress_prefixes parameter
         auto [send_buf_char, send_counts_char] =
-            _internal::write_send_buf<true>(container, send_counts, prefixes);
+            _internal::write_send_buf<compress_prefixes>(container, send_counts, prefixes);
         container.deleteRawStrings();
         measuring_tool.stop("all_to_all_strings_intern_copy");
 
-        using SendImpl = _internal::StringSetSendImpl<compress_lcps, StringSet, AllToAllPolicy>;
+        using SendImpl =
+            _internal::StringSetSendImpl<compress_lcps, StringPEIndexSet, AllToAllPolicy>;
         return SendImpl::alltoallv(container, send_buf_char, send_counts_char, send_counts, env);
     }
 };
@@ -745,4 +712,5 @@ getStrings(Iterator requestBegin, Iterator requestEnd, StringSet localSS, enviro
     return container;
 }
 
-} // namespace dss_schimek::mpi
+} // namespace mpi
+} // namespace dss_schimek

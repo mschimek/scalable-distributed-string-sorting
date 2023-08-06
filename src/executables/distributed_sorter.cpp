@@ -168,11 +168,13 @@ void run_prefix_doubling(
     using namespace dss_schimek;
 
     constexpr bool lcp_compression = LcpCompression();
-    // todo
-    constexpr bool prefix_compression [[maybe_unused]] = PrefixCompression();
+    constexpr bool prefix_compression = PrefixCompression();
     using StringLcpPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
-    using AllToAllPolicy =
-        mpi::AllToAllStringImplPrefixDoubling<lcp_compression, StringSet, MPIAllToAllRoutine>;
+    using AllToAllPolicy = mpi::AllToAllStringImplPrefixDoubling<
+        lcp_compression,
+        prefix_compression,
+        StringSet,
+        MPIAllToAllRoutine>;
 
     using dss_mehnert::measurement::MeasuringTool;
     auto& measuring_tool = MeasuringTool::measuringTool();
