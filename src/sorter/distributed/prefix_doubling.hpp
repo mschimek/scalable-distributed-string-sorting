@@ -65,10 +65,9 @@ public:
 
         this->measuring_tool_.start("bloomfilter", "bloomfilter_overall");
         auto prefixes = compute_distinguishing_prefixes(string_ptr, comms.comm_root());
-        sample::DistPrefixes dist_prefixes{prefixes};
         this->measuring_tool_.stop("bloomfilter", "bloomfilter_overall", comms.comm_root());
 
-        std::tuple sample_args{dist_prefixes};
+        std::tuple<sample::DistPrefixes> sample_args{{prefixes}};
         std::tuple<std::vector<size_t> const&> all_to_all_args{prefixes};
 
         if (std::begin(comms) == std::end(comms)) {
@@ -87,9 +86,23 @@ public:
         size_t rank = comms.comm_root().rank();
         StringPEIndexContainer container_PE_idx{std::move(container), rank};
 
-        for (size_t round = 0; auto level: comms) {
+        size_t round = 0;
+        {
             this->measuring_tool_.start("sort_globally", "partial_sorting");
-            container_PE_idx = this->sort_partial(std::move(container_PE_idx), level, {}, {});
+            auto level = *std::begin(comms);
+            container_PE_idx = this->sort_partial(
+                std::move(container_PE_idx),
+                level,
+                sample_args,
+                all_to_all_args
+            );
+            this->measuring_tool_.stop("sort_globally", "partial_sorting", comms.comm_root());
+            this->measuring_tool_.setRound(++round);
+        }
+
+        for (auto level = std::begin(comms); level != std::end(comms); ++level) {
+            this->measuring_tool_.start("sort_globally", "partial_sorting");
+            container_PE_idx = this->sort_partial(std::move(container_PE_idx), *level, {}, {});
             this->measuring_tool_.stop("sort_globally", "partial_sorting", comms.comm_root());
             this->measuring_tool_.setRound(++round);
         }
