@@ -64,7 +64,10 @@ public:
         }
 
         this->measuring_tool_.start("bloomfilter", "bloomfilter_overall");
+        auto enabled = this->measuring_tool_.isEnabled();
+        this->measuring_tool_.setEnabled(measure_bloomfilter);
         auto prefixes = compute_distinguishing_prefixes(string_ptr, comms.comm_root());
+        this->measuring_tool_.setEnabled(enabled);
         this->measuring_tool_.stop("bloomfilter", "bloomfilter_overall", comms.comm_root());
 
         std::tuple<sample::DistPrefixes> sample_args{{prefixes}};
@@ -83,8 +86,7 @@ public:
         }
 
         // note the type of used string container changes from here on out
-        size_t rank = comms.comm_root().rank();
-        StringPEIndexContainer container_PE_idx{std::move(container), rank};
+        StringPEIndexContainer container_PE_idx{std::move(container), comms.comm_root().rank()};
 
         size_t round = 0;
         {
@@ -118,6 +120,7 @@ public:
 
 private:
     static constexpr bool debug = false;
+    static constexpr bool measure_bloomfilter = false;
     static constexpr uint64_t start_depth = 8;
 
     std::vector<StringIndexPEIndex> writeback_permutation(auto& sorted_container) {

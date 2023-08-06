@@ -41,6 +41,7 @@ public:
     }
 
     void addRawCommunication(size_t value, std::string_view description) {
+        // todo should this respect `state.disabled`?
         if (state.verbose && comm.is_root()) {
             std::cout << description << std::endl;
         }
@@ -95,16 +96,13 @@ public:
         enable();
     }
 
+    bool isEnabled() { return !state.disabled; }
+    void setEnabled(bool enable) { state.disabled = !enable; }
     void enable() { state.disabled = false; }
-
     void disable() { state.disabled = true; }
-
-    void setVerbose(bool const value) { state.verbose = value; }
-
+    void setVerbose(bool value) { state.verbose = value; }
     void setPrefix(std::string_view prefix_) { state.prefix = prefix_; }
-
     void setPhase(std::string_view phase) { state.phase = phase; }
-
     void setRound(size_t round) { state.round = round; }
 
 private:
