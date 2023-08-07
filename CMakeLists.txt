@@ -1,6 +1,5 @@
 cmake_minimum_required(VERSION 3.13)
 
-# todo consider moving to C++23
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -31,15 +30,20 @@ message(STATUS "All-To-All Routines Enabled: ${CLI_ENABLE_ALLTOALL}")
 
 list(APPEND
   DSS_MEHNERT_WARNING_FLAGS
+  "-Werror"
   "-Wall"
   "-Wextra"
   "-Wundef"
   "-Wunreachable-code"
   "-Wno-unused-parameter"
   "-Wpedantic"
+  "-Wnull-dereference"
+  "-Wimplicit-fallthrough"
 
   # todo remove vla usages
   "-Wno-vla"
+
+  "-Wno-gnu-zero-variadic-macro-arguments"
 
   # todo produce too much noise with existing code
   # "-Wshadow"
@@ -88,12 +92,11 @@ target_link_libraries(dss_base INTERFACE ips4o)
 
 add_subdirectory(src)
 
-configure_file("cli_options.hpp.in" "include/cli_options.hpp")
 add_executable(distributed_sorter
   src/executables/distributed_sorter.cpp
-  src/executables/variant_selection.hpp
-   )
+  src/executables/variant_selection.hpp)
 
+configure_file("cli_options.hpp.in" "include/cli_options.hpp")
 target_include_directories(distributed_sorter PRIVATE
   "${CMAKE_CURRENT_BINARY_DIR}/include")
 

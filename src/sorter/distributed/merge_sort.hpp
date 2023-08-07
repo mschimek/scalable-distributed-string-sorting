@@ -122,7 +122,7 @@ protected:
         auto recv_counts = alltoall_result.extract_recv_buffer();
 
         auto alltoallv = [&, this](auto... args) {
-            return AllToAllStringPolicy::alltoallv(container, send_counts, args..., comm);
+            return this->AllToAllStringPolicy::alltoallv(container, send_counts, args..., comm);
         };
         auto recv_string_container = std::apply(alltoallv, extra_all_to_all_args);
         container.deleteAll();

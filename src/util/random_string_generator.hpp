@@ -114,12 +114,9 @@ public:
         auto [rawStrings, genStrings] = distributeSuffixes(text);
         this->update(std::move(rawStrings));
         String* begin = this->strings();
-        std::random_device randSeedGenerator;
-        std::mt19937 rand_gen(randSeedGenerator());
-        auto rand = [&](size_t n) {
-            return rand_gen() % n;
-        };
-        std::random_shuffle(begin, begin + genStrings, rand);
+        std::random_device rand;
+        std::mt19937 gen{rand()};
+        std::shuffle(begin, begin + genStrings, gen);
     }
 
     static std::string getName() { return "SuffixGenerator"; }
@@ -268,12 +265,9 @@ public:
             getRawStringsTimoStyle(size, stringLength, dToN, env);
         this->update(std::move(rawStrings));
         String* begin = this->strings();
-        std::random_device randSeedGenerator;
-        std::mt19937 rand_gen(randSeedGenerator());
-        auto rand = [&](size_t n) {
-            return rand_gen() % n;
-        };
-        std::random_shuffle(begin, begin + genStrings, rand);
+        std::random_device rand;
+        std::mt19937 gen(rand());
+        std::shuffle(begin, begin + genStrings, gen);
         this->orderRawStrings();
     }
 
@@ -463,12 +457,9 @@ public:
             getRawStringsTimoStyle(size, stringLength, dToN);
         this->update(std::move(rawStrings));
         String* begin = this->strings();
-        std::random_device randSeedGenerator;
-        std::mt19937 rand_gen(randSeedGenerator());
-        auto rand = [&](size_t n) {
-            return rand_gen() % n;
-        };
-        std::random_shuffle(begin, begin + genStrings, rand);
+        std::random_device rand;
+        std::mt19937 gen(rand());
+        std::shuffle(begin, begin + genStrings, gen);
         this->orderRawStrings();
     }
 

@@ -1136,8 +1136,8 @@ public:
         std::vector<T> data;
         std::vector<size_t> localDups;
         std::vector<size_t> eosCandidates;
-        GeneratedHashesLocalDupsEOSCandidates(
 
+        GeneratedHashesLocalDupsEOSCandidates(
             std::vector<T>&& data,
             std::vector<size_t>&& localDups,
             std::vector<size_t>&& eosCandidates
@@ -1155,11 +1155,7 @@ public:
         std::vector<size_t> eosCandidates;
         std::vector<size_t> localDups;
         if (candidates.size() == 0) {
-            return GeneratedHashesLocalDupsEOSCandidates(
-                std::move(hashStringIndices),
-                std::move(localDups),
-                std::move(eosCandidates)
-            );
+            return {std::move(hashStringIndices), std::move(localDups), std::move(eosCandidates)};
         }
         eosCandidates.reserve(candidates.size());
         hashStringIndices.reserve(candidates.size());
@@ -1205,11 +1201,7 @@ public:
                 hashValues[curCandidate] = curHash;
             }
         }
-        return GeneratedHashesLocalDupsEOSCandidates(
-            std::move(hashStringIndices),
-            std::move(localDups),
-            std::move(eosCandidates)
-        );
+        return {std::move(hashStringIndices), std::move(localDups), std::move(eosCandidates)};
     }
     GeneratedHashStructuresEOSCandidates<HashStringIndex> generateHashStringIndices(
         StringSet ss, std::vector<size_t> const& candidates, const size_t depth
@@ -1268,11 +1260,7 @@ public:
 
         std::vector<size_t> localDups;
         if (ss.size() == 0) {
-            return GeneratedHashesLocalDupsEOSCandidates(
-                std::move(hashStringIndices),
-                std::move(localDups),
-                std::move(eosCandidates)
-            );
+            return {std::move(hashStringIndices), std::move(localDups), std::move(eosCandidates)};
         }
         eosCandidates.reserve(ss.size());
         hashStringIndices.reserve(ss.size());
@@ -1310,11 +1298,7 @@ public:
             }
         }
 
-        return GeneratedHashesLocalDupsEOSCandidates(
-            std::move(hashStringIndices),
-            std::move(localDups),
-            std::move(eosCandidates)
-        );
+        return {std::move(hashStringIndices), std::move(localDups), std::move(eosCandidates)};
     }
 
     std::vector<size_t> getIndicesOfLocalDuplicates(std::vector<HashStringIndex>& hashStringIndices
