@@ -52,64 +52,6 @@ inline std::vector<DataType> alltoall(std::vector<DataType> const& send_data, en
     return receive_data;
 }
 
-template <typename DataType>
-inline std::vector<DataType> alltoallv_small(
-    std::vector<DataType> const& send_data, std::vector<size_t> const& send_counts, environment env
-) {
-    using dss_schimek::measurement::MeasuringTool;
-    MeasuringTool& measuringTool = MeasuringTool::measuringTool();
-
-    std::vector<int32_t> real_send_counts(send_counts.size());
-    for (size_t i = 0; i < send_counts.size(); ++i) {
-        real_send_counts[i] = static_cast<int32_t>(send_counts[i]);
-    }
-    std::vector<int32_t> receive_counts = alltoall(real_send_counts, env);
-
-    std::vector<int32_t> send_displacements(real_send_counts.size(), 0);
-    std::vector<int32_t> receive_displacements(real_send_counts.size(), 0);
-    for (size_t i = 1; i < real_send_counts.size(); ++i) {
-        send_displacements[i] = send_displacements[i - 1] + real_send_counts[i - 1];
-        receive_displacements[i] = receive_displacements[i - 1] + receive_counts[i - 1];
-    }
-    std::vector<DataType> receive_data(receive_counts.back() + receive_displacements.back());
-
-    if constexpr (debug_alltoall) {
-        for (int32_t i = 0; i < env.size(); ++i) {
-            if (i == env.rank()) {
-                std::cout << i << ": send_counts.size() " << send_counts.size() << std::endl;
-                std::cout << i << ": send counts: ";
-                for (auto const sc: real_send_counts) {
-                    std::cout << sc << ", ";
-                }
-                std::cout << std::endl << "receive counts: ";
-
-                for (auto const rc: receive_counts) {
-                    std::cout << rc << ", ";
-                }
-                std::cout << std::endl;
-            }
-            env.barrier();
-        }
-    }
-    const size_t sentItems =
-        std::accumulate(real_send_counts.begin(), real_send_counts.end(), size_t{0});
-    measuringTool.addRawCommunication(sentItems * sizeof(DataType), "alltoallv_small");
-
-    data_type_mapper<DataType> dtm;
-    MPI_Alltoallv(
-        send_data.data(),
-        real_send_counts.data(),
-        send_displacements.data(),
-        dtm.get_mpi_type(),
-        receive_data.data(),
-        receive_counts.data(),
-        receive_displacements.data(),
-        dtm.get_mpi_type(),
-        env.communicator()
-    );
-    return receive_data;
-}
-
 // uses builtin MPI_Alltoallv for message exchange
 class AllToAllvSmall {
 public:
@@ -117,56 +59,34 @@ public:
 
     template <typename DataType>
     static std::vector<DataType>
-    alltoallv(DataType* const send_data, std::vector<size_t> const& send_counts, environment env) {
+    alltoallv(DataType* const send_data, std::vector<size_t> const& send_counts_, environment env) {
         using dss_schimek::measurement::MeasuringTool;
         MeasuringTool& measuringTool = MeasuringTool::measuringTool();
 
-        std::vector<int32_t> real_send_counts(send_counts.size());
-        for (size_t i = 0; i < send_counts.size(); ++i) {
-            real_send_counts[i] = static_cast<int32_t>(send_counts[i]);
-        }
-        std::vector<int32_t> receive_counts = alltoall(real_send_counts, env);
+        std::vector<int32_t> send_counts{send_counts_.cbegin(), send_counts_.cend()};
+        std::vector<int32_t> recv_counts = alltoall(send_counts, env);
 
-        std::vector<int32_t> send_displacements(real_send_counts.size(), 0);
-        std::vector<int32_t> receive_displacements(real_send_counts.size(), 0);
-        for (size_t i = 1; i < real_send_counts.size(); ++i) {
-            send_displacements[i] = send_displacements[i - 1] + real_send_counts[i - 1];
-            receive_displacements[i] = receive_displacements[i - 1] + receive_counts[i - 1];
-        }
-        std::vector<DataType> receive_data(receive_counts.back() + receive_displacements.back());
+        std::vector<int32_t> send_displs(send_counts.size());
+        std::exclusive_scan(send_counts.cbegin(), send_counts.cend(), send_displs.begin(), 0);
 
-        if constexpr (debug_alltoall) {
-            for (int32_t i = 0; i < env.size(); ++i) {
-                if (i == env.rank()) {
-                    std::cout << i << ": send_counts.size() " << send_counts.size() << std::endl;
-                    std::cout << i << ": send counts: ";
-                    for (auto const sc: real_send_counts) {
-                        std::cout << sc << ", ";
-                    }
-                    std::cout << std::endl << "receive counts: ";
+        std::vector<int32_t> recv_displs(send_counts.size());
+        std::exclusive_scan(recv_counts.cbegin(), recv_counts.cend(), recv_displs.begin(), 0);
 
-                    for (auto const rc: receive_counts) {
-                        std::cout << rc << ", ";
-                    }
-                    std::cout << std::endl;
-                }
-                env.barrier();
-            }
-        }
+        auto recv_total = recv_counts.back() + recv_displs.back();
+        std::vector<DataType> receive_data(recv_total);
 
-        const size_t elemToSend =
-            std::accumulate(send_counts.begin(), send_counts.end(), size_t{0});
-        measuringTool.addRawCommunication(elemToSend * sizeof(DataType), "alltoallv_small");
+        auto send_total = send_counts.back() + send_displs.back();
+        measuringTool.addRawCommunication(send_total * sizeof(DataType), "alltoallv_small");
 
         data_type_mapper<DataType> dtm;
         MPI_Alltoallv(
             send_data,
-            real_send_counts.data(),
-            send_displacements.data(),
+            send_counts.data(),
+            send_displs.data(),
             dtm.get_mpi_type(),
             receive_data.data(),
-            receive_counts.data(),
-            receive_displacements.data(),
+            recv_counts.data(),
+            recv_displs.data(),
             dtm.get_mpi_type(),
             env.communicator()
         );
@@ -178,38 +98,52 @@ public:
 class AllToAllvDirectMessages {
 public:
     static std::string getName() { return "AlltoAllvDirectMessages"; }
+
     template <typename DataType>
     static std::vector<DataType>
     alltoallv(DataType* const send_data, std::vector<size_t> const& send_counts, environment env) {
+        std::vector<size_t> recv_counts = alltoall(send_counts, env);
+        return alltoallv(send_data, send_counts, recv_counts, env);
+    }
+
+    template <typename DataType>
+    static std::vector<DataType> alltoallv(
+        DataType* const send_data,
+        std::vector<size_t> const& send_counts,
+        std::vector<size_t> const& recv_counts,
+        environment env
+    ) {
         using dss_schimek::measurement::MeasuringTool;
         MeasuringTool& measuringTool = MeasuringTool::measuringTool();
 
-        std::vector<size_t> receive_counts = alltoall(send_counts, env);
-        std::vector<size_t> send_displacements(env.size(), 0);
-
-        for (size_t i = 1; i < send_counts.size(); ++i) {
-            send_displacements[i] = send_displacements[i - 1] + send_counts[i - 1];
-        }
-        std::vector<size_t> receive_displacements(env.size(), 0);
-        for (size_t i = 1; i < send_counts.size(); ++i) {
-            receive_displacements[i] = receive_displacements[i - 1] + receive_counts[i - 1];
-        }
-
-        const size_t elemToSend = std::accumulate(send_counts.begin(), send_counts.end(), size_t{0})
-                                  - send_counts[env.rank()];
-        measuringTool.addRawCommunication(
-            elemToSend * sizeof(DataType),
-            "alltoallv_directMessages"
+        std::vector<size_t> send_displs(env.size());
+        std::exclusive_scan(
+            send_counts.cbegin(),
+            send_counts.cend(),
+            send_displs.begin(),
+            size_t{0}
         );
 
+        std::vector<size_t> recv_displs(env.size());
+        std::exclusive_scan(
+            recv_counts.cbegin(),
+            recv_counts.cend(),
+            recv_displs.begin(),
+            size_t{0}
+        );
+
+        auto send_total = send_displs.back() + send_counts.back() - send_counts[env.rank()];
+        measuringTool.addRawCommunication(send_total * sizeof(DataType), "alltoallv_direct");
+
+        auto recv_total = recv_displs.back() + recv_counts.back();
+        std::vector<DataType> receive_data(recv_total);
         std::vector<MPI_Request> mpi_request(2 * env.size());
-        std::vector<DataType> receive_data(receive_displacements.back() + receive_counts.back());
+
         for (uint32_t i = 0; i < env.size(); ++i) {
-            // start with self send/recv
             int32_t source = (env.rank() + (env.size() - i)) % env.size();
-            auto receive_type = get_big_type<DataType>(receive_counts[source]);
+            auto receive_type = get_big_type<DataType>(recv_counts[source]);
             MPI_Irecv(
-                receive_data.data() + receive_displacements[source],
+                receive_data.data() + recv_displs[source],
                 1,
                 receive_type,
                 source,
@@ -218,12 +152,11 @@ public:
                 &mpi_request[source]
             );
         }
-        // dispatch sends
         for (uint32_t i = 0; i < env.size(); ++i) {
             int32_t target = (env.rank() + i) % env.size();
             auto send_type = get_big_type<DataType>(send_counts[target]);
             MPI_Isend(
-                send_data + send_displacements[target],
+                send_data + send_displs[target],
                 1,
                 send_type,
                 target,
@@ -247,10 +180,6 @@ public:
     template <typename DataType>
     static std::vector<DataType>
     alltoallv(DataType* const send_data, std::vector<size_t> const& send_counts, environment env) {
-        // std::cout << "MPI Routine : combined" << std::endl;
-        using dss_schimek::measurement::MeasuringTool;
-        MeasuringTool& measuringTool = MeasuringTool::measuringTool();
-
         size_t local_send_count =
             std::accumulate(send_counts.begin(), send_counts.end(), size_t{0});
 
@@ -264,51 +193,7 @@ public:
         if (global_max < env.mpi_max_int()) {
             return AllToAllvSmallPolicy::alltoallv(send_data, send_counts, env);
         } else {
-            std::vector<size_t> send_displacements(env.size(), 0);
-            for (size_t i = 1; i < send_counts.size(); ++i) {
-                send_displacements[i] = send_displacements[i - 1] + send_counts[i - 1];
-            }
-            std::vector<size_t> receive_displacements(env.size(), 0);
-            for (size_t i = 1; i < send_counts.size(); ++i) {
-                receive_displacements[i] = receive_displacements[i - 1] + recv_counts[i - 1];
-            }
-
-            const size_t elemToSend =
-                std::accumulate(send_counts.begin(), send_counts.end(), size_t{0});
-            measuringTool.addRawCommunication(elemToSend * sizeof(DataType), "alltoallv_combined");
-
-            std::vector<MPI_Request> mpi_request(2 * env.size());
-            std::vector<DataType> receive_data(receive_displacements.back() + recv_counts.back());
-            for (uint32_t i = 0; i < env.size(); ++i) {
-                // start with self send/recv
-                int32_t source = (env.rank() + (env.size() - i)) % env.size();
-                auto receive_type = get_big_type<DataType>(recv_counts[source]);
-                MPI_Irecv(
-                    receive_data.data() + receive_displacements[source],
-                    1,
-                    receive_type,
-                    source,
-                    44227,
-                    env.communicator(),
-                    &mpi_request[source]
-                );
-            }
-            // dispatch sends
-            for (uint32_t i = 0; i < env.size(); ++i) {
-                int32_t target = (env.rank() + i) % env.size();
-                auto send_type = get_big_type<DataType>(send_counts[target]);
-                MPI_Isend(
-                    send_data + send_displacements[target],
-                    1,
-                    send_type,
-                    target,
-                    44227,
-                    env.communicator(),
-                    &mpi_request[env.size() + target]
-                );
-            }
-            MPI_Waitall(2 * env.size(), mpi_request.data(), MPI_STATUSES_IGNORE);
-            return receive_data;
+            return AllToAllvDirectMessages::alltoallv(send_data, send_counts, recv_counts, env);
         }
     }
 };
