@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include <bits/iterator_concepts.h>
 #include <kamping/checking_casts.hpp>
 #include <kamping/rank_ranges.hpp>
 #include <tlx/die.hpp>
@@ -30,26 +31,42 @@ struct Level {
 template <typename Impl, typename Communicator>
 struct LevelIter {
     using iterator = LevelIter<Impl, Communicator>;
+    using iterator_category = std::forward_iterator_tag;
+    using value_type = Level<Communicator>;
+    using difference_type = std::ptrdiff_t;
+    using pointer = Level<Communicator>*;
+    using reference = Level<Communicator>;
 
-    LevelIter(Impl const& impl, size_t level) : impl_(impl), level_(level) {}
+    LevelIter() = default;
+
+    LevelIter(Impl const& impl, size_t level) : impl_(&impl), level_(level) {}
 
     iterator& operator++() {
         ++level_;
         return *this;
     }
 
-    Level<Communicator> operator*() const { return impl_.level(level_); }
+    iterator operator++(int) {
+        iterator tmp{*this};
+        ++level_;
+        return tmp;
+    }
+
+    Level<Communicator> operator*() const { return impl_->level(level_); }
 
     friend void swap(iterator& lhs, iterator& rhs) {
         std::swap(lhs.impl_, rhs.impl_);
         std::swap(lhs.level_, rhs.level_);
     }
-
-    bool operator==(iterator const& rhs) { return level_ == rhs.level_; }
-    bool operator!=(iterator const& rhs) { return level_ != rhs.level_; }
+    friend bool operator==(iterator const& lhs, iterator const& rhs) {
+        return lhs.level_ == rhs.level_;
+    }
+    friend bool operator!=(iterator const& lhs, iterator const& rhs) {
+        return lhs.level_ != rhs.level_;
+    }
 
 private:
-    Impl const& impl_;
+    Impl const* impl_;
     size_t level_;
 };
 
