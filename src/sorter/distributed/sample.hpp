@@ -126,7 +126,7 @@ public:
         raw_splitters.reserve(num_splitters * (100 + 1u));
 
         for (size_t i = 1; i <= num_splitters; ++i) {
-            size_t const splitter_index = i * static_cast<size_t>(splitter_dist);
+            size_t const splitter_index = static_cast<size_t>(i * splitter_dist);
             auto const splitter = ss[ss.begin() + splitter_index];
             size_t const splitter_len = get_splitter_len(ss, splitter, splitter_index, params);
             std::copy_n(ss.get_chars(splitter, 0), splitter_len, std::back_inserter(raw_splitters));
@@ -155,7 +155,6 @@ public:
 
         Result<StringSet> sample_indices;
         auto& [raw_splitters, splitter_idxs] = sample_indices;
-        // raw_splitters.reserve(num_splitters * (maxLength + 1u));
         raw_splitters.reserve(num_splitters * (100 + 1u));
         splitter_idxs.resize(num_splitters, local_offset);
 
