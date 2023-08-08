@@ -11,6 +11,7 @@
 #include <iterator>
 #include <limits>
 #include <numeric>
+#include <random>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -104,6 +105,47 @@ struct SampleResult<Char, true> {
     std::vector<uint64_t> indices;
 };
 
+namespace _internal {
+
+// todo this could be implemented using ranges
+template <bool random_sample>
+class StringIndexSample;
+
+template <>
+class StringIndexSample<false> {
+public:
+    StringIndexSample() = delete;
+
+    StringIndexSample(size_t strings, size_t splitters)
+        : splitter_dist_{static_cast<double>(strings) / static_cast<double>(splitters + 1)} {}
+
+    size_t get_splitter(size_t splitter) {
+        return static_cast<size_t>(static_cast<double>(splitter) * splitter_dist_);
+    }
+
+private:
+    double splitter_dist_;
+};
+
+template <>
+class StringIndexSample<true> {
+public:
+    StringIndexSample() = delete;
+
+    StringIndexSample(size_t strings, size_t)
+        : gen_{}, // todo what to do about seed here?
+          dist_{0, strings == 0 ? 0 : strings - 1} {}
+
+    size_t get_splitter(size_t) { return dist_(gen_); }
+
+private:
+    std::mt19937_64 gen_;
+    std::uniform_int_distribution<size_t> dist_;
+};
+
+} // namespace _internal
+
+template <bool random_sample = false>
 class NumStringsPolicy {
 public:
     static constexpr bool is_indexed = false;
@@ -117,8 +159,7 @@ public:
     sample_splitters(StringSet const& ss, Params const& params, Communicator const& comm) {
         size_t const local_num_strings = ss.size();
         size_t const num_splitters = params.get_num_splitters(ss.size());
-        double const splitter_dist =
-            static_cast<double>(local_num_strings) / static_cast<double>(num_splitters + 1);
+        _internal::StringIndexSample<random_sample> sample{local_num_strings, num_splitters};
 
         Result<StringSet> result;
 
@@ -126,7 +167,8 @@ public:
         raw_splitters.reserve(num_splitters * (100 + 1u));
 
         for (size_t i = 1; i <= num_splitters; ++i) {
-            size_t const splitter_index = static_cast<size_t>(i * splitter_dist);
+            size_t const splitter_index = sample.get_splitter(i);
+
             auto const splitter = ss[ss.begin() + splitter_index];
             size_t const splitter_len = get_splitter_len(ss, splitter, splitter_index, params);
             std::copy_n(ss.get_chars(splitter, 0), splitter_len, std::back_inserter(raw_splitters));
@@ -136,6 +178,7 @@ public:
     }
 };
 
+template <bool random_sample = false>
 class IndexedNumStringsPolicy {
 public:
     static constexpr bool is_indexed = true;
@@ -150,8 +193,7 @@ public:
         size_t const local_offset = get_local_offset(ss.size(), comm);
         size_t const local_num_strings = ss.size();
         size_t const num_splitters = params.get_num_splitters(local_num_strings);
-        double const splitter_dist =
-            static_cast<double>(local_num_strings) / static_cast<double>(num_splitters + 1);
+        _internal::StringIndexSample<random_sample> sample{local_num_strings, num_splitters};
 
         Result<StringSet> sample_indices;
         auto& [raw_splitters, splitter_idxs] = sample_indices;
@@ -160,7 +202,7 @@ public:
 
         // todo this could be improved
         for (size_t i = 1; i <= num_splitters; ++i) {
-            size_t const splitter_index = static_cast<size_t>(i * splitter_dist);
+            size_t const splitter_index = sample.get_splitter(i);
             splitter_idxs[i - 1] += splitter_index;
             auto const splitter = ss[ss.begin() + splitter_index];
             size_t const splitter_len = get_splitter_len(ss, splitter, splitter_index, params);
