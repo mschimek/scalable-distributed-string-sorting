@@ -144,7 +144,7 @@ void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicat
         }
     }
 
-    measuring_tool.write_on_root(std::cout);
+    measuring_tool.write_on_root(std::cout, comm);
     measuring_tool.reset();
 }
 
@@ -236,7 +236,7 @@ void run_prefix_doubling(
         }
     }
 
-    measuring_tool.write_on_root(std::cout);
+    measuring_tool.write_on_root(std::cout, comm);
     measuring_tool.reset();
 }
 

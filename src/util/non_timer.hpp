@@ -14,7 +14,6 @@
 #include <kamping/collectives/gather.hpp>
 #include <kamping/named_parameters.hpp>
 
-#include "mpi/communicator.hpp"
 #include "util/measurements.hpp"
 
 namespace dss_mehnert {
@@ -48,6 +47,7 @@ public:
 
     NonTimer() { entries.reserve(allocationSize); }
 
+    template <typename Communicator>
     std::pair<std::vector<OutputFormat>, std::vector<OutputFormatSingle>>
     collect_on_root(Communicator const& comm) {
         using namespace kamping;

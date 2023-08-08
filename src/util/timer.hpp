@@ -21,7 +21,6 @@
 #include <kamping/named_parameters.hpp>
 #include <tlx/die.hpp>
 
-#include "mpi/communicator.hpp"
 #include "util/measurements.hpp"
 
 namespace dss_mehnert {
@@ -85,33 +84,28 @@ public:
         itToStart->second = Clock::now();
     }
 
-    void stop(Key const& key, bool barrier = false, Communicator const& comm = {}) {
+    void stop(Key const& key) {
         if (!enabled) {
             return;
         }
 
         PointInTime before_barrier = Clock::now();
-        if (barrier) {
-            comm.barrier();
-        }
-        PointInTime after_barrier = Clock::now();
-
-        // check whether key is present
-        auto it = key_start_.find(key);
-        if (it == key_start_.end()) {
-            std::cout << "Key: " << key << " has no corresponding start" << std::endl;
-            std::abort();
-        }
-        PointInTime start_time = it->second;
-
-        using std::chrono::duration_cast;
-        auto elapsed_active_time = duration_cast<TimeUnit>(before_barrier - start_time);
-        auto elapsed_total_time = duration_cast<TimeUnit>(after_barrier - start_time);
-
-        active_time_.emplace(key, elapsed_active_time.count());
-        total_time_.emplace(key, elapsed_total_time.count());
+        stop(key, before_barrier, before_barrier);
     }
 
+    template <typename Communicator>
+    void stop(Key const& key, Communicator const& comm) {
+        if (!enabled) {
+            return;
+        }
+
+        PointInTime before_barrier = Clock::now();
+        comm.barrier();
+        PointInTime after_barrier = Clock::now();
+        stop(key, before_barrier, after_barrier);
+    }
+
+    template <typename Communicator>
     std::vector<OutputFormat> collect_on_root(Communicator const& comm) {
         using namespace kamping;
 
@@ -136,6 +130,23 @@ public:
 
 private:
     static constexpr bool enabled = true;
+
+    void stop(Key const& key, PointInTime before_barrier, PointInTime after_barrier) {
+        // check whether key is present
+        auto it = key_start_.find(key);
+        if (it == key_start_.end()) {
+            std::cout << "Key: " << key << " has no corresponding start" << std::endl;
+            std::abort();
+        }
+        PointInTime start_time = it->second;
+
+        using std::chrono::duration_cast;
+        auto elapsed_active_time = duration_cast<TimeUnit>(before_barrier - start_time);
+        auto elapsed_total_time = duration_cast<TimeUnit>(after_barrier - start_time);
+
+        active_time_.emplace(key, elapsed_active_time.count());
+        total_time_.emplace(key, elapsed_total_time.count());
+    }
 
     size_t incrementCounterPerPseudoKey(Key const& key) {
         auto itCounter = key_counter_.find(key.pseudoKey());

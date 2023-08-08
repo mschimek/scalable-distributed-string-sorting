@@ -122,9 +122,9 @@ public:
             kamping::RankRange range{first, last, 1};
 
             auto comm_group = comm.create_subcommunicators({std::array{range}});
-            communicators_.push_back(std::exchange(comm, std::move(comm_group)));
+            communicators_.emplace_back(std::exchange(comm, std::move(comm_group)));
         }
-        communicators_.push_back(std::move(comm));
+        communicators_.emplace_back(std::move(comm));
     }
 
     iterator begin() const { return {*this, 0}; }
@@ -182,16 +182,16 @@ public:
             kamping::RankRange col_range{col_first, col_last, group_size};
 
             auto comm_col = comm.create_subcommunicators({std::array{col_range}});
-            comms_col_.push_back(std::move(comm_col));
+            comms_col_.emplace_back(std::move(comm_col));
 
             int row_first = (comm.rank_signed() / group_size) * group_size;
             int row_last = row_first + group_size - 1;
             kamping::RankRange row_range{row_first, row_last, 1};
 
-            auto comm_row = comm.create_subcommunicators({std::array{row_range}});
-            comms_row_.push_back(std::exchange(comm, std::move(comm_row)));
+            Communicator comm_row{comm.create_subcommunicators({std::array{row_range}})};
+            comms_row_.emplace_back(std::exchange(comm, std::move(comm_row)));
         }
-        comms_row_.push_back(std::move(comm));
+        comms_row_.emplace_back(std::move(comm));
     }
 
     iterator begin() const { return {*this, 0}; }

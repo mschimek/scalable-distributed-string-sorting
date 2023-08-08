@@ -12,7 +12,6 @@
 #include <kamping/collectives/reduce.hpp>
 #include <kamping/named_parameters.hpp>
 
-#include "mpi/communicator.hpp"
 #include "util/measurements.hpp"
 
 namespace dss_mehnert {
@@ -34,6 +33,7 @@ public:
         records.reserve(allocationSize);
     }
 
+    template <typename Communicator>
     std::vector<OutputFormat> collect_on_root(Communicator const& comm) const {
         using namespace kamping;
 

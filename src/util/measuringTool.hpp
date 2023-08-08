@@ -7,7 +7,6 @@
 #include <ostream>
 #include <vector>
 
-#include "mpi/communicator.hpp"
 #include "util/lean_non_timer.hpp"
 #include "util/measurements.hpp"
 #include "util/non_timer.hpp"
@@ -22,17 +21,18 @@ public:
     using TimerKey = PhaseRoundDescription;
     using TimerValue = CounterPerPhase;
 
+    template <typename Communicator>
+    MeasuringTool(Communicator const& comm) : is_root_(comm.is_root()) {}
+
     static MeasuringTool& measuringTool() {
-        static MeasuringTool measuringTool;
+        static MeasuringTool measuringTool{kamping::comm_world()};
         return measuringTool;
     }
-
-    void reset() { state = {}; }
 
     // todo add back option to print value on every PE
     void add(size_t value, std::string_view description, bool collect = true) {
         if (!state.disabled) {
-            if (state.verbose && comm.is_root()) {
+            if (state.verbose && is_root_) {
                 std::cout << description << std::endl;
             }
             NonTimerRecord record{state.phase, 0u, state.round, std::string{description}};
@@ -42,7 +42,7 @@ public:
 
     void addRawCommunication(size_t value, std::string_view description) {
         // todo should this respect `state.disabled`?
-        if (state.verbose && comm.is_root()) {
+        if (state.verbose && is_root_) {
             std::cout << description << std::endl;
         }
         state.comm_volume.add({state.phase, value});
@@ -50,7 +50,7 @@ public:
 
     void start(std::string_view description) {
         if (!state.disabled) {
-            if (state.verbose && comm.is_root()) {
+            if (state.verbose && is_root_) {
                 std::cout << description << std::endl;
             }
             state.timer.start({state.phase, state.round, std::string{description}}, {});
@@ -64,10 +64,10 @@ public:
 
     void stop(std::string_view description) {
         if (!state.disabled) {
-            if (state.verbose && comm.is_root()) {
+            if (state.verbose && is_root_) {
                 std::cout << description << std::endl;
             }
-            state.timer.stop({state.phase, state.round, std::string{description}}, false, comm);
+            state.timer.stop({state.phase, state.round, std::string{description}});
         }
     }
 
@@ -76,21 +76,23 @@ public:
         stop(desc);
     }
 
+    template <typename Communicator>
     void stop(std::string_view phase, std::string_view desc, Communicator const& comm) {
         setPhase(phase);
         if (!state.disabled) {
-            if (state.verbose && comm.is_root()) {
+            if (state.verbose && is_root_) {
                 std::cout << desc << std::endl;
             }
-            state.timer.stop({state.phase, state.round, std::string{desc}}, true, comm);
+            state.timer.stop({state.phase, state.round, std::string{desc}}, comm);
         }
     }
 
-    void write_on_root(std::ostream& stream) {
-        auto write_records = [this](std::ostream& stream, auto const& records) {
+    template <typename Communicator>
+    void write_on_root(std::ostream& stream, Communicator const& comm) {
+        auto write_records = [&, this](std::ostream& stream, auto const& records) {
             if (comm.is_root()) {
                 for (auto const& record: records) {
-                    stream << state.prefix << " " << record << "\n";
+                    stream << this->MeasuringTool::state.prefix << " " << record << "\n";
                 }
             }
         };
@@ -104,6 +106,7 @@ public:
         enable();
     }
 
+    void reset() { state = {}; }
     bool isEnabled() { return !state.disabled; }
     void setEnabled(bool enable) { state.disabled = !enable; }
     void enable() { state.disabled = false; }
@@ -125,7 +128,7 @@ private:
         Timer<TimerKey, TimerValue> timer;
     };
 
-    Communicator comm;
+    bool is_root_;
     State state;
 };
 
