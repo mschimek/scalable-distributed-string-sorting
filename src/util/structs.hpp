@@ -15,11 +15,11 @@
 struct StringIndexPEIndex {
     size_t stringIndex;
     size_t PEIndex;
-};
 
-inline std::ostream& operator<<(std::ostream& stream, StringIndexPEIndex const& indices) {
-    return stream << "[" << indices.stringIndex << ", " << indices.PEIndex << "]";
-}
+    friend std::ostream& operator<<(std::ostream& stream, StringIndexPEIndex const& indices) {
+        return stream << "[" << indices.stringIndex << ", " << indices.PEIndex << "]";
+    }
+};
 
 template <typename DataType>
 inline std::vector<DataType>
@@ -33,11 +33,9 @@ flatten(std::vector<std::vector<DataType>> const& dataToFlatten, const size_t to
 }
 
 template <typename DataType>
-inline std::vector<DataType> flatten(std::vector<std::vector<DataType>> const& dataToFlatten) {
-    size_t totalSumElements = 0;
-    for (auto const& curVec: dataToFlatten) totalSumElements += curVec.size();
-
-    return flatten(dataToFlatten, totalSumElements);
+inline std::vector<DataType> flatten(std::vector<std::vector<DataType>> const& data) {
+    auto op = [](auto const& sum, auto const& vec) { return sum + vec.size(); };
+    return flatten(data, std::accumulate(data.begin(), data.end(), size_t{0}, op));
 }
 
 template <typename StringSet, typename Iterator>
@@ -45,32 +43,34 @@ void reorder(StringSet ss, Iterator begin, Iterator end) {
     using String = typename StringSet::String;
 
     dss_schimek::mpi::environment env;
-    std::vector<String> reorderedStrings;
     std::vector<size_t> numberInStringSet(env.size(), 0);
-    std::vector<size_t> startIndexInStringSet;
     std::vector<size_t> smallestIndexInPermutation(env.size(), std::numeric_limits<size_t>::max());
 
-    reorderedStrings.reserve(end - begin);
     for (Iterator curIt = begin; curIt != end; ++curIt) {
         auto const& indices = *curIt;
         numberInStringSet[indices.PEIndex]++;
         size_t& curSmallestIndex = smallestIndexInPermutation[indices.PEIndex];
         curSmallestIndex = std::min(curSmallestIndex, indices.stringIndex);
     }
-    startIndexInStringSet.push_back(0);
-    std::partial_sum(
+
+    std::vector<size_t> startIndices(numberInStringSet.size());
+    std::exclusive_scan(
         numberInStringSet.begin(),
-        numberInStringSet.end() - 1,
-        std::back_inserter(startIndexInStringSet)
+        numberInStringSet.end(),
+        startIndices.begin(),
+        size_t{0}
     );
 
+    std::vector<String> reorderedStrings;
+    reorderedStrings.reserve(end - begin);
     for (Iterator curIt = begin; curIt != end; ++curIt) {
         auto const& indices = *curIt;
-        const size_t stringOffset = startIndexInStringSet[indices.PEIndex];
+        const size_t stringOffset = startIndices[indices.PEIndex];
         String str =
             ss[ss.begin() + stringOffset + indices.stringIndex
                - smallestIndexInPermutation[indices.PEIndex]];
         reorderedStrings.push_back(str);
     }
-    for (size_t i = 0; i < ss.size(); ++i) ss[ss.begin() + i] = reorderedStrings[i];
+    for (size_t i = 0; i < ss.size(); ++i)
+        ss[ss.begin() + i] = reorderedStrings[i];
 }
