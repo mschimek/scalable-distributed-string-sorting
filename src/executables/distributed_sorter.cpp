@@ -374,25 +374,14 @@ template <typename... Args>
 void arg4(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
     using namespace dss_schimek;
 
-    switch (key.golomb_encoding) {
-        case PolicyEnums::GolombEncoding::noGolombEncoding: {
-            arg5<Args..., AllToAllHashesNaive>(key, args);
-            break;
+    if (key.golomb_encoding) {
+        if constexpr (CliOptions::enable_golomb) {
+            arg5<Args..., AllToAllHashesGolomb>(key, args);
+        } else {
+            die_with_feature("CLI_ENABLE_GOLOMB");
         }
-        case PolicyEnums::GolombEncoding::sequentialGolombEncoding: {
-            if constexpr (CliOptions::enable_golomb) {
-                arg5<Args..., AllToAllHashesGolomb>(key, args);
-            } else {
-                die_with_feature("CLI_ENABLE_GOLOMB");
-            }
-            break;
-        }
-        case PolicyEnums::GolombEncoding::pipelinedGolombEncoding: {
-            // todo this implementation seems to be broken
-            // arg5<Args..., AllToAllHashValuesPipeline>(key, args);
-            // break;
-            tlx_die("not implemented");
-        }
+    } else {
+        arg5<Args..., AllToAllHashesNaive>(key, args);
     }
 }
 
@@ -488,10 +477,10 @@ int main(int argc, char* argv[]) {
     bool prefix_compression = false;
     bool lcp_compression = false;
     bool prefix_doubling = false;
+    bool golomb_encoding = false;
     unsigned int generator = static_cast<int>(PolicyEnums::StringGenerator::DNRatioGenerator);
     unsigned int sample_policy = static_cast<int>(PolicyEnums::SampleString::numStrings);
     unsigned int alltoall_routine = static_cast<int>(PolicyEnums::MPIRoutineAllToAll::combined);
-    unsigned int golomb_encoding = static_cast<int>(PolicyEnums::GolombEncoding::noGolombEncoding);
     unsigned int comm_split = static_cast<int>(PolicyEnums::Subcommunicators::grid);
     size_t num_strings = 100000;
     size_t num_iterations = 5;
@@ -542,13 +531,7 @@ int main(int argc, char* argv[]) {
         "use LCP compression during string exchange"
     );
     cp.add_flag('d', "prefix-doubling", prefix_doubling, "use prefix doubling merge sort");
-    cp.add_unsigned(
-        'g',
-        "golomb",
-        golomb_encoding,
-        "type of golomb encoding to use during prefix doubling "
-        "([0]=none, 1=sequential, 2=pipelined)"
-    );
+    cp.add_flag('g', "golomb", golomb_encoding, "use Golomb encoding during prefix doubling");
     cp.add_unsigned(
         'a',
         "alltoall-routine",
@@ -586,7 +569,6 @@ int main(int argc, char* argv[]) {
     }
 
     PolicyEnums::CombinationKey key{
-        .golomb_encoding = PolicyEnums::getGolombEncoding(golomb_encoding),
         .string_generator = PolicyEnums::getStringGenerator(generator),
         .sample_policy = PolicyEnums::getSampleString(sample_policy),
         .alltoall_routine = PolicyEnums::getMPIRoutineAllToAll(alltoall_routine),
@@ -594,6 +576,7 @@ int main(int argc, char* argv[]) {
         .prefix_compression = prefix_compression,
         .lcp_compression = lcp_compression,
         .prefix_doubling = prefix_doubling,
+        .golomb_encoding = golomb_encoding,
     };
 
     GeneratedStringsArgs generator_args{

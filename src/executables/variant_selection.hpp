@@ -36,25 +36,6 @@ StringGenerator getGeneratedStringContainer(GeneratedStringsArgs const& args) {
 
 namespace PolicyEnums {
 
-enum class GolombEncoding {
-    noGolombEncoding = 0,
-    sequentialGolombEncoding = 1,
-    pipelinedGolombEncoding = 2
-};
-
-inline GolombEncoding getGolombEncoding(size_t i) {
-    switch (i) {
-        case 0:
-            return GolombEncoding::noGolombEncoding;
-        case 1:
-            return GolombEncoding::sequentialGolombEncoding;
-        case 2:
-            return GolombEncoding::pipelinedGolombEncoding;
-        default:
-            std::abort();
-    }
-}
-
 enum class StringGenerator {
     skewedRandomStringLcpContainer = 0,
     DNRatioGenerator = 1,
@@ -132,9 +113,7 @@ inline Subcommunicators getSubcommunicators(size_t i) {
     }
 };
 
-
 struct CombinationKey {
-    GolombEncoding golomb_encoding;
     StringGenerator string_generator;
     SampleString sample_policy;
     MPIRoutineAllToAll alltoall_routine;
@@ -142,6 +121,7 @@ struct CombinationKey {
     bool prefix_compression;
     bool lcp_compression;
     bool prefix_doubling;
+    bool golomb_encoding;
 
     auto operator<=>(CombinationKey const&) const = default;
 };
