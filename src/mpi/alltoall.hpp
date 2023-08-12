@@ -537,48 +537,5 @@ struct AllToAllStringImplPrefixDoubling : public AllToAllStringImpl<
     }
 };
 
-// Collect Strings specified by string index and PE index -> should be used for
-// verification (probably not as efficient as it could be)
-template <typename StringSet, typename Iterator>
-StringLcpContainer<StringSet>
-getStrings(Iterator reqs_begin, Iterator reqs_end, StringSet ss, environment env) {
-    using MPIRoutine = mpi::AllToAllvCombined<mpi::AllToAllvSmall>;
-    using std::begin;
-
-    std::vector<size_t> req_sizes(env.size());
-    for (auto it = reqs_begin; it != reqs_end; ++it) {
-        ++req_sizes[it->PEIndex];
-    }
-
-    std::vector<size_t> offsets(env.size());
-    std::exclusive_scan(req_sizes.begin(), req_sizes.end(), offsets.begin(), size_t{0});
-
-    std::vector<size_t> requests(reqs_end - reqs_begin);
-    for (auto it = reqs_begin; it != reqs_end; ++it) {
-        requests[offsets[it->PEIndex]++] = it->stringIndex;
-    }
-
-    auto recv_req_sizes = mpi::alltoall(req_sizes, env);
-    auto recv_requests = MPIRoutine::alltoallv(requests.data(), req_sizes, env);
-
-    std::vector<unsigned char> raw_strs;
-    std::vector<size_t> raw_str_sizes(env.size());
-
-    for (size_t rank = 0, offset = 0; rank < env.size(); ++rank) {
-        for (size_t i = 0; i < recv_req_sizes[rank]; ++i) {
-            auto req_index = recv_requests[offset + i];
-            auto const& str = ss[begin(ss) + req_index];
-            auto str_len = ss.get_length(str) + 1;
-            auto str_chars = ss.get_chars(str, 0);
-            std::copy_n(str_chars, str_len, std::back_inserter(raw_strs));
-            raw_str_sizes[rank] += str_len;
-        }
-        offset += recv_req_sizes[rank];
-    }
-
-    auto recv_chars = MPIRoutine::alltoallv(raw_strs.data(), raw_str_sizes, env);
-    return StringLcpContainer<StringSet>{std::move(recv_chars)};
-}
-
 } // namespace mpi
 } // namespace dss_schimek

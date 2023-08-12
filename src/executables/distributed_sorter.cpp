@@ -214,19 +214,13 @@ void run_prefix_doubling(
     measuring_tool.stop("none", "sorting_overall", comm);
 
     if ((args.check || args.check_exhaustive) && comm.size() > 1) {
-        StringLcpContainer<StringSet> original_input{checker.getLocalInput()};
-
-        auto complete_strings_cont = mpi::getStrings(
-            permutation.begin(),
-            permutation.end(),
-            original_input.make_string_set(),
+        auto complete_strings_cont = dss_mehnert::sorter::apply_permutation(
+            StringLcpContainer<StringSet>{checker.getLocalInput()},
+            permutation,
             comm
         );
 
-        auto complete_strings = complete_strings_cont.make_string_set();
-        reorder(complete_strings, permutation.begin(), permutation.end());
-
-        StringLcpPtr sorted_str_ptr = complete_strings_cont.make_string_lcp_ptr();
+        auto sorted_str_ptr = complete_strings_cont.make_string_lcp_ptr();
         auto num_sorted_chars = complete_strings_cont.char_size();
         auto num_sorted_strs = complete_strings_cont.size();
 

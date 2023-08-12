@@ -21,10 +21,19 @@
 #include "sorter/distributed/merge_sort.hpp"
 #include "sorter/distributed/sample.hpp"
 #include "strings/stringcontainer.hpp"
-#include "util/structs.hpp"
+#include "tlx/die.hpp"
 
 namespace dss_mehnert {
 namespace sorter {
+
+struct StringIndexPEIndex {
+    size_t stringIndex;
+    size_t PEIndex;
+
+    friend std::ostream& operator<<(std::ostream& stream, StringIndexPEIndex const& indices) {
+        return stream << "[" << indices.stringIndex << ", " << indices.PEIndex << "]";
+    }
+};
 
 template <
     typename StringPtr,
@@ -47,13 +56,23 @@ public:
         using std::begin;
         using std::end;
 
-        // this->measuring_tool_.start("");
+        if (comms.comm_root().size() == 1) {
+            std::vector<StringIndexPEIndex> result(container_.size());
+            for (size_t idx = 0; auto& elem: result) {
+                elem.stringIndex = idx++;
+            }
+            return result;
+        }
+
+        this->measuring_tool_.setPhase("local_sorting");
+
+        // todo add proper special case for single level sort
+        this->measuring_tool_.start("init_container");
         // create a new container with additional PE rank and string index
         StringPEIndexContainer container{std::move(container_), comms.comm_root().rank()};
-
         StringPEIndexPtr string_ptr = container.make_string_lcp_ptr();
         StringPEIndexSet const& ss = string_ptr.active();
-        this->measuring_tool_.setPhase("local_sorting");
+        this->measuring_tool_.stop("init_container");
 
         if constexpr (debug) {
             auto op = [&ss](auto sum, auto const& str) { return sum + ss.get_length(str) + 1; };
@@ -64,14 +83,6 @@ public:
         this->measuring_tool_.start("local_sorting", "sort_locally");
         tlx::sort_strings_detail::radixsort_CI3(string_ptr, 0, 0);
         this->measuring_tool_.stop("local_sorting", "sort_locally", comms.comm_root());
-
-        if (comms.comm_root().size() == 1) {
-            std::vector<StringIndexPEIndex> result(ss.size());
-            std::for_each(result.begin(), result.end(), [idx = size_t{0}](auto& x) mutable {
-                x.stringIndex = idx++;
-            });
-            return result;
-        }
 
         this->measuring_tool_.start("bloomfilter", "bloomfilter_overall");
         auto prefixes = compute_distinguishing_prefixes(string_ptr, comms.comm_root());
@@ -131,18 +142,15 @@ private:
         using std::end;
 
         this->measuring_tool_.start("writeback_permutation");
-
         auto ss = sorted_container.make_string_set();
         std::vector<StringIndexPEIndex> permutation(ss.size());
 
-        auto op = [&ss](auto const& str) -> StringIndexPEIndex {
-            return {ss.getIndex(str), ss.getPEIndex(str)};
-        };
-        std::transform(begin(ss), end(ss), permutation.begin(), op);
-
+        std::transform(begin(ss), end(ss), permutation.begin(), [&ss](auto const& str) {
+            return StringIndexPEIndex{ss.getIndex(str), ss.getPEIndex(str)};
+        });
         this->measuring_tool_.stop("writeback_permutation");
-        this->measuring_tool_.setPhase("none");
 
+        this->measuring_tool_.setPhase("none");
         return permutation;
     }
 
@@ -184,6 +192,95 @@ private:
         return results;
     }
 };
+
+
+namespace _internal {
+
+template <typename StringSet>
+dss_schimek::StringLcpContainer<StringSet> receive_strings(
+    dss_schimek::StringLcpContainer<StringSet>&& container,
+    std::vector<StringIndexPEIndex> const& permutation,
+    dss_schimek::mpi::environment env
+) {
+    using namespace dss_schimek;
+    using MPIRoutine = mpi::AllToAllvCombined<mpi::AllToAllvSmall>;
+    using std::begin;
+
+    std::vector<size_t> req_sizes(env.size());
+    for (auto const& elem: permutation) {
+        ++req_sizes[elem.PEIndex];
+    }
+
+    std::vector<size_t> offsets(env.size());
+    std::exclusive_scan(req_sizes.begin(), req_sizes.end(), offsets.begin(), size_t{0});
+
+    std::vector<size_t> requests(permutation.size());
+    for (auto const& elem: permutation) {
+        requests[offsets[elem.PEIndex]++] = elem.stringIndex;
+    }
+
+    auto recv_req_sizes = mpi::alltoall(req_sizes, env);
+    auto recv_requests = MPIRoutine::alltoallv(requests.data(), req_sizes, env);
+
+    auto const& ss = container.make_string_set();
+    std::vector<unsigned char> raw_strs;
+    std::vector<size_t> raw_str_sizes(env.size());
+    for (size_t rank = 0, offset = 0; rank < env.size(); ++rank) {
+        for (size_t i = 0; i < recv_req_sizes[rank]; ++i, ++offset) {
+            auto const& str = ss[begin(ss) + recv_requests[offset]];
+            auto str_len = ss.get_length(str) + 1;
+            auto str_chars = ss.get_chars(str, 0);
+            std::copy_n(str_chars, str_len, std::back_inserter(raw_strs));
+            raw_str_sizes[rank] += str_len;
+        }
+    }
+
+    auto recv_chars = MPIRoutine::alltoallv(raw_strs.data(), raw_str_sizes, env);
+    return StringLcpContainer<StringSet>{std::move(recv_chars)};
+}
+
+template <typename StringSet>
+std::vector<typename StringSet::String> reordered_strings(
+    StringSet const& ss,
+    std::vector<StringIndexPEIndex> const& permutation,
+    dss_schimek::mpi::environment env
+) {
+    using std::begin;
+
+    std::vector<size_t> offsets(env.size());
+    for (auto const& elem: permutation) {
+        ++offsets[elem.PEIndex];
+    }
+    std::exclusive_scan(offsets.begin(), offsets.end(), offsets.begin(), size_t{0});
+
+    // using back_inserter here becuase String may not be default-insertable
+    std::vector<typename StringSet::String> strings;
+    strings.reserve(ss.size());
+    auto op = [&](auto const& x) { return ss[begin(ss) + offsets[x.PEIndex]++]; };
+    std::transform(permutation.begin(), permutation.end(), std::back_inserter(strings), op);
+
+    return strings;
+}
+
+} // namespace _internal
+
+
+// todo could also use the gridwise subcommunicators here
+// Apply a permutation generated by prefix doubling merge-sort.
+template <typename StringSet>
+dss_schimek::StringLcpContainer<StringSet> apply_permutation(
+    dss_schimek::StringLcpContainer<StringSet>&& container,
+    std::vector<StringIndexPEIndex> const& permutation,
+    dss_schimek::mpi::environment env
+) {
+    auto output_container = _internal::receive_strings(std::move(container), permutation, env);
+    assert_equal(output_container.size(), permutation.size());
+
+    auto ss = output_container.make_string_set();
+    output_container.set(_internal::reordered_strings(ss, permutation, env));
+
+    return output_container;
+}
 
 } // namespace sorter
 } // namespace dss_mehnert
