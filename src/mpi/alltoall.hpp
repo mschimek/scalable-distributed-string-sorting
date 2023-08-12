@@ -200,15 +200,11 @@ public:
 
 namespace _internal {
 
-template <typename LcpIterator, typename IntervalIterator>
-inline void setLcpAtStartOfInterval(
-    LcpIterator lcpIt, const IntervalIterator begin, const IntervalIterator end
-) {
-    for (IntervalIterator it = begin; it != end; ++it) {
-        if (*it == 0)
-            continue;
-        *lcpIt = 0;
-        std::advance(lcpIt, *it);
+template <typename LcpIter, typename IntervalIter>
+inline void set_interval_start_lcp(LcpIter lcp_it, IntervalIter begin, IntervalIter end) {
+    for (auto it = begin; it != end; ++it) {
+        *lcp_it = 0;
+        std::advance(lcp_it, *it);
     }
 }
 
@@ -280,7 +276,7 @@ template <bool compress_prefixes>
 std::pair<std::vector<unsigned char>, std::vector<size_t>>
 write_send_buf(auto& container, std::vector<size_t> const& send_counts, auto const&... prefixes) {
     auto& lcps = container.lcps();
-    setLcpAtStartOfInterval(lcps.begin(), send_counts.begin(), send_counts.end());
+    set_interval_start_lcp(lcps.begin(), send_counts.begin(), send_counts.end());
 
     auto num_send_chars = get_num_send_chars<compress_prefixes>(container, prefixes...);
     std::vector<unsigned char> send_buf_char(num_send_chars);
@@ -320,17 +316,16 @@ inline std::vector<uint64_t> send_u64s(
         auto compressedData =
             IntegerCompression::writeRanges(send_counts.begin(), send_counts.end(), values.data());
 
-        std::vector<uint8_t> recvCompressedLcps =
+        auto recv_lcps =
             AllToAllPolicy::alltoallv(compressedData.integers.data(), compressedData.counts, env);
 
         // decode Lcp Compression:
         return IntegerCompression::readRanges(
             recv_counts.begin(),
             recv_counts.end(),
-            recvCompressedLcps.data()
+            recv_lcps.data()
         );
     } else {
-        // todo why isn't this using recv_counts?
         return AllToAllPolicy::alltoallv(values.data(), send_counts, env);
     }
 }
@@ -350,10 +345,16 @@ public:
 
         measuring_tool.start("all_to_all_strings_mpi");
         auto recv_buf_char = AllToAllPolicy::alltoallv(send_buf_char.data(), send_counts_char, env);
-
         auto recv_counts = mpi::alltoall(send_counts, env);
+
+        measuring_tool.start("all_to_all_strings_send_lcps");
         auto send_lcps = _internal::send_u64s<compress_lcps, AllToAllPolicy>;
         auto recv_buf_lcp = send_lcps(container.lcps(), send_counts, recv_counts, env);
+        measuring_tool.stop("all_to_all_strings_send_lcps");
+
+        measuring_tool.start("all_to_all_strings_send_idxs");
+        measuring_tool.stop("all_to_all_strings_send_idxs");
+
         container.deleteAll();
         measuring_tool.stop("all_to_all_strings_mpi");
 
@@ -393,15 +394,21 @@ public:
 
         measuring_tool.start("all_to_all_strings_mpi");
         auto recv_buf_char = AllToAllPolicy::alltoallv(send_buf_char.data(), send_counts_char, env);
-
         auto recv_counts = mpi::alltoall(send_counts, env);
+
+        measuring_tool.start("all_to_all_strings_send_lcps");
         auto send_lcps = _internal::send_u64s<compress_lcps, AllToAllPolicy>;
         auto recv_buf_lcp = send_lcps(container.lcps(), send_counts, recv_counts, env);
+        measuring_tool.stop("all_to_all_strings_send_lcps");
         container.deleteAll();
 
         // todo does 7-bit compression make sense for PE and string indices
-        auto recv_buf_PE_idx = send_lcps(send_buf_PE_idx, send_counts, recv_counts, env);
-        auto recv_buf_str_idx = send_lcps(send_buf_str_idx, send_counts, recv_counts, env);
+        // todo this is pretty wasteful in terms of memory
+        measuring_tool.start("all_to_all_strings_send_idxs");
+        auto send_idxs = _internal::send_u64s<compress_lcps, AllToAllPolicy>;
+        auto recv_buf_PE_idx = send_idxs(send_buf_PE_idx, send_counts, recv_counts, env);
+        auto recv_buf_str_idx = send_idxs(send_buf_str_idx, send_counts, recv_counts, env);
+        measuring_tool.stop("all_to_all_strings_send_idxs");
         measuring_tool.stop("all_to_all_strings_mpi");
 
         measuring_tool.start("container_construction");
@@ -451,20 +458,17 @@ public:
 // Method for the All-To-All exchange of the reduced strings, i.e. only
 // distinguishing prefix - common prefix, in the prefix-doubling-algorithm
 template <bool compress_lcps, bool compress_prefixes, typename StringSet, typename AllToAllPolicy>
-struct AllToAllStringImplPrefixDoubling : public AllToAllStringImpl<
+struct AllToAllStringImplPrefixDoubling : private AllToAllStringImpl<
                                               compress_lcps,
                                               compress_prefixes,
                                               UCharLengthIndexPEIndexStringSet,
                                               AllToAllPolicy> {
-    using StringPEIndexSet = dss_schimek::UCharLengthIndexPEIndexStringSet;
+    using StringPEIndexSet = UCharLengthIndexPEIndexStringSet;
     static constexpr bool Lcps = true;
     static constexpr bool PrefixCompression = compress_prefixes;
 
-    using AllToAllStringImpl<
-        compress_lcps,
-        compress_prefixes,
-        UCharLengthIndexPEIndexStringSet,
-        AllToAllPolicy>::alltoallv;
+    using AllToAllStringImpl<compress_lcps, compress_prefixes, StringPEIndexSet, AllToAllPolicy>::
+        alltoallv;
 
     StringLcpContainer<StringPEIndexSet> alltoallv(
         StringLcpContainer<StringSet>& container,
@@ -490,12 +494,18 @@ struct AllToAllStringImplPrefixDoubling : public AllToAllStringImpl<
         auto recv_buf_char = AllToAllPolicy::alltoallv(send_buf_char.data(), send_counts_char, env);
 
         auto recv_counts = mpi::alltoall(send_counts, env);
+
+        measuring_tool.start("all_to_all_strings_send_lcps");
         auto send_lcps = _internal::send_u64s<compress_lcps, AllToAllPolicy>;
         auto recv_buf_lcp = send_lcps(container.lcps(), send_counts, recv_counts, env);
+        measuring_tool.stop("all_to_all_strings_send_lcps");
         container.deleteAll();
 
+        measuring_tool.start("all_to_all_strings_send_idxs");
+        measuring_tool.stop("all_to_all_strings_send_idxs");
+
         std::vector<size_t> offsets(send_counts.size());
-        std::exclusive_scan(send_counts.begin(), send_counts.end(), offsets.begin(), 0);
+        std::exclusive_scan(send_counts.begin(), send_counts.end(), offsets.begin(), size_t{0});
 
         auto recv_offsets = mpi::alltoall(offsets, env);
         measuring_tool.stop("all_to_all_strings_mpi");

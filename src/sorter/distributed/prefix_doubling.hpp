@@ -70,8 +70,8 @@ public:
         this->measuring_tool_.start("init_container");
         // create a new container with additional PE rank and string index
         StringPEIndexContainer container{std::move(container_), comms.comm_root().rank()};
-        StringPEIndexPtr string_ptr = container.make_string_lcp_ptr();
-        StringPEIndexSet const& ss = string_ptr.active();
+        auto string_ptr = container.make_string_lcp_ptr();
+        auto const& ss = string_ptr.active();
         this->measuring_tool_.stop("init_container");
 
         if constexpr (debug) {
