@@ -24,7 +24,6 @@
 #include "strings/stringcontainer.hpp"
 #include "strings/stringset.hpp"
 #include "util/measuringTool.hpp"
-#include "util/structs.hpp"
 
 namespace dss_schimek {
 namespace mpi {
@@ -541,60 +540,44 @@ struct AllToAllStringImplPrefixDoubling : public AllToAllStringImpl<
 // Collect Strings specified by string index and PE index -> should be used for
 // verification (probably not as efficient as it could be)
 template <typename StringSet, typename Iterator>
-dss_schimek::StringLcpContainer<StringSet>
-getStrings(Iterator requestBegin, Iterator requestEnd, StringSet localSS, environment env) {
-    using String = typename StringSet::String;
-    using CharIt = typename StringSet::CharIterator;
-    using MPIRoutine = dss_schimek::mpi::AllToAllvCombined<dss_schimek::mpi::AllToAllvSmall>;
+StringLcpContainer<StringSet>
+getStrings(Iterator reqs_begin, Iterator reqs_end, StringSet ss, environment env) {
+    using MPIRoutine = mpi::AllToAllvCombined<mpi::AllToAllvSmall>;
+    using std::begin;
 
-    std::vector<size_t> requests(requestEnd - requestBegin);
-    std::vector<size_t> requestSizes(env.size(), 0);
-
-    // get size of each interval
-    for (Iterator curIt = requestBegin; curIt != requestEnd; ++curIt) {
-        const StringIndexPEIndex indices = *curIt;
-        ++requestSizes[indices.PEIndex];
+    std::vector<size_t> req_sizes(env.size());
+    for (auto it = reqs_begin; it != reqs_end; ++it) {
+        ++req_sizes[it->PEIndex];
     }
 
-    std::vector<size_t> offsets;
-    offsets.reserve(env.size());
-    offsets.push_back(0);
-    std::partial_sum(requestSizes.begin(), requestSizes.end() - 1, std::back_inserter(offsets));
+    std::vector<size_t> offsets(env.size());
+    std::exclusive_scan(req_sizes.begin(), req_sizes.end(), offsets.begin(), size_t{0});
 
-    for (Iterator curIt = requestBegin; curIt != requestEnd; ++curIt) {
-        const StringIndexPEIndex indices = *curIt;
-        requests[offsets[indices.PEIndex]++] = indices.stringIndex;
-    };
+    std::vector<size_t> requests(reqs_end - reqs_begin);
+    for (auto it = reqs_begin; it != reqs_end; ++it) {
+        requests[offsets[it->PEIndex]++] = it->stringIndex;
+    }
 
-    // exchange request
-    std::vector<size_t> recvRequestSizes = dss_schimek::mpi::alltoall(requestSizes, env);
-    std::vector<size_t> recvRequests = MPIRoutine::alltoallv(requests.data(), requestSizes, env);
+    auto recv_req_sizes = mpi::alltoall(req_sizes, env);
+    auto recv_requests = MPIRoutine::alltoallv(requests.data(), req_sizes, env);
 
-    // collect strings to send back
-    std::vector<std::vector<unsigned char>> rawStrings(env.size());
-    std::vector<size_t> rawStringSizes(env.size());
-    size_t offset = 0;
+    std::vector<unsigned char> raw_strs;
+    std::vector<size_t> raw_str_sizes(env.size());
 
-    for (size_t curRank = 0; curRank < env.size(); ++curRank) {
-        for (size_t i = 0; i < recvRequestSizes[curRank]; ++i) {
-            const size_t requestedIndex = recvRequests[offset + i];
-            String str = localSS[localSS.begin() + requestedIndex];
-            size_t length = localSS.get_length(str) + 1;
-            CharIt charsStr = localSS.get_chars(str, 0);
-            std::copy_n(charsStr, length, std::back_inserter(rawStrings[curRank]));
-            rawStringSizes[curRank] += length;
+    for (size_t rank = 0, offset = 0; rank < env.size(); ++rank) {
+        for (size_t i = 0; i < recv_req_sizes[rank]; ++i) {
+            auto req_index = recv_requests[offset + i];
+            auto const& str = ss[begin(ss) + req_index];
+            auto str_len = ss.get_length(str) + 1;
+            auto str_chars = ss.get_chars(str, 0);
+            std::copy_n(str_chars, str_len, std::back_inserter(raw_strs));
+            raw_str_sizes[rank] += str_len;
         }
-        offset += recvRequestSizes[curRank];
+        offset += recv_req_sizes[rank];
     }
 
-    std::vector<unsigned char> rawStringsFlattened = flatten(rawStrings);
-
-    std::vector<unsigned char> recvRequestedStrings =
-        MPIRoutine::alltoallv(rawStringsFlattened.data(), rawStringSizes, env);
-
-    dss_schimek::StringLcpContainer<StringSet> container(std::move(recvRequestedStrings));
-
-    return container;
+    auto recv_chars = MPIRoutine::alltoallv(raw_strs.data(), raw_str_sizes, env);
+    return StringLcpContainer<StringSet>{std::move(recv_chars)};
 }
 
 } // namespace mpi

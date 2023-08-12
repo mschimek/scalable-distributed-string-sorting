@@ -21,56 +21,27 @@ struct StringIndexPEIndex {
     }
 };
 
-template <typename DataType>
-inline std::vector<DataType>
-flatten(std::vector<std::vector<DataType>> const& dataToFlatten, const size_t totalSumElements) {
-    std::vector<DataType> flattenedData;
-    flattenedData.reserve(totalSumElements);
-    for (auto const& curVec: dataToFlatten) {
-        std::copy(curVec.begin(), curVec.end(), std::back_inserter(flattenedData));
-    }
-    return flattenedData;
-}
 
-template <typename DataType>
-inline std::vector<DataType> flatten(std::vector<std::vector<DataType>> const& data) {
-    auto op = [](auto const& sum, auto const& vec) { return sum + vec.size(); };
-    return flatten(data, std::accumulate(data.begin(), data.end(), size_t{0}, op));
-}
-
+// todo this can be merged with getStrings
 template <typename StringSet, typename Iterator>
-void reorder(StringSet ss, Iterator begin, Iterator end) {
-    using String = typename StringSet::String;
+void reorder(StringSet ss, Iterator perm_begin, Iterator perm_end) {
+    using std::begin;
 
+    assert_equal(std::ssize(ss), perm_end - perm_begin);
     dss_schimek::mpi::environment env;
-    std::vector<size_t> numberInStringSet(env.size(), 0);
-    std::vector<size_t> smallestIndexInPermutation(env.size(), std::numeric_limits<size_t>::max());
 
-    for (Iterator curIt = begin; curIt != end; ++curIt) {
-        auto const& indices = *curIt;
-        numberInStringSet[indices.PEIndex]++;
-        size_t& curSmallestIndex = smallestIndexInPermutation[indices.PEIndex];
-        curSmallestIndex = std::min(curSmallestIndex, indices.stringIndex);
+    std::vector<size_t> offsets(env.size());
+    for (auto src = perm_begin; src != perm_end; ++src) {
+        ++offsets[src->PEIndex];
     }
+    std::exclusive_scan(offsets.begin(), offsets.end(), offsets.begin(), size_t{0});
 
-    std::vector<size_t> startIndices(numberInStringSet.size());
-    std::exclusive_scan(
-        numberInStringSet.begin(),
-        numberInStringSet.end(),
-        startIndices.begin(),
-        size_t{0}
-    );
+    // using back_inserter here becuase String may not be default-insertable
+    std::vector<typename StringSet::String> strings;
+    strings.reserve(ss.size());
+    std::transform(perm_begin, perm_end, std::back_inserter(strings), [&](auto const& x) {
+        return ss[begin(ss) + offsets[x.PEIndex]++];
+    });
 
-    std::vector<String> reorderedStrings;
-    reorderedStrings.reserve(end - begin);
-    for (Iterator curIt = begin; curIt != end; ++curIt) {
-        auto const& indices = *curIt;
-        const size_t stringOffset = startIndices[indices.PEIndex];
-        String str =
-            ss[ss.begin() + stringOffset + indices.stringIndex
-               - smallestIndexInPermutation[indices.PEIndex]];
-        reorderedStrings.push_back(str);
-    }
-    for (size_t i = 0; i < ss.size(); ++i)
-        ss[ss.begin() + i] = reorderedStrings[i];
+    std::copy(strings.begin(), strings.end(), begin(ss));
 }

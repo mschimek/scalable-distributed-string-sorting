@@ -165,15 +165,11 @@ bool is_complete_and_sorted(
     if (env.size() == 0)
         return is_sorted(strptr, env);
 
-    const size_t initial_total_num_chars =
-        dss_schimek::mpi::allreduce_sum(initial_local_num_chars, env);
-    const size_t initial_total_num_strings =
-        dss_schimek::mpi::allreduce_sum(initial_local_num_strings, env);
+    const size_t initial_total_num_chars = mpi::allreduce_sum(initial_local_num_chars, env);
+    const size_t initial_total_num_strings = mpi::allreduce_sum(initial_local_num_strings, env);
 
-    const size_t current_total_num_chars =
-        dss_schimek::mpi::allreduce_sum(current_local_num_chars, env);
-    const size_t current_total_num_strings =
-        dss_schimek::mpi::allreduce_sum(current_local_num_strings, env);
+    const size_t current_total_num_chars = mpi::allreduce_sum(current_local_num_chars, env);
+    const size_t current_total_num_strings = mpi::allreduce_sum(current_local_num_strings, env);
 
     if (initial_total_num_chars != current_total_num_chars) {
         std::cout << "initial total num chars: " << initial_total_num_chars

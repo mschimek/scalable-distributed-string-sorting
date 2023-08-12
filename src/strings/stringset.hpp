@@ -356,6 +356,8 @@ Type get_key(StringSet const& ss, const typename StringSet::String& s, size_t de
 /******************************************************************************/
 
 struct Length {
+    static constexpr std::string_view name{"length"};
+
     size_t length;
 
     size_t value() const { return length; }
@@ -364,6 +366,8 @@ struct Length {
 };
 
 struct Index {
+    static constexpr std::string_view name{"index"};
+
     uint64_t index; // todo is u64 the right type here?
 
     size_t value() const { return index; }
@@ -372,6 +376,8 @@ struct Index {
 };
 
 struct PEIndex {
+    static constexpr std::string_view name{"pe_index"};
+
     size_t PEIndex;
 
     size_t value() const { return PEIndex; }
@@ -381,6 +387,8 @@ struct PEIndex {
 
 // todo replace usages of StringIndex with Index
 struct StringIndex {
+    static constexpr std::string_view name{"str_index"};
+
     size_t stringIndex;
 
     size_t value() const { return stringIndex; }
@@ -426,10 +434,9 @@ using StringLengthStringIndexPEIndex = StringData<String, Length, StringIndex, P
 
 template <typename String, typename... Args>
 std::ostream& operator<<(std::ostream& out, StringData<String, Args...> const& str) {
-    out << "[";
-    (str.string == nullptr) ? out << "(null)" : out << str.string;
-    ((out << ", " << static_cast<Args>(str).value()), ...);
-    return out << "]";
+    out << "{";
+    ((out << Args::name << "=" << static_cast<Args>(str).value() << ", "), ...);
+    return out << "}";
 }
 
 /*!
