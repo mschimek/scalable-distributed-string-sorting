@@ -215,16 +215,14 @@ void run_prefix_doubling(
 
     if ((args.check || args.check_exhaustive) && comm.size() > 1) {
         StringLcpContainer<StringSet> original_input{checker.getLocalInput()};
-        auto original_input_ptr = original_input.make_string_lcp_ptr();
 
-        tlx::sort_strings_detail::radixsort_CI3(original_input_ptr, 0, 0);
-
-        auto complete_strings_cont = dss_schimek::mpi::getStrings(
+        auto complete_strings_cont = mpi::getStrings(
             permutation.begin(),
             permutation.end(),
             original_input.make_string_set(),
             comm
         );
+
         auto complete_strings = complete_strings_cont.make_string_set();
         reorder(complete_strings, permutation.begin(), permutation.end());
 

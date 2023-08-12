@@ -21,6 +21,7 @@
 #include "sorter/distributed/merge_sort.hpp"
 #include "sorter/distributed/sample.hpp"
 #include "strings/stringcontainer.hpp"
+#include "util/structs.hpp"
 
 namespace dss_mehnert {
 namespace sorter {
@@ -35,20 +36,28 @@ class PrefixDoublingMergeSort
     : private BaseDistributedMergeSort<Subcommunicators, AllToAllStringPolicy, SamplePolicy> {
 public:
     using StringLcpContainer = dss_schimek::StringLcpContainer<typename StringPtr::StringSet>;
-    using StringPEIndexContainer =
-        dss_schimek::StringLcpContainer<dss_schimek::UCharLengthIndexPEIndexStringSet>;
+
+    using StringPEIndexSet = dss_schimek::UCharLengthIndexPEIndexStringSet;
+    using StringPEIndexPtr = tlx::sort_strings_detail::StringLcpPtr<StringPEIndexSet, size_t>;
+    using StringPEIndexContainer = dss_schimek::StringLcpContainer<StringPEIndexSet>;
 
     std::vector<StringIndexPEIndex>
-    sort(StringLcpContainer&& container, Subcommunicators const& comms) {
+    sort(StringLcpContainer&& container_, Subcommunicators const& comms) {
         using namespace kamping;
+        using std::begin;
+        using std::end;
 
-        auto string_ptr = container.make_string_lcp_ptr();
-        auto const& ss = string_ptr.active();
+        // this->measuring_tool_.start("");
+        // create a new container with additional PE rank and string index
+        StringPEIndexContainer container{std::move(container_), comms.comm_root().rank()};
+
+        StringPEIndexPtr string_ptr = container.make_string_lcp_ptr();
+        StringPEIndexSet const& ss = string_ptr.active();
         this->measuring_tool_.setPhase("local_sorting");
 
         if constexpr (debug) {
             auto op = [&ss](auto sum, auto const& str) { return sum + ss.get_length(str) + 1; };
-            size_t chars_in_set = std::accumulate(std::begin(ss), std::end(ss), size_t{0}, op);
+            size_t chars_in_set = std::accumulate(begin(ss), end(ss), size_t{0}, op);
             this->measuring_tool_.add(chars_in_set, "chars_in_set");
         }
 
@@ -58,8 +67,9 @@ public:
 
         if (comms.comm_root().size() == 1) {
             std::vector<StringIndexPEIndex> result(ss.size());
-            auto op = [idx = size_t{0}](auto& x) mutable { x.stringIndex = idx++; };
-            std::for_each(result.begin(), result.end(), op);
+            std::for_each(result.begin(), result.end(), [idx = size_t{0}](auto& x) mutable {
+                x.stringIndex = idx++;
+            });
             return result;
         }
 
@@ -70,7 +80,9 @@ public:
         std::tuple<sample::DistPrefixes> sample_args{{prefixes}};
         std::tuple<std::vector<size_t> const&> all_to_all_args{prefixes};
 
-        if (std::begin(comms) == std::end(comms)) {
+        auto level = begin(comms);
+        if (level == end(comms)) {
+            // special case for single level sort
             this->measuring_tool_.start("sort_globally", "final_sorting");
             auto sorted_container = this->sort_exhaustive(
                 std::move(container),
@@ -82,33 +94,28 @@ public:
             return writeback_permutation(sorted_container);
         }
 
-        // note the type of used string container changes from here on out
-        StringPEIndexContainer container_PE_idx{std::move(container), comms.comm_root().rank()};
-
         size_t round = 0;
         {
+            // first level of multi-level sort, consider distinguishing prefixes
             this->measuring_tool_.start("sort_globally", "partial_sorting");
-            auto level = *std::begin(comms);
-            container_PE_idx = this->sort_partial(
-                std::move(container_PE_idx),
-                level,
-                sample_args,
-                all_to_all_args
-            );
+            container =
+                this->sort_partial(std::move(container), *level++, sample_args, all_to_all_args);
             this->measuring_tool_.stop("sort_globally", "partial_sorting", comms.comm_root());
             this->measuring_tool_.setRound(++round);
         }
 
-        for (auto level = std::begin(comms); level != std::end(comms); ++level) {
+        for (; level != std::end(comms); ++level) {
+            // intermediate level of multi-level sort, don't consider distinguishing prefixes
             this->measuring_tool_.start("sort_globally", "partial_sorting");
-            container_PE_idx = this->sort_partial(std::move(container_PE_idx), *level, {}, {});
+            container = this->sort_partial(std::move(container), *level, {}, {});
             this->measuring_tool_.stop("sort_globally", "partial_sorting", comms.comm_root());
             this->measuring_tool_.setRound(++round);
         }
 
         this->measuring_tool_.start("sort_globally", "final_sorting");
+        // final level of multi-level sort
         auto sorted_container =
-            this->sort_exhaustive(std::move(container_PE_idx), comms.comm_final(), {}, {});
+            this->sort_exhaustive(std::move(container), comms.comm_final(), {}, {});
         this->measuring_tool_.stop("sort_globally", "final_sorting");
 
         this->measuring_tool_.setRound(0);
@@ -120,6 +127,9 @@ private:
     static constexpr uint64_t start_depth = 8;
 
     std::vector<StringIndexPEIndex> writeback_permutation(auto& sorted_container) {
+        using std::begin;
+        using std::end;
+
         this->measuring_tool_.start("writeback_permutation");
 
         auto ss = sorted_container.make_string_set();
@@ -128,7 +138,7 @@ private:
         auto op = [&ss](auto const& str) -> StringIndexPEIndex {
             return {ss.getIndex(str), ss.getPEIndex(str)};
         };
-        std::transform(std::cbegin(ss), std::cend(ss), std::begin(permutation), op);
+        std::transform(begin(ss), end(ss), permutation.begin(), op);
 
         this->measuring_tool_.stop("writeback_permutation");
         this->measuring_tool_.setPhase("none");
@@ -137,28 +147,26 @@ private:
     }
 
     std::vector<size_t>
-    compute_distinguishing_prefixes(StringPtr local_string_ptr, Communicator const& comm) {
+    compute_distinguishing_prefixes(StringPEIndexPtr str_ptr, Communicator const& comm) {
         using namespace kamping;
-        using StringSet = typename StringPtr::StringSet;
         using BloomFilter = dss_schimek::BloomFilter<
-            StringSet,
+            StringPEIndexSet,
             dss_schimek::FindDuplicates<GolombPolicy>,
             dss_schimek::SendOnlyHashesToFilter<GolombPolicy>,
             dss_schimek::XXHasher>;
 
         this->measuring_tool_.start("bloomfilter_init");
-        StringSet ss = local_string_ptr.active();
+        auto const& ss = str_ptr.active();
         BloomFilter bloom_filter{ss.size(), start_depth};
         std::vector<size_t> results(ss.size());
         this->measuring_tool_.stop("bloomfilter_init");
 
-        size_t current_round = 0;
-        this->measuring_tool_.setRound(current_round);
-        std::vector<size_t> candidates =
-            bloom_filter.filter(local_string_ptr, start_depth, results);
+        size_t round = 0;
+        this->measuring_tool_.setRound(round);
+        std::vector<size_t> candidates = bloom_filter.filter(str_ptr, start_depth, results);
 
-        for (size_t i = (start_depth * 2); i < std::numeric_limits<size_t>::max(); i *= 2) {
-            this->measuring_tool_.add(candidates.size(), "bloomfilter_numberCandidates", false);
+        for (size_t i = start_depth * 2; i < std::numeric_limits<size_t>::max(); i *= 2) {
+            this->measuring_tool_.add(candidates.size(), "bloomfilter_numberCandidates");
             this->measuring_tool_.start("bloomfilter_allreduce");
             bool no_candidates = candidates.empty();
             bool all_empty = comm.allreduce(send_buf({no_candidates}), op(ops::logical_and<>{}))
@@ -169,8 +177,8 @@ private:
                 break;
             }
 
-            this->measuring_tool_.setRound(++current_round);
-            candidates = bloom_filter.filter(local_string_ptr, i, candidates, results);
+            this->measuring_tool_.setRound(++round);
+            candidates = bloom_filter.filter(str_ptr, i, candidates, results);
         }
         this->measuring_tool_.setRound(0);
         return results;
