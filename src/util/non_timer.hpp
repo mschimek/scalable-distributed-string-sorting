@@ -55,16 +55,17 @@ public:
 
         for (auto const& [record, value, collect]: entries) {
             if (collect) {
-                auto values = comm.allgather(send_buf(value.getValue())).extract_recv_buffer();
-                auto begin = std::begin(values), end = std::end(values);
+                auto result = comm.allgather(send_buf(value.getValue()));
+                auto values = result.extract_recv_buffer();
+                auto begin = values.begin(), end = values.end();
 
-                auto min = std::min_element(begin, end);
-                auto max = std::max_element(begin, end);
+                auto min = *std::min_element(begin, end);
+                auto max = *std::max_element(begin, end);
                 auto sum = std::accumulate(begin, end, size_t{0});
                 auto median = begin + std::midpoint(size_t{0}, values.size());
                 std::nth_element(begin, median, end);
                 auto avg = sum / comm.size();
-                output.emplace_back(record, *min, *max, *median, avg, sum);
+                output.emplace_back(record, min, max, *median, avg, sum);
             } else {
                 auto values = comm.allgather(send_buf(value)).extract_recv_buffer();
                 for (auto proc = 0; auto const& proc_value: values) {
