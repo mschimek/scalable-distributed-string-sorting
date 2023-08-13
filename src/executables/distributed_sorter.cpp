@@ -29,7 +29,6 @@
 #include "sorter/distributed/multi_level.hpp"
 #include "sorter/distributed/prefix_doubling.hpp"
 #include "util/measuringTool.hpp"
-#include "util/random_string_generator.hpp"
 #include "variant_selection.hpp"
 
 struct SorterArgs {
@@ -49,7 +48,7 @@ auto generate_strings(SorterArgs& args, dss_mehnert::Communicator const& comm) {
     auto& measuring_tool = MeasuringTool::measuringTool();
 
     if (!args.strong_scaling)
-        args.generator_args.numOfStrings *= comm.size();
+        args.generator_args.num_strings *= comm.size();
 
     if (comm.is_root())
         std::cout << "string generation started " << std::endl;
@@ -259,14 +258,14 @@ std::string get_result_prefix(
            + (args.experiment.empty() ? "" : (" experiment=" + args.experiment))
            + " num_procs=" + std::to_string(comm.size())
            + " num_strings=" + std::to_string(args.num_strings)
-           + " len_strings=" + std::to_string(args.generator_args.stringLength)
+           + " len_strings=" + std::to_string(args.generator_args.len_strings)
            + " num_levels=" + std::to_string(args.levels.size())
            + " iteration=" + std::to_string(args.iteration)
            + " strong_scaling=" + std::to_string(args.strong_scaling)
            + " lcp_compression=" + std::to_string(key.lcp_compression)
            + " prefix_compression=" + std::to_string(key.prefix_compression)
            + " prefix_doubling=" + std::to_string(key.prefix_doubling)
-           + " DN_ratio=" + std::to_string(args.generator_args.dToNRatio);
+           + " dn_ratio=" + std::to_string(args.generator_args.DN_ratio);
     // clang-format on
 }
 
@@ -282,7 +281,7 @@ template <
 void print_config(
     std::string_view prefix, SorterArgs const& args, PolicyEnums::CombinationKey const& key
 ) {
-    // todo question: output all measurements in a single line?
+    // todo print string generator arguments
     std::cout << prefix << " key=string_generator name=" << StringGenerator::getName() << "\n";
     std::cout << prefix << " key=sampler name=" << SamplePolicy::getName() << "\n";
     std::cout << prefix << " key=alltoall_routine name=" << MPIAllToAllRoutine::getName() << "\n";
@@ -477,8 +476,8 @@ int main(int argc, char* argv[]) {
     size_t num_strings = 100000;
     size_t num_iterations = 5;
     size_t string_length = 50;
-    size_t min_string_length = string_length;
-    size_t max_string_length = string_length + 10;
+    size_t len_strings_min = string_length;
+    size_t len_strings_max = string_length + 10;
     double DN_ratio = 0.5;
     std::string path;
     std::string experiment;
@@ -499,8 +498,8 @@ int main(int argc, char* argv[]) {
     cp.add_double('r', "DN-ratio", DN_ratio, "D/N ratio of generated strings");
     cp.add_size_t('n', "num-strings", num_strings, "number of strings to be generated");
     cp.add_size_t('m', "len-strings", string_length, "length of generated strings");
-    cp.add_size_t('b', "min-len-strings", min_string_length, "minimum length of generated strings");
-    cp.add_size_t('B', "max-len-strings", max_string_length, "maximum length of generated strings");
+    cp.add_size_t('b', "min-len-strings", len_strings_min, "minimum length of generated strings");
+    cp.add_size_t('B', "max-len-strings", len_strings_max, "maximum length of generated strings");
     cp.add_size_t('i', "num-iterations", num_iterations, "numer of sorting iterations to run");
     cp.add_flag('x', "strong-scaling", strong_scaling, "perform a strong scaling experiment");
     cp.add_unsigned(
@@ -572,11 +571,11 @@ int main(int argc, char* argv[]) {
     };
 
     GeneratedStringsArgs generator_args{
-        .numOfStrings = num_strings,
-        .stringLength = string_length,
-        .minStringLength = min_string_length,
-        .maxStringLength = max_string_length,
-        .dToNRatio = DN_ratio,
+        .num_strings = num_strings,
+        .len_strings = string_length,
+        .len_strings_min = len_strings_min,
+        .len_strings_max = len_strings_max,
+        .DN_ratio = DN_ratio,
         .path = path,
     };
 
@@ -588,6 +587,7 @@ int main(int argc, char* argv[]) {
         tlx_die("the given group sizes must be decreasing");
     }
 
+    // todo does this make sense? maybe discard first round instead?
     auto num_bytes = std::min<size_t>(num_strings * 5, 100000u);
     dss_schimek::mpi::randomDataAllToAllExchange(num_bytes);
 

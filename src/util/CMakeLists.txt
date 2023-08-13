@@ -4,6 +4,6 @@ target_sources(dss_base
         measuringTool.hpp
         non_timer.hpp
         measurements.hpp
-        random_string_generator.hpp
+        string_generator.hpp
         timer.hpp
 )

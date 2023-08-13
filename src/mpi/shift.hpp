@@ -1,10 +1,7 @@
-/*******************************************************************************
- * mpi/shift.hpp
- *
- * Copyright (C) 2018 Florian Kurpicz <florian.kurpicz@tu-dortmund.de>
- *
- * All rights reserved. Published under the BSD-2 license in the LICENSE file.
- ******************************************************************************/
+// (c) 2018 Florian Kurpicz
+// (c) 2019 Matthias Schimek
+// (c) 2023 Pascal Mehnert
+// This code is licensed under BSD 2-Clause License (see LICENSE for details)
 
 #pragma once
 
@@ -234,11 +231,6 @@ shift_string_right(dss_schimek::string send_data, environment env) {
     return receive_data;
 }
 
-} // namespace dss_schimek::mpi
-
-namespace dss_schimek::mpi {
-using namespace dss_schimek::mpi;
-
 struct ShiftAdress {
     size_t source;
     size_t destination;
@@ -408,5 +400,3 @@ shift_string(unsigned char* send_data, bool isEmpty, environment env) {
 }
 
 } // namespace dss_schimek::mpi
-
-/******************************************************************************/

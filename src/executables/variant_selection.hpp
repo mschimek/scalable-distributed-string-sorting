@@ -1,36 +1,41 @@
 #pragma once
 
 #include <cstdlib>
+#include <filesystem>
 
-#include "util/random_string_generator.hpp"
+#include <tlx/die/core.hpp>
+
+#include "util/string_generator.hpp"
 
 struct GeneratedStringsArgs {
-    size_t numOfStrings = 0;
-    size_t stringLength = 0;
-    size_t minStringLength = 0;
-    size_t maxStringLength = 0;
-    double dToNRatio = 0.5;
+    size_t num_strings;
+    size_t len_strings;
+    size_t len_strings_min;
+    size_t len_strings_max;
+    double DN_ratio = 0.5;
     std::string path = "";
 };
 
 template <typename StringGenerator, typename StringSet>
 StringGenerator getGeneratedStringContainer(GeneratedStringsArgs const& args) {
-    if constexpr (std::is_same_v<StringGenerator, dss_schimek::DNRatioGenerator<StringSet>>) {
-        return StringGenerator(args.numOfStrings, args.stringLength, args.dToNRatio);
-    } else if constexpr (std::is_same_v<StringGenerator, dss_schimek::FileDistributer<StringSet>>) {
-        return dss_schimek::FileDistributer<StringSet>(args.path);
-    } else if constexpr (std::is_same_v<
-                             StringGenerator,
-                             dss_schimek::SkewedDNRatioGenerator<StringSet>>) {
-        return dss_schimek::SkewedDNRatioGenerator<StringSet>(
-            args.numOfStrings,
-            args.stringLength,
-            args.dToNRatio
-        );
-    } else if constexpr (std::is_same_v<StringGenerator, dss_schimek::SuffixGenerator<StringSet>>) {
-        return dss_schimek::SuffixGenerator<StringSet>(args.path);
+    using namespace dss_schimek;
+
+    auto check_path_exists = [](std::string const& path) {
+        tlx_die_verbose_unless(std::filesystem::exists(path), "file not found: " << path);
+    };
+
+    if constexpr (std::is_same_v<StringGenerator, DNRatioGenerator<StringSet>>) {
+        return StringGenerator(args.num_strings, args.len_strings, args.DN_ratio);
+    } else if constexpr (std::is_same_v<StringGenerator, FileDistributer<StringSet>>) {
+        check_path_exists(args.path);
+        return FileDistributer<StringSet>(args.path);
+    } else if constexpr (std::is_same_v<StringGenerator, SkewedDNRatioGenerator<StringSet>>) {
+        return SkewedDNRatioGenerator<StringSet>(args.num_strings, args.len_strings, args.DN_ratio);
+    } else if constexpr (std::is_same_v<StringGenerator, SuffixGenerator<StringSet>>) {
+        check_path_exists(args.path);
+        return SuffixGenerator<StringSet>(args.path);
     } else {
-        return StringGenerator(args.numOfStrings, args.minStringLength, args.maxStringLength);
+        return StringGenerator(args.num_strings, args.len_strings_min, args.len_strings_max);
     }
 }
 

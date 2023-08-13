@@ -1,10 +1,7 @@
-/*******************************************************************************
- * tests/util/random_string_generator.hpp
- *
- * Copyright (C) 2018 Florian Kurpicz <florian.kurpicz@tu-dortmund.de>
- *
- * All rights reserved. Published under the BSD-2 license in the LICENSE file.
- ******************************************************************************/
+// (c) 2018 Florian Kurpicz
+// (c) 2019 Matthias Schimek
+// (c) 2023 Pascal Mehnert
+// This code is licensed under BSD 2-Clause License (see LICENSE for details)
 
 #pragma once
 
@@ -16,7 +13,7 @@
 
 #include "mpi/allgather.hpp"
 #include "mpi/environment.hpp"
-#include "mpi/readInput.hpp"
+#include "mpi/read_input.hpp"
 #include "strings/stringcontainer.hpp"
 
 namespace dss_schimek {
@@ -44,15 +41,12 @@ public:
     static std::string getName() { return "PrefixStringGenerator"; }
 };
 
+// todo this should NOT be using inheritance!
 template <typename StringSet>
 class FileDistributer : public StringLcpContainer<StringSet> {
-    using Char = typename StringSet::Char;
-
 public:
-    FileDistributer(std::string const& path) {
-        std::vector<Char> raw_string_data = dss_schimek::distribute_strings(path);
-        this->update(std::move(raw_string_data));
-    }
+    FileDistributer(std::string const& path)
+        : StringLcpContainer<StringSet>{distribute_strings(path)} {}
 
     static std::string getName() { return "FileDistributer"; }
 };
@@ -65,7 +59,7 @@ private:
     std::vector<unsigned char> readFile(std::string const& path) {
         using dss_schimek::RawStringsLines;
         RawStringsLines data;
-        const size_t fileSize = getFileSize(path);
+        const size_t fileSize = get_file_size(path);
         std::ifstream in(path);
         std::vector<unsigned char>& rawStrings = data.rawStrings;
         rawStrings.reserve(1.5 * fileSize);

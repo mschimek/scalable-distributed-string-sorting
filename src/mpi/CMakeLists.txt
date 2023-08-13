@@ -10,7 +10,7 @@ target_sources(dss_base
         environment.hpp
         gather.hpp
         is_sorted.hpp
-        readInput.hpp
+        read_input.hpp
         shift.hpp
         synchron.hpp
         type_mapper.hpp
