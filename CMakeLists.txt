@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.13)
 
+find_program(CCACHE_PROGRAM ccache)
+if(CCACHE_PROGRAM)
+    set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CCACHE_PROGRAM}")
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -43,14 +48,16 @@ list(APPEND
   # todo remove vla usages
   "-Wno-vla"
 
-  "-Wno-gnu-zero-variadic-macro-arguments"
-
   # todo produce too much noise with existing code
   # "-Wshadow"
   # "-Wconversion"
   # "-Wsign-conversion"
   # "-Wunused"
 )
+
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+  list(APPEND DSS_MEHNERT_WARNING_FLAGS "-Wno-gnu-zero-variadic-macro-arguments")
+endif()
 
 ## todo maybe use -flto, but consider binary size (maybe strip?)
 set(CMAKE_CXX_FLAGS_DEBUG "-ggdb")
