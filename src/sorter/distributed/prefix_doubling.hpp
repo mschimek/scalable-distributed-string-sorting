@@ -13,6 +13,7 @@
 #include <kamping/collectives/allreduce.hpp>
 #include <kamping/collectives/alltoall.hpp>
 #include <kamping/named_parameters.hpp>
+#include <tlx/die.hpp>
 #include <tlx/sort/strings/radix_sort.hpp>
 #include <tlx/sort/strings/string_ptr.hpp>
 
@@ -21,7 +22,6 @@
 #include "sorter/distributed/merge_sort.hpp"
 #include "sorter/distributed/sample.hpp"
 #include "strings/stringcontainer.hpp"
-#include "tlx/die.hpp"
 
 namespace dss_mehnert {
 namespace sorter {
@@ -102,6 +102,7 @@ public:
                 all_to_all_args
             );
             this->measuring_tool_.stop("sort_globally", "final_sorting");
+
             return writeback_permutation(sorted_container);
         }
 
@@ -115,7 +116,7 @@ public:
             this->measuring_tool_.setRound(++round);
         }
 
-        for (; level != std::end(comms); ++level) {
+        for (; level != end(comms); ++level) {
             // intermediate level of multi-level sort, don't consider distinguishing prefixes
             this->measuring_tool_.start("sort_globally", "partial_sorting");
             container = this->sort_partial(std::move(container), *level, {}, {});

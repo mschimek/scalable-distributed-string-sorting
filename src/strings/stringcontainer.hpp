@@ -325,49 +325,42 @@ public:
 
     template <typename StringSet, typename LcpIt>
     void extendPrefix(StringSet ss, LcpIt first_lcp, LcpIt last_lcp) {
-        assert(std::distance(first_lcp, last_lcp) == std::ssize(ss));
+        using std::begin;
+        using std::end;
 
-        using Char = typename StringSet::Char;
-
-        if (ss.size() == 0u)
+        assert_equal(std::distance(first_lcp, last_lcp), std::ssize(ss));
+        assert_equal(*first_lcp, size_t{0});
+        if (ss.empty()) {
             return;
+        }
 
         size_t L = std::accumulate(first_lcp, last_lcp, size_t{0});
-        std::vector<Char> raw_strings(this->char_size() + L);
-
-        auto& fst_str = ss[ss.begin()];
-        auto const fst_str_begin = ss.get_chars(fst_str, 0);
-        auto const fst_str_len = ss.get_length(fst_str) + 1;
-        std::copy(fst_str_begin, fst_str_begin + fst_str_len, raw_strings.begin());
-
-        fst_str.string = raw_strings.data();
-        fst_str.length = fst_str_len - 1;
-
+        std::vector<typename StringSet::Char> raw_strings(this->char_size() + L);
         auto prev_chars = raw_strings.begin();
-        auto curr_chars = raw_strings.begin() + fst_str_len;
-        for (size_t i = 1; i < ss.size(); ++i) {
-            // copy common prefix from previous string
-            size_t lcp = *(++first_lcp);
-            std::copy(prev_chars, prev_chars + lcp, curr_chars);
+        auto curr_chars = raw_strings.begin();
 
-            // copy remaining (distinct) characters
-            auto& curr_str = ss[ss.begin() + i];
-            auto const curr_str_begin = ss.get_chars(curr_str, 0);
-            auto const curr_str_len = ss.get_length(curr_str) + 1;
-            std::copy(curr_str_begin, curr_str_begin + curr_str_len, curr_chars + lcp);
+        auto lcp_it = first_lcp;
+        for (auto it = begin(ss); it != end(ss); ++it, ++lcp_it) {
+            auto& curr_str = ss[it];
+            auto curr_str_begin = ss.get_chars(curr_str, 0);
+            auto curr_str_len = ss.get_length(curr_str) + 1;
 
             curr_str.string = &(*curr_chars);
-            curr_str.length = curr_str_len + lcp - 1;
+            curr_str.length = curr_str_len + *lcp_it - 1;
 
-            prev_chars = curr_chars;
-            curr_chars += curr_str_len + lcp;
+            // copy common prefix from previous string
+            auto lcp_chars = std::exchange(prev_chars, curr_chars);
+            curr_chars = std::copy_n(lcp_chars, *lcp_it, curr_chars);
+
+            // copy remaining (distinct) characters
+            curr_chars = std::copy_n(curr_str_begin, curr_str_len, curr_chars);
         }
 
         *this->raw_strings_ = std::move(raw_strings);
     }
 
     bool operator==(Container const& other) {
-        return (this->raw_strings() == other.raw_strings()) && (lcps() == other.lcps());
+        return this->raw_strings() == other.raw_strings() && lcps() == other.lcps();
     }
 
 protected:
