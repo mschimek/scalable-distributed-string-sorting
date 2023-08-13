@@ -16,6 +16,7 @@
 #include <vector>
 
 #include <kamping/collectives/allreduce.hpp>
+#include <kamping/environment.hpp>
 #include <kamping/mpi_ops.hpp>
 #include <kamping/named_parameters.hpp>
 #include <tlx/die.hpp>
@@ -30,6 +31,23 @@ namespace measurement {
 template <typename Key, typename Value>
 class Timer {
 public:
+    class Clock {
+    public:
+        using rep = double;
+        using period = std::ratio<1>;
+        using duration = std::chrono::duration<rep, period>;
+        using time_point = std::chrono::time_point<Clock>;
+
+        static constexpr bool is_steady = true;
+
+        static time_point now() { return time_point{duration{kamping::Environment<>::wtime()}}; }
+    };
+
+    using PointInTime = std::chrono::time_point<Clock>;
+    using TimeUnit = std::chrono::nanoseconds;
+    using TimeIntervalDataType = uint64_t;
+    using PseudoKey = typename Key::PseudoKey;
+
     struct OutputFormat {
         Key key;
         Value value;
@@ -67,11 +85,11 @@ public:
             return;
         }
 
-        const PointInTime before_barrier = Clock::now();
+        PointInTime before_barrier = Clock::now();
         if (barrier) {
             comm.barrier();
         }
-        const PointInTime after_barrier = Clock::now();
+        PointInTime after_barrier = Clock::now();
 
         // check whether key is present
         auto it = key_start_.find(key);
@@ -79,15 +97,14 @@ public:
             std::cout << "Key: " << key << " has no corresponding start" << std::endl;
             std::abort();
         }
-        const PointInTime start_time = it->second;
+        PointInTime start_time = it->second;
 
-        TimeIntervalDataType elapsed_active_time =
-            std::chrono::duration_cast<TimeUnit>(before_barrier - start_time).count();
-        TimeIntervalDataType elapsed_total_time =
-            std::chrono::duration_cast<TimeUnit>(after_barrier - start_time).count();
+        using std::chrono::duration_cast;
+        auto elapsed_active_time = duration_cast<TimeUnit>(before_barrier - start_time);
+        auto elapsed_total_time = duration_cast<TimeUnit>(after_barrier - start_time);
 
-        active_time_.emplace(key, elapsed_active_time);
-        total_time_.emplace(key, elapsed_total_time);
+        active_time_.emplace(key, elapsed_active_time.count());
+        total_time_.emplace(key, elapsed_total_time.count());
     }
 
     std::vector<OutputFormat> collect(Communicator const& comm) {
@@ -97,7 +114,6 @@ public:
         output.reserve(key_value_.size());
         for (auto& [key, value]: key_value_) {
             auto time = expect_key(active_time_, key)->second;
-            // todo loss is currently alwas 0
             auto loss = get_loss(key);
             auto size = comm.size();
 
@@ -116,12 +132,6 @@ public:
     }
 
 private:
-    using Clock = std::chrono::high_resolution_clock;
-    using PointInTime = std::chrono::time_point<Clock>;
-    using TimeUnit = std::chrono::nanoseconds;
-    using TimeIntervalDataType = uint64_t;
-    using PseudoKey = typename Key::PseudoKey;
-
     static constexpr bool enabled = true;
 
     size_t incrementCounterPerPseudoKey(Key const& key) {
