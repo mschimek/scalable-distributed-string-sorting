@@ -118,154 +118,69 @@ public:
 
 template <typename StringSet>
 class DNRatioGenerator : public StringLcpContainer<StringSet> {
-    using Char = typename StringSet::Char;
-    using String = typename StringSet::String;
-
 public:
-    std::vector<unsigned char>
-    nextChar(std::vector<unsigned char> const& lastChar, const size_t min, const size_t max) {
-        std::vector<unsigned char> nextChar(lastChar.size(), min);
-        int64_t i = lastChar.size() - 1;
-        for (; i >= 0; --i) {
-            if (lastChar[i] < max) {
-                nextChar[i] = lastChar[i] + 1;
-                std::copy(lastChar.begin(), lastChar.begin() + i, nextChar.begin());
-                break;
-            }
-        }
-        return nextChar;
+    DNRatioGenerator(size_t size, size_t stringLength, double DN_ratio)
+        : StringLcpContainer<StringSet>{get_raw_strings(size, stringLength, DN_ratio, {})} {
+        std::random_device rand;
+        std::mt19937 gen{rand()};
+
+        auto& strings = this->getStrings();
+        std::shuffle(strings.begin(), strings.end(), gen);
+        this->orderRawStrings();
     }
 
-    std::tuple<std::vector<unsigned char>, size_t, size_t> getRawStringsTimoStyle(
-        size_t numStrings,
-        size_t desiredStringLength,
-        double dToN,
-        dss_schimek::mpi::environment env
+    static std::string getName() { return "DNRatioGenerator"; }
+
+private:
+    static constexpr unsigned char min_char = 'A';
+    static constexpr unsigned char max_char = 'Z';
+    static constexpr unsigned char char_range = max_char - min_char;
+
+    std::vector<unsigned char> get_raw_strings(
+        size_t num_strings, size_t len_strings_requested, double DN_ratio, mpi::environment env
     ) {
-        const size_t minInternChar = 65;
-        const size_t maxInternChar = 90;
-
-        const size_t numberInternChars = maxInternChar - minInternChar + 1;
-        const size_t k = std::max(
-            desiredStringLength * dToN,
-            std::ceil(std::log(numStrings) / std::log(numberInternChars))
+        size_t const k = std::max(
+            len_strings_requested * std::clamp(DN_ratio, 0.0, 1.0),
+            std::ceil(std::log(num_strings) / std::log(char_range))
         );
-        const size_t stringLength = std::max(desiredStringLength, k);
-        std::vector<unsigned char> rawStrings; //(numStrings * (stringLength + 1), minInternChar);
-        rawStrings.reserve(numStrings * (stringLength + 1) / env.size());
+        size_t const len_strings = std::max(len_strings_requested, k);
 
-        const size_t globalSeed = getSameSeedGlobally(env);
-        std::mt19937 randGen(globalSeed);
-        const size_t randomChar = minInternChar + (randGen() % numberInternChars);
-        std::uniform_int_distribution<size_t> dist(0, env.size() - 1);
+        std::vector<unsigned char> raw_strings;
+        raw_strings.reserve((1.005 * num_strings) * (len_strings + 1) / env.size());
 
-        size_t numGenStrings = 0;
-        size_t curOffset = 0;
-        for (size_t i = 0; i < numStrings; ++i) {
-            size_t PEIndex = dist(randGen);
+        std::mt19937 gen{get_global_seed(env)};
+        std::uniform_int_distribution<size_t> dist{0, env.size() - 1};
+
+        size_t const rand_char = min_char + (gen() % char_range);
+        for (size_t i = 0; i < num_strings; ++i) {
+            size_t PEIndex = dist(gen);
             if (PEIndex == env.rank()) {
                 // only create your own strings
-                ++numGenStrings;
-                size_t curIndex = i;
-                for (size_t j = 0; j < k; ++j) {
-                    rawStrings.push_back(minInternChar);
-                }
-                for (size_t j = 0; j < k; ++j) {
-                    if (curIndex == 0)
+                raw_strings.resize(raw_strings.size() + k, min_char);
+
+                size_t current = i;
+                for (auto it = raw_strings.rbegin(); it != raw_strings.rbegin() + k; ++it) {
+                    if (current == 0)
                         break;
-                    rawStrings[curOffset + k - 1 - j] =
-                        minInternChar + (curIndex % numberInternChars);
-                    curIndex /= numberInternChars;
+                    *it = min_char + (current % char_range);
+                    current /= char_range;
                 }
-                for (size_t j = k; j < stringLength; ++j)
-                    rawStrings.push_back(randomChar);
-                rawStrings.push_back(0);
-                curOffset += stringLength + 1;
+
+                raw_strings.resize(raw_strings.size() + (len_strings - k), rand_char);
+                raw_strings.push_back(0);
             }
         }
-        rawStrings.resize(curOffset);
-
-        return make_tuple(rawStrings, numGenStrings, stringLength);
+        return raw_strings;
     }
 
-    std::tuple<std::vector<unsigned char>, size_t, size_t> getRawStrings(
-        size_t numStrings,
-        size_t desiredStringLength,
-        double dToN,
-        dss_schimek::mpi::environment env = dss_schimek::mpi::environment()
-    ) {
-        std::vector<unsigned char> rawStrings;
-        const size_t minInternChar = 65;
-        const size_t maxInternChar = 90;
-        const size_t numberInternChars = maxInternChar - minInternChar + 1;
-        const size_t charLength = std::ceil(0.5 * std::log(numStrings) / log(numberInternChars));
-        const size_t commonPrefixLength =
-            std::max(static_cast<int64_t>(desiredStringLength * dToN - 2 * charLength), 0l);
-        const size_t paddingLength = std::max(
-            static_cast<int64_t>(desiredStringLength - (commonPrefixLength + 2 * charLength)),
-            0l
-        );
-        const size_t stringLength = commonPrefixLength + 2 * charLength + paddingLength;
-        const size_t wrap =
-            std::pow(static_cast<double>(maxInternChar - minInternChar + 1), charLength);
-
-        std::mt19937 randGen(getSameSeedGlobally());
-        std::uniform_int_distribution<size_t> dist(0, env.size() - 1);
-
-        std::vector<unsigned char> curFirstChar(charLength, minInternChar);
-        std::vector<unsigned char> curSecondChar(charLength, minInternChar);
-        size_t numGenStrings = 0;
-
-        for (size_t i = 0; i < numStrings; ++i) {
-            size_t PEIndex = dist(randGen);
-            if (PEIndex == env.rank()) {
-                ++numGenStrings;
-                for (size_t j = 0; j < commonPrefixLength; ++j)
-                    rawStrings.emplace_back(maxInternChar);
-
-                for (size_t j = 0; j < charLength; ++j)
-                    rawStrings.emplace_back(curFirstChar[j]);
-                for (size_t j = 0; j < charLength; ++j)
-                    rawStrings.emplace_back(curSecondChar[j]);
-
-                for (size_t j = 0; j < paddingLength; ++j)
-                    rawStrings.emplace_back(maxInternChar);
-                rawStrings.emplace_back(0);
-            }
-            if ((i + 1) % wrap == 0)
-                curFirstChar = nextChar(curFirstChar, minInternChar, maxInternChar);
-            curSecondChar = nextChar(curSecondChar, minInternChar, maxInternChar);
-        }
-        return make_tuple(rawStrings, numGenStrings, stringLength);
-    }
-
-    size_t getSameSeedGlobally(dss_schimek::mpi::environment env) {
+    size_t get_global_seed(mpi::environment env) {
         size_t seed = 0;
         if (env.rank() == 0) {
             std::random_device rand_seed;
             seed = rand_seed();
         }
-        return dss_schimek::mpi::broadcast(seed, env);
+        return mpi::broadcast(seed, env);
     }
-
-public:
-    DNRatioGenerator(size_t size, size_t stringLength = 40, double dToN = 0.5) {
-        // todo pass as parameter
-        mpi::environment env;
-        size_t genStrings = 0;
-        size_t genStringLength = 0;
-        std::vector<Char> rawStrings;
-        std::tie(rawStrings, genStrings, genStringLength) =
-            getRawStringsTimoStyle(size, stringLength, dToN, env);
-        this->update(std::move(rawStrings));
-        String* begin = this->strings();
-        std::random_device rand;
-        std::mt19937 gen(rand());
-        std::shuffle(begin, begin + genStrings, gen);
-        this->orderRawStrings();
-    }
-
-    static std::string getName() { return "DNRatioGenerator"; }
 };
 
 template <typename StringSet>

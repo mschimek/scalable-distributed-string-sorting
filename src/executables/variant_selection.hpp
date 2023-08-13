@@ -25,7 +25,7 @@ StringGenerator getGeneratedStringContainer(GeneratedStringsArgs const& args) {
     };
 
     if constexpr (std::is_same_v<StringGenerator, DNRatioGenerator<StringSet>>) {
-        return StringGenerator(args.num_strings, args.len_strings, args.DN_ratio);
+        return DNRatioGenerator<StringSet>(args.num_strings, args.len_strings, args.DN_ratio);
     } else if constexpr (std::is_same_v<StringGenerator, FileDistributer<StringSet>>) {
         check_path_exists(args.path);
         return FileDistributer<StringSet>(args.path);
