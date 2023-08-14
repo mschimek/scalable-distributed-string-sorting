@@ -12,8 +12,8 @@ struct GeneratedStringsArgs {
     size_t len_strings;
     size_t len_strings_min;
     size_t len_strings_max;
-    double DN_ratio = 0.5;
-    std::string path = "";
+    double DN_ratio;
+    std::string path;
 };
 
 template <typename StringGenerator, typename StringSet>

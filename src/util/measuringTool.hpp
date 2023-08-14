@@ -86,13 +86,21 @@ public:
         }
     }
 
-    void writeToStream(std::ostream& stream) {
+    void write_on_root(std::ostream& stream) {
+        auto write_records = [this](std::ostream& stream, auto const& records) {
+            if (comm.is_root()) {
+                for (auto const& record: records) {
+                    stream << state.prefix << " " << record << "\n";
+                }
+            }
+        };
+
         disable();
-        auto records = state.non_timer.collect(comm);
+        auto records = state.non_timer.collect_on_root(comm);
         write_records(stream, records.first);
         write_records(stream, records.second);
-        write_records(stream, state.comm_volume.collect(comm));
-        write_records(stream, state.timer.collect(comm));
+        write_records(stream, state.comm_volume.collect_on_root(comm));
+        write_records(stream, state.timer.collect_on_root(comm));
         enable();
     }
 
@@ -119,12 +127,6 @@ private:
 
     Communicator comm;
     State state;
-
-    void write_records(std::ostream& stream, auto const& records) {
-        for (auto const& record: records) {
-            stream << state.prefix << " " << record << "\n";
-        }
-    }
 };
 
 } // namespace measurement

@@ -11,7 +11,7 @@
 #include <numeric>
 #include <vector>
 
-#include <kamping/collectives/allgather.hpp>
+#include <kamping/collectives/gather.hpp>
 #include <kamping/named_parameters.hpp>
 
 #include "mpi/communicator.hpp"
@@ -25,12 +25,13 @@ class NonTimer {
 public:
     struct OutputFormat {
         Record record;
-        size_t min, max, median, avg, sum;
+        Summary<size_t> summary;
+        size_t median;
 
         friend std::ostream& operator<<(std::ostream& stream, OutputFormat const& output) {
-            return stream << Result << output.record << " min=" << output.min
-                          << " max=" << output.max << " median=" << output.median
-                          << " avg=" << output.avg << " sum=" << output.sum;
+            return stream << Result << output.record << " min=" << output.summary.min
+                          << " max=" << output.summary.max << " median=" << output.median
+                          << " avg=" << output.summary.avg << " sum=" << output.summary.sum;
         }
     };
 
@@ -48,28 +49,26 @@ public:
     NonTimer() { entries.reserve(allocationSize); }
 
     std::pair<std::vector<OutputFormat>, std::vector<OutputFormatSingle>>
-    collect(Communicator const& comm) {
+    collect_on_root(Communicator const& comm) {
         using namespace kamping;
         std::vector<OutputFormat> output;
         std::vector<OutputFormatSingle> output_single;
 
         for (auto const& [record, value, collect]: entries) {
-            if (collect) {
-                auto result = comm.allgather(send_buf(value.getValue()));
-                auto values = result.extract_recv_buffer();
-                auto begin = values.begin(), end = values.end();
+            std::vector<size_t> values;
+            comm.gather(send_buf(value.getValue()), root(comm.root()), recv_buf(values));
 
-                auto min = *std::min_element(begin, end);
-                auto max = *std::max_element(begin, end);
-                auto sum = std::accumulate(begin, end, size_t{0});
-                auto median = begin + std::midpoint(size_t{0}, values.size());
-                std::nth_element(begin, median, end);
-                auto avg = sum / comm.size();
-                output.emplace_back(record, min, max, *median, avg, sum);
-            } else {
-                auto values = comm.allgather(send_buf(value)).extract_recv_buffer();
-                for (auto proc = 0; auto const& proc_value: values) {
-                    output_single.emplace_back(record, proc++, proc_value);
+            if (comm.is_root()) {
+                if (collect) {
+                    auto summary = describe<size_t>(values.begin(), values.end());
+                    auto median = get_median<size_t>(values.begin(), values.end());
+                    output.emplace_back(record, summary, median);
+                } else {
+                    Value value_{value};
+                    for (size_t proc = 0; auto const& proc_value: values) {
+                        value_.setValue(proc_value);
+                        output_single.emplace_back(record, proc++, value_);
+                    }
                 }
             }
         }

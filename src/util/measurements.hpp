@@ -3,13 +3,41 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <iostream>
+#include <iterator>
+#include <numeric>
 #include <ostream>
 #include <string>
+#include <vector>
 
 namespace dss_mehnert {
 namespace measurement {
+
+template <typename T>
+struct Summary {
+    T min, max, avg, sum;
+};
+
+template <typename T, typename InputIt>
+inline Summary<T> describe(InputIt begin, InputIt end) {
+    auto size = static_cast<size_t>(std::distance(begin, end));
+
+    auto sum = std::accumulate(begin, end, size_t{0});
+    auto avg = sum / size;
+
+    auto [min, max] = std::minmax_element(begin, end);
+    return {*min, *max, avg, sum};
+}
+
+template <typename T, typename InputIt>
+inline T get_median(InputIt begin, InputIt end) {
+    auto size = static_cast<size_t>(std::distance(begin, end));
+    auto median = begin + std::midpoint(size_t{0}, size);
+    std::nth_element(begin, median, end);
+    return *median;
+}
 
 struct ostream_wrapper {
     std::ostream& stream;

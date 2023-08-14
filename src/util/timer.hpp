@@ -15,7 +15,7 @@
 #include <tuple>
 #include <vector>
 
-#include <kamping/collectives/allreduce.hpp>
+#include <kamping/collectives/gather.hpp>
 #include <kamping/environment.hpp>
 #include <kamping/mpi_ops.hpp>
 #include <kamping/named_parameters.hpp>
@@ -51,14 +51,19 @@ public:
     struct OutputFormat {
         Key key;
         Value value;
-        uint64_t min_time, max_time, avg_time;
-        uint64_t min_loss, max_loss, avg_loss;
+        Summary<size_t> summary_time;
+        Summary<size_t> summary_loss;
 
         friend std::ostream& operator<<(std::ostream& stream, OutputFormat const& output) {
             return stream << Result << output.key << " " << Result << output.value
-                          << " min_time=" << output.min_time << " max_time=" << output.max_time
-                          << " avg_time=" << output.avg_time << " min_loss=" << output.min_loss
-                          << " max_loss=" << output.max_loss << " avg_loss=" << output.avg_loss;
+                          << " min_time=" << output.summary_time.min
+                          << " max_time=" << output.summary_time.max
+                          << " avg_time=" << output.summary_time.avg
+                          << " sum_time=" << output.summary_time.sum
+                          << " min_loss=" << output.summary_loss.min
+                          << " max_loss=" << output.summary_loss.max
+                          << " avg_loss=" << output.summary_loss.avg
+                          << " sum_loss=" << output.summary_loss.sum;
         }
     };
 
@@ -107,7 +112,7 @@ public:
         total_time_.emplace(key, elapsed_total_time.count());
     }
 
-    std::vector<OutputFormat> collect(Communicator const& comm) {
+    std::vector<OutputFormat> collect_on_root(Communicator const& comm) {
         using namespace kamping;
 
         std::vector<OutputFormat> output;
@@ -115,18 +120,16 @@ public:
         for (auto& [key, value]: key_value_) {
             auto time = expect_key(active_time_, key)->second;
             auto loss = get_loss(key);
-            auto size = comm.size();
 
-            output.push_back({
-                .key = key,
-                .value = value,
-                .min_time = comm.allreduce_single(send_buf(time), op(ops::min<>{})),
-                .max_time = comm.allreduce_single(send_buf(time), op(ops::max<>{})),
-                .avg_time = comm.allreduce_single(send_buf(time), op(ops::plus<>{})) / size,
-                .min_loss = comm.allreduce_single(send_buf(loss), op(ops::min<>{})),
-                .max_loss = comm.allreduce_single(send_buf(loss), op(ops::max<>{})),
-                .avg_loss = comm.allreduce_single(send_buf(loss), op(ops::plus<>{})) / size,
-            });
+            std::vector<size_t> recv_time, recv_loss;
+            comm.gather(send_buf(time), root(comm.root()), recv_buf(recv_time));
+            comm.gather(send_buf(loss), root(comm.root()), recv_buf(recv_loss));
+
+            if (comm.is_root()) {
+                auto summary_time = describe<size_t>(recv_time.begin(), recv_time.end());
+                auto summary_loss = describe<size_t>(recv_loss.begin(), recv_loss.end());
+                output.emplace_back(key, value, summary_time, summary_loss);
+            }
         }
         return output;
     }

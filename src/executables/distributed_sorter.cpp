@@ -128,7 +128,7 @@ void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicat
         auto num_sorted_chars = sorted_container.char_size();
         auto num_sorted_strs = sorted_container.size();
 
-        bool is_sorted = dss_schimek::is_complete_and_sorted(
+        bool is_sorted = is_complete_and_sorted(
             sorted_str_ptr,
             num_input_chars,
             num_sorted_chars,
@@ -144,11 +144,7 @@ void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicat
         }
     }
 
-    std::stringstream buffer;
-    measuring_tool.writeToStream(buffer);
-    if (comm.is_root()) {
-        std::cout << buffer.str() << std::endl;
-    }
+    measuring_tool.write_on_root(std::cout);
     measuring_tool.reset();
 }
 
@@ -240,11 +236,7 @@ void run_prefix_doubling(
         }
     }
 
-    std::stringstream buffer;
-    measuring_tool.writeToStream(buffer);
-    if (comm.is_root()) {
-        std::cout << buffer.str() << std::endl;
-    }
+    measuring_tool.write_on_root(std::cout);
     measuring_tool.reset();
 }
 

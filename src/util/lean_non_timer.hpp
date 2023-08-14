@@ -9,7 +9,7 @@
 #include <string_view>
 #include <vector>
 
-#include <kamping/collectives/allreduce.hpp>
+#include <kamping/collectives/reduce.hpp>
 #include <kamping/named_parameters.hpp>
 
 #include "mpi/communicator.hpp"
@@ -34,16 +34,19 @@ public:
         records.reserve(allocationSize);
     }
 
-    std::vector<OutputFormat> collect(Communicator const& comm) const {
+    std::vector<OutputFormat> collect_on_root(Communicator const& comm) const {
         using namespace kamping;
 
         std::vector<OutputFormat> output;
         output.reserve(records.size());
         for (Record record: records) {
             auto local_value = record.getValue();
-            auto sum = comm.allreduce_single(send_buf(local_value), op(ops::plus<>{}));
-            record.setValue(sum);
-            output.emplace_back(description, record);
+            auto result = comm.reduce(send_buf(local_value), op(ops::plus<>{}));
+
+            if (comm.is_root()) {
+                record.setValue(result.extract_recv_buffer()[0]);
+                output.emplace_back(description, record);
+            }
         }
         return output;
     }
