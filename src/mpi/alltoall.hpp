@@ -203,8 +203,10 @@ namespace _internal {
 template <typename LcpIter, typename IntervalIter>
 inline void set_interval_start_lcp(LcpIter lcp_it, IntervalIter begin, IntervalIter end) {
     for (auto it = begin; it != end; ++it) {
-        *lcp_it = 0;
-        std::advance(lcp_it, *it);
+        if (*it != 0) {
+            *lcp_it = 0;
+            std::advance(lcp_it, *it);
+        }
     }
 }
 
@@ -439,6 +441,7 @@ public:
         using dss_mehnert::measurement::MeasuringTool;
         auto& measuring_tool = MeasuringTool::measuringTool();
 
+        // todo this is wrong
         if (container.empty()) {
             return {};
         }

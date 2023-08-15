@@ -210,8 +210,8 @@ public:
     }
 
     void deleteAll() {
-        this->deleteRawStrings();
-        this->deleteStrings();
+        deleteRawStrings();
+        deleteStrings();
     }
 
     bool operator==(Container const& other) { return this->raw_strings() == other.raw_strings(); }

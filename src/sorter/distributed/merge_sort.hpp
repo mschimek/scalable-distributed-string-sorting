@@ -48,6 +48,9 @@ protected:
     ) {
         using partition::compute_partition;
 
+        auto const& comm_orig = level.comm_orig;
+        auto const& comm_exchange = level.comm_exchange;
+
         auto string_ptr = container.make_string_lcp_ptr();
         auto num_groups = level.num_groups();
         auto group_size = level.group_size();
@@ -61,13 +64,11 @@ protected:
             return sample::SampleParams{num_groups, 2, args...};
         };
         auto params = std::apply(get_params, extra_sample_args);
-        auto const& comm_orig = level.comm_orig;
         auto interval_sizes = compute_partition<SamplePolicy>(string_ptr, params, comm_orig);
         measuring_tool_.stop("sort_globally", "compute_partition");
 
         measuring_tool_.start("sort_globally", "exchange_and_merge");
         auto send_counts = Subcommunicators::send_counts(interval_sizes, level);
-        auto const& comm_exchange = level.comm_exchange;
         auto sorted_container = exchange_and_merge(
             std::move(container),
             send_counts,
