@@ -41,11 +41,12 @@ public:
     }
 
     void addRawCommunication(size_t value, std::string_view description) {
-        // todo should this respect `state.disabled`?
-        if (state.verbose && is_root_) {
-            std::cout << description << std::endl;
+        if (!state.comm_volume_disabled) {
+            if (state.verbose && is_root_) {
+                std::cout << description << std::endl;
+            }
+            state.comm_volume.add({state.phase, value});
         }
-        state.comm_volume.add({state.phase, value});
     }
 
     void start(std::string_view description) {
@@ -107,8 +108,8 @@ public:
     }
 
     void reset() { state = {}; }
-    bool isEnabled() { return !state.disabled; }
-    void setEnabled(bool enable) { state.disabled = !enable; }
+    void enableCommVolume() { state.comm_volume_disabled = false; }
+    void disableCommVolume() { state.comm_volume_disabled = true; }
     void enable() { state.disabled = false; }
     void disable() { state.disabled = true; }
     void setVerbose(bool value) { state.verbose = value; }
@@ -119,6 +120,7 @@ public:
 private:
     struct State {
         bool disabled = false;
+        bool comm_volume_disabled = false;
         bool verbose = false;
         std::string prefix = "";
         std::string phase = "none";

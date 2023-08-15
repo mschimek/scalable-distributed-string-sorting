@@ -94,6 +94,7 @@ void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicat
     auto& measuring_tool = MeasuringTool::measuringTool();
     measuring_tool.setPrefix(prefix);
     measuring_tool.setVerbose(false);
+    measuring_tool.disableCommVolume();
 
     auto input_container = generate_strings<StringGenerator, StringSet>(args, comm);
     auto num_input_chars = input_container.char_size();
@@ -108,6 +109,7 @@ void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicat
     auto pred = [&](auto const& group_size) { return group_size < comm.size(); };
     auto first_level = std::find_if(args.levels.begin(), args.levels.end(), pred);
 
+    measuring_tool.enableCommVolume();
     comm.barrier();
 
     measuring_tool.start("none", "sorting_overall");
@@ -176,6 +178,8 @@ void run_prefix_doubling(
     measuring_tool.setPrefix(prefix);
     measuring_tool.setVerbose(false);
 
+    measuring_tool.disableCommVolume();
+
     auto input_container = generate_strings<StringGenerator, StringSet>(args, comm);
     auto num_input_chars = input_container.char_size();
     auto num_input_strs = input_container.size();
@@ -188,6 +192,8 @@ void run_prefix_doubling(
     // skip unused levels for multi-level merge sort
     auto pred = [&](auto const& group_size) { return group_size < comm.size(); };
     auto first_level = std::find_if(args.levels.begin(), args.levels.end(), pred);
+
+    measuring_tool.enableCommVolume();
 
     comm.barrier();
     measuring_tool.start("none", "sorting_overall");
@@ -207,6 +213,8 @@ void run_prefix_doubling(
     auto permutation = merge_sort.sort(std::move(input_container), comms);
 
     measuring_tool.stop("none", "sorting_overall", comm);
+    measuring_tool.disable();
+    measuring_tool.disableCommVolume();
 
     if ((args.check || args.check_exhaustive) && comm.size() > 1) {
         auto complete_strings_cont = dss_mehnert::sorter::apply_permutation(
