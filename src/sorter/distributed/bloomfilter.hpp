@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <bitset>
+#include <cstddef>
 #include <functional>
 #include <iostream>
 #include <iterator>
@@ -356,99 +357,86 @@ public:
 
 template <typename GolombPolicy>
 struct FindDuplicates {
-    using DataType = HashPEIndex;
-
     static inline std::vector<size_t>
-    findDuplicates(std::vector<HashPEIndex>& hashPEIndices, RecvData const& recvData) {
+    findDuplicates(std::vector<HashPEIndex>& hash_triples, RecvData const& data) {
         using Iterator = std::vector<HashPEIndex>::iterator;
         using IteratorPair = std::pair<Iterator, Iterator>;
 
-        auto& measuringTool = measurement::MeasuringTool::measuringTool();
-
         mpi::environment env;
 
-        measuringTool.add(hashPEIndices.size(), "bloomfilter_recvHashValues");
-        measuringTool.start("bloomfilter_findDuplicatesOverallIntern");
-        measuringTool.start("bloomfilter_findDuplicatesSetup");
-        std::vector<IteratorPair> iteratorPairs;
-        size_t elementsToMerge = std::accumulate(
-            recvData.intervalSizes.begin(),
-            recvData.intervalSizes.end(),
-            size_t{0}
-        );
-        std::vector<HashPEIndex> mergedElements(elementsToMerge);
-        Iterator it = hashPEIndices.begin();
+        auto& measuring_tool = measurement::MeasuringTool::measuringTool();
+        auto const& interval_sizes = data.intervalSizes;
+        auto const& global_offsets = data.globalOffsets;
 
-        for (size_t i = 0; i < recvData.intervalSizes.size(); ++i) {
-            iteratorPairs.emplace_back(it, it + recvData.intervalSizes[i]);
-            it += recvData.intervalSizes[i];
+        measuring_tool.add(hash_triples.size(), "bloomfilter_recvHashValues");
+        measuring_tool.start("bloomfilter_findDuplicatesOverallIntern");
+        measuring_tool.start("bloomfilter_findDuplicatesSetup");
+
+        auto num_elems = std::accumulate(interval_sizes.begin(), interval_sizes.end(), size_t{0});
+
+        std::vector<IteratorPair> iter_pairs;
+        for (auto it = hash_triples.begin(); auto const& interval: interval_sizes) {
+            iter_pairs.emplace_back(it, it + interval);
+            it += interval;
         }
-        measuringTool.stop("bloomfilter_findDuplicatesSetup");
+        measuring_tool.stop("bloomfilter_findDuplicatesSetup");
 
-        measuringTool.start("bloomfilter_findDuplicatesMerge");
+        measuring_tool.start("bloomfilter_findDuplicatesMerge");
+        std::vector<HashPEIndex> merged_triples(num_elems);
         tlx::multiway_merge(
-            iteratorPairs.begin(),
-            iteratorPairs.end(),
-            mergedElements.begin(),
-            elementsToMerge
+            iter_pairs.begin(),
+            iter_pairs.end(),
+            merged_triples.begin(),
+            num_elems
         );
-        measuringTool.stop("bloomfilter_findDuplicatesMerge");
+        measuring_tool.stop("bloomfilter_findDuplicatesMerge");
 
-        measuringTool.start("bloomfilter_findDuplicatesFind");
-        std::vector<std::vector<size_t>> result_sets(recvData.intervalSizes.size());
-        std::vector<size_t> counters(recvData.intervalSizes.size(), 0);
+        measuring_tool.start("bloomfilter_findDuplicatesFind");
+        std::vector<std::vector<size_t>> result_sets(interval_sizes.size());
+        std::vector<size_t> counters(global_offsets.begin(), global_offsets.end());
 
-        HashPEIndex prevHashTriple = mergedElements.empty() ? HashPEIndex{0, 0} : mergedElements[0];
-        bool duplicate = false;
-
-        // todo rewrite with iterators
-        for (size_t i = 1; i < mergedElements.size(); ++i) {
-            const HashPEIndex curHashTriple = mergedElements[i];
-            if (prevHashTriple.hashValue == curHashTriple.hashValue) {
-                result_sets[prevHashTriple.PEIndex].push_back(counters[prevHashTriple.PEIndex]++);
-                duplicate = true;
-            } else if (duplicate) {
-                result_sets[prevHashTriple.PEIndex].push_back(counters[prevHashTriple.PEIndex]++);
-                duplicate = false;
-            } else {
-                ++counters[prevHashTriple.PEIndex];
+        if (!merged_triples.empty()) {
+            bool duplicate = false;
+            auto prev = merged_triples.begin();
+            for (auto curr = prev + 1; curr != merged_triples.end(); ++prev, ++curr) {
+                auto idx = counters[prev->PEIndex]++;
+                if (prev->hashValue == curr->hashValue) {
+                    result_sets[prev->PEIndex].push_back(idx);
+                    duplicate = true;
+                } else if (duplicate) {
+                    result_sets[prev->PEIndex].push_back(idx);
+                    duplicate = false;
+                }
             }
-            prevHashTriple = curHashTriple;
-        }
-
-        if (duplicate)
-            result_sets[prevHashTriple.PEIndex].push_back(counters[prevHashTriple.PEIndex]++);
-
-        std::vector<size_t> sendBuffer;
-        sendBuffer.reserve(elementsToMerge);
-        std::vector<size_t> sendCounts_;
-        // write back to PEs
-        for (size_t i = 0; i < result_sets.size(); ++i) {
-            sendCounts_.push_back(result_sets[i].size());
-            for (size_t j = 0; j < result_sets[i].size(); ++j) {
-                sendBuffer.push_back(result_sets[i][j] + recvData.globalOffsets[i]);
+            if (duplicate) {
+                result_sets[prev->PEIndex].push_back(counters[prev->PEIndex]++);
             }
         }
-        measuringTool.stop("bloomfilter_findDuplicatesFind");
 
-        size_t totalNumSendDuplicates =
-            std::accumulate(sendCounts_.begin(), sendCounts_.end(), static_cast<size_t>(0u));
-        measuringTool.add(
-            totalNumSendDuplicates * sizeof(size_t),
-            "bloomfilter_findDuplicatesSendDups"
-        );
-        measuringTool.start("bloomfilter_findDuplicatesSendDups");
-        int mpiSmallTypes = 0;
-        if (totalNumSendDuplicates > 0)
-            mpiSmallTypes = 1;
-        bool dupsToSend = (0 != mpi::allreduce_max(mpiSmallTypes, env));
+        std::vector<size_t> send_counts(result_sets.size());
+        auto get_size = std::size<std::vector<size_t>>;
+        std::transform(result_sets.begin(), result_sets.end(), send_counts.begin(), get_size);
+
+        auto num_duplicates = std::accumulate(send_counts.begin(), send_counts.end(), size_t{0});
+        measuring_tool.add(num_duplicates * sizeof(size_t), "bloomfilter_findDuplicatesSendDups");
+
+        std::vector<size_t> send_buf(num_duplicates);
+        for (auto dest_it = send_buf.begin(); auto const& set: result_sets) {
+            dest_it = std::copy(set.begin(), set.end(), dest_it);
+        }
+        measuring_tool.stop("bloomfilter_findDuplicatesFind");
+
+        measuring_tool.start("bloomfilter_findDuplicatesSendDups");
+        int any_local_dups = (num_duplicates > 0);
+        bool any_dups = (0 != mpi::allreduce_max(any_local_dups, env));
+
         std::vector<size_t> duplicates;
-        if (dupsToSend) {
-            duplicates =
-                GolombPolicy::alltoallv(sendBuffer, sendCounts_, recvData.intervalSizes, env);
+        if (any_dups) {
+            duplicates = GolombPolicy::alltoallv(send_buf, send_counts, interval_sizes, env);
         }
-        measuringTool.stop("bloomfilter_findDuplicatesSendDups");
-        measuringTool.stop("bloomfilter_findDuplicatesOverallIntern");
+
+        measuring_tool.stop("bloomfilter_findDuplicatesSendDups");
+        measuring_tool.stop("bloomfilter_findDuplicatesOverallIntern");
 
         return duplicates;
     }
@@ -498,27 +486,6 @@ struct FindDuplicates {
         );
 
         return mergedElements;
-    }
-    static std::vector<size_t> getIndicesOfDuplicates(
-        const size_t size,
-        std::vector<size_t>& localDuplicates,
-        std::vector<size_t>& remoteDuplicates,
-        std::vector<HashStringIndex> const& originalMapping
-    ) {
-        std::vector<size_t> indicesOfAllDuplicates(localDuplicates);
-        mpi::environment env;
-        // indicesOfAllDuplicates.reserve(localDuplicates.size() +
-        // remoteDuplicates.size());
-        for (size_t i = 0; i < remoteDuplicates.size(); ++i) {
-            const size_t curIndex = remoteDuplicates[i];
-            bool isAlsoLocalDuplicate = originalMapping[curIndex].isLocalDuplicateButSendAnyway;
-            if (!isAlsoLocalDuplicate) {
-                const size_t stringIndex = originalMapping[curIndex].stringIndex;
-                indicesOfAllDuplicates.push_back(stringIndex);
-            }
-        }
-
-        return indicesOfAllDuplicates;
     }
 };
 
