@@ -16,6 +16,9 @@
 
 #include <bits/iterator_concepts.h>
 #include <ips4o.hpp>
+#include <kamping/collectives/allreduce.hpp>
+#include <kamping/collectives/alltoall.hpp>
+#include <kamping/named_parameters.hpp>
 #include <tlx/algorithm/multiway_merge.hpp>
 #include <tlx/die.hpp>
 #include <tlx/siphash.hpp>
@@ -26,11 +29,16 @@
 #include "hash/xxhash.hpp"
 #include "mpi/allgather.hpp"
 #include "mpi/alltoall.hpp"
+#include "mpi/communicator.hpp"
 #include "mpi/environment.hpp"
 #include "strings/stringtools.hpp"
 #include "util/measuringTool.hpp"
 
-namespace dss_schimek {
+namespace dss_mehnert {
+namespace bloomfilter {
+
+// todo remove
+using namespace dss_schimek;
 
 struct Duplicate {
     size_t index;
@@ -258,66 +266,57 @@ struct AllToAllHashesGolomb {
     static std::string getName() { return "sequentialGolombEncoding"; }
 };
 
-inline std::vector<size_t> computeIntervalSizes(
-    std::vector<size_t> const& hashes, size_t bloomFilterSize, mpi::environment env
-) {
-    std::vector<size_t> intervals;
-    intervals.reserve(env.size());
-
-    auto current_pos = hashes.begin();
-    for (size_t i = 0; i + 1 < env.size(); ++i) {
-        size_t upper_limit = (i + 1) * (bloomFilterSize / env.size()) - 1;
-        auto pos = std::upper_bound(current_pos, hashes.end(), upper_limit);
-        intervals.push_back(pos - current_pos);
-        current_pos = pos;
-    }
-    intervals.push_back(hashes.end() - current_pos);
-
-    return intervals;
-}
-
 struct RecvData {
     std::vector<size_t> data;
-    std::vector<size_t> intervalSizes;
-    std::vector<size_t> globalOffsets;
+    std::vector<size_t> interval_sizes;
+    std::vector<size_t> global_offsets;
 };
 
 template <typename SendPolicy>
 class SendOnlyHashesToFilter : private SendPolicy {
 public:
-    static RecvData
-    sendToFilter(std::vector<HashStringIndex> const& hashes, size_t bloomfilterSize) {
-        mpi::environment env;
-
+    static RecvData sendToFilter(
+        std::vector<HashStringIndex> const& hashes,
+        size_t filter_size,
+        dss_mehnert::Communicator const& comm
+    ) {
+        namespace kmp = kamping;
         auto& measuringTool = measurement::MeasuringTool::measuringTool();
 
         measuringTool.start("bloomfilter_sendToFilterSetup");
-        std::vector<size_t> sendValues(hashes.size());
+        std::vector<size_t> send_values(hashes.size());
         auto get_hash = [](auto const& x) { return x.hashValue; };
-        std::transform(hashes.begin(), hashes.end(), sendValues.begin(), get_hash);
+        std::transform(hashes.begin(), hashes.end(), send_values.begin(), get_hash);
 
-        std::vector<size_t> intervalSizes = computeIntervalSizes(sendValues, bloomfilterSize, env);
+        auto interval_sizes = computeIntervalSizes(send_values, filter_size, comm.size());
 
-        std::vector<size_t> offsets(intervalSizes.size());
-        std::exclusive_scan(intervalSizes.begin(), intervalSizes.end(), offsets.begin(), size_t{0});
-        assert_equal(offsets.back() + intervalSizes.back(), hashes.size());
+        std::vector<size_t> offsets(interval_sizes.size());
+        std::exclusive_scan(
+            interval_sizes.begin(),
+            interval_sizes.end(),
+            offsets.begin(),
+            size_t{0}
+        );
+        assert_equal(offsets.back() + interval_sizes.back(), hashes.size());
 
-        offsets = mpi::alltoall(offsets, env);
+        auto offset_result = comm.alltoall(kmp::send_buf(offsets));
+        auto global_offsets = offset_result.extract_recv_buffer();
 
-        auto recvIntervalSizes = mpi::alltoall(intervalSizes, env);
+        auto interval_resut = comm.alltoall(kmp::send_buf(interval_sizes));
+        auto recv_interval_sizes = interval_resut.extract_recv_buffer();
         measuringTool.stop("bloomfilter_sendToFilterSetup");
 
         if constexpr (std::is_same_v<SendPolicy, AllToAllHashesNaive>) {
             measuringTool.start("bloomfilter_sendEncodedValuesOverall");
-            auto result = SendPolicy::alltoallv(sendValues, intervalSizes, env);
+            auto result = SendPolicy::alltoallv(send_values, interval_sizes, comm);
             measuringTool.stop("bloomfilter_sendEncodedValuesOverall");
-            return {std::move(result), std::move(recvIntervalSizes), std::move(offsets)};
+            return {std::move(result), std::move(recv_interval_sizes), std::move(offsets)};
 
         } else if constexpr (std::is_same_v<SendPolicy, AllToAllHashesGolomb>) {
             measuringTool.start("bloomfilter_sendEncodedValuesOverall");
-            auto result = SendPolicy::alltoallv(sendValues, intervalSizes, bloomfilterSize, env);
+            auto result = SendPolicy::alltoallv(send_values, interval_sizes, filter_size, comm);
             measuringTool.stop("bloomfilter_sendEncodedValuesOverall");
-            return {std::move(result), std::move(recvIntervalSizes), std::move(offsets)};
+            return {std::move(result), std::move(recv_interval_sizes), std::move(offsets)};
 
         } else {
             []<bool flag = false> { static_assert(flag, "unexpected SendPolicy"); }
@@ -325,32 +324,53 @@ public:
         }
     }
 
-    static inline std::vector<HashPEIndex> addPEIndex(RecvData const& recv_data) {
+    static std::vector<HashPEIndex> addPEIndex(RecvData const& recv_data) {
         std::vector<HashPEIndex> hash_pairs(recv_data.data.size());
 
         auto hashes = recv_data.data.begin();
         auto dest = hash_pairs.begin();
-        for (size_t PE_idx = 0; auto const& interval: recv_data.intervalSizes) {
+        for (size_t PE_idx = 0; auto const& interval: recv_data.interval_sizes) {
             auto hash_pair = [idx = PE_idx++](auto const& hash) { return HashPEIndex{hash, idx}; };
             dest = std::transform(hashes, hashes + interval, dest, hash_pair);
             hashes += interval;
         }
         return hash_pairs;
     }
+
+private:
+    static std::vector<size_t> computeIntervalSizes(
+        std::vector<size_t> const& hashes, size_t bloomFilterSize, size_t num_intervals
+    ) {
+        std::vector<size_t> intervals;
+        intervals.reserve(num_intervals);
+
+        auto current_pos = hashes.begin();
+        for (size_t i = 0; i + 1 < num_intervals; ++i) {
+            size_t upper_limit = (i + 1) * (bloomFilterSize / num_intervals) - 1;
+            auto pos = std::upper_bound(current_pos, hashes.end(), upper_limit);
+            intervals.push_back(pos - current_pos);
+            current_pos = pos;
+        }
+        intervals.push_back(hashes.end() - current_pos);
+
+        return intervals;
+    }
 };
 
 template <typename GolombPolicy>
 struct FindDuplicates {
-    static inline std::vector<size_t>
-    findDuplicates(std::vector<HashPEIndex>& hash_triples, RecvData const& data) {
+    static inline std::vector<size_t> findDuplicates(
+        std::vector<HashPEIndex>& hash_triples,
+        RecvData const& data,
+        dss_mehnert::Communicator const& comm
+    ) {
+        namespace kmp = kamping;
         using Iterator = std::vector<HashPEIndex>::iterator;
         using IteratorPair = std::pair<Iterator, Iterator>;
 
-        mpi::environment env;
-
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
-        auto const& interval_sizes = data.intervalSizes;
-        auto const& global_offsets = data.globalOffsets;
+        auto const& interval_sizes = data.interval_sizes;
+        auto const& global_offsets = data.global_offsets;
 
         measuring_tool.add(hash_triples.size(), "bloomfilter_recvHashValues");
         measuring_tool.start("bloomfilter_findDuplicatesOverallIntern");
@@ -411,12 +431,13 @@ struct FindDuplicates {
         measuring_tool.stop("bloomfilter_findDuplicatesFind");
 
         measuring_tool.start("bloomfilter_findDuplicatesSendDups");
-        int any_local_dups = (num_duplicates > 0);
-        bool any_dups = (0 != mpi::allreduce_max(any_local_dups, env));
+        bool any_dups = num_duplicates > 0;
+        auto result = comm.allreduce(kmp::send_buf({any_dups}), kmp::op(std::logical_or<>{}));
+        auto any_global_dups = result.extract_recv_buffer()[0];
 
         std::vector<size_t> duplicates;
-        if (any_dups) {
-            duplicates = GolombPolicy::alltoallv(send_buf, send_counts, interval_sizes, env);
+        if (any_global_dups) {
+            duplicates = GolombPolicy::alltoallv(send_buf, send_counts, interval_sizes, comm);
         }
 
         measuring_tool.stop("bloomfilter_findDuplicatesSendDups");
@@ -432,8 +453,6 @@ struct FindDuplicates {
         std::vector<size_t>& remote_dups,
         std::vector<HashStringIndex> const& originalMapping
     ) {
-        mpi::environment env;
-
         std::vector<size_t> sorted_remote_dups;
         sorted_remote_dups.reserve(remote_dups.size());
         for (auto const& idx: remote_dups) {
@@ -708,8 +727,6 @@ class BloomFilter {
     using CharIt = typename StringSet::CharIterator;
     using StringLcpPtr = typename tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
 
-    mpi::environment env;
-
     size_t size;
     std::vector<size_t> hashValues;
     size_t startDepth;
@@ -735,9 +752,12 @@ public:
         std::vector<size_t> eosCandidates;
     };
 
-    std::vector<size_t> filter(StringLcpPtr strptr, size_t depth, std::vector<size_t>& results) {
-        mpi::environment env;
-
+    std::vector<size_t> filter(
+        StringLcpPtr strptr,
+        size_t depth,
+        std::vector<size_t>& results,
+        dss_mehnert::Communicator const& comm
+    ) {
         auto& measuringTool = measurement::MeasuringTool::measuringTool();
 
         measuringTool.start("bloomfilter_generateHashStringIndices");
@@ -750,7 +770,7 @@ public:
         measuringTool.stop("bloomfilter_sortHashStringIndices");
 
         measuringTool.start("bloomfilter_indicesOfLocalDuplicates");
-        std::vector<size_t> local_dups = localDuplicateIndices(hash_idx_pairs);
+        auto local_dups = localDuplicateIndices(hash_idx_pairs);
         measuringTool.stop("bloomfilter_indicesOfLocalDuplicates");
 
         measuringTool.start("bloomfilter_ReducedHashStringIndices");
@@ -758,25 +778,24 @@ public:
         measuringTool.stop("bloomfilter_ReducedHashStringIndices");
 
         measuringTool.start("bloomfilter_sendHashStringIndices");
-        RecvData recvData = SendPolicy::sendToFilter(hash_idx_pairs, filter_size);
+        RecvData recvData = SendPolicy::sendToFilter(hash_idx_pairs, filter_size, comm);
         measuringTool.stop("bloomfilter_sendHashStringIndices");
 
         measuringTool.start("bloomfilter_addPEIndex");
-        std::vector<HashPEIndex> recvHashPEIndices = SendPolicy::addPEIndex(recvData);
+        auto recvHashPEIndices = SendPolicy::addPEIndex(recvData);
         measuringTool.stop("bloomfilter_addPEIndex");
 
-        std::vector<size_t> indicesOfRemoteDuplicates =
-            FindDuplicatesPolicy::findDuplicates(recvHashPEIndices, recvData);
+        auto indicesOfRemoteDuplicates =
+            FindDuplicatesPolicy::findDuplicates(recvHashPEIndices, recvData, comm);
 
         measuringTool.start("bloomfilter_getIndices");
-        std::vector<size_t> indicesOfAllDuplicates =
-            FindDuplicatesPolicy::getSortedIndicesOfDuplicates(
-                strptr.active().size(),
-                local_dups,
-                local_lcp_dups,
-                indicesOfRemoteDuplicates,
-                hash_idx_pairs
-            );
+        auto indicesOfAllDuplicates = FindDuplicatesPolicy::getSortedIndicesOfDuplicates(
+            strptr.active().size(),
+            local_dups,
+            local_lcp_dups,
+            indicesOfRemoteDuplicates,
+            hash_idx_pairs
+        );
         measuringTool.stop("bloomfilter_getIndices");
 
         measuringTool.start("bloomfilter_setDepth");
@@ -790,10 +809,9 @@ public:
         StringLcpPtr strptr,
         size_t depth,
         std::vector<size_t> const& candidates,
-        std::vector<size_t>& results
+        std::vector<size_t>& results,
+        dss_mehnert::Communicator const& comm
     ) {
-        mpi::environment env;
-
         auto& measuringTool = measurement::MeasuringTool::measuringTool();
 
         measuringTool.start("bloomfilter_generateHashStringIndices");
@@ -814,25 +832,24 @@ public:
         measuringTool.stop("bloomfilter_ReducedHashStringIndices");
 
         measuringTool.start("bloomfilter_sendHashStringIndices");
-        RecvData recvData = SendPolicy::sendToFilter(hash_idx_pairs, filter_size);
+        RecvData recvData = SendPolicy::sendToFilter(hash_idx_pairs, filter_size, comm);
         measuringTool.stop("bloomfilter_sendHashStringIndices");
 
         measuringTool.start("bloomfilter_addPEIndex");
-        std::vector<HashPEIndex> recvHashPEIndices = SendPolicy::addPEIndex(recvData);
+        auto recvHashPEIndices = SendPolicy::addPEIndex(recvData);
         measuringTool.stop("bloomfilter_addPEIndex");
 
-        std::vector<size_t> indicesOfRemoteDuplicates =
-            FindDuplicatesPolicy::findDuplicates(recvHashPEIndices, recvData);
+        auto indicesOfRemoteDuplicates =
+            FindDuplicatesPolicy::findDuplicates(recvHashPEIndices, recvData, comm);
 
         measuringTool.start("bloomfilter_getIndices");
-        std::vector<size_t> indicesOfAllDuplicates =
-            FindDuplicatesPolicy::getSortedIndicesOfDuplicates(
-                strptr.active().size(),
-                local_dups,
-                local_lcp_dups,
-                indicesOfRemoteDuplicates,
-                hash_idx_pairs
-            );
+        auto indicesOfAllDuplicates = FindDuplicatesPolicy::getSortedIndicesOfDuplicates(
+            strptr.active().size(),
+            local_dups,
+            local_lcp_dups,
+            indicesOfRemoteDuplicates,
+            hash_idx_pairs
+        );
         measuringTool.stop("bloomfilter_getIndices");
 
         measuringTool.start("bloomfilter_setDepth");
@@ -979,7 +996,6 @@ private:
                 hashValues[candidate] = hash;
             }
         }
-
         return {std::move(hash_idx_pairs), std::move(local_lcp_dups), std::move(eos_candidates)};
     }
 
@@ -988,4 +1004,5 @@ private:
     }
 };
 
-} // namespace dss_schimek
+} // namespace bloomfilter
+} // namespace dss_mehnert

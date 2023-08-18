@@ -157,12 +157,13 @@ private:
 
     std::vector<size_t>
     compute_distinguishing_prefixes(StringPEIndexPtr str_ptr, Communicator const& comm) {
-        using namespace kamping;
-        using BloomFilter = dss_schimek::BloomFilter<
+        namespace kmp = kamping;
+
+        using BloomFilter = bloomfilter::BloomFilter<
             StringPEIndexSet,
-            dss_schimek::FindDuplicates<GolombPolicy>,
-            dss_schimek::SendOnlyHashesToFilter<GolombPolicy>,
-            dss_schimek::XXHasher>;
+            bloomfilter::FindDuplicates<GolombPolicy>,
+            bloomfilter::SendOnlyHashesToFilter<GolombPolicy>,
+            bloomfilter::XXHasher>;
 
         this->measuring_tool_.start("bloomfilter_init");
         auto const& ss = str_ptr.active();
@@ -172,14 +173,14 @@ private:
 
         size_t round = 0;
         this->measuring_tool_.setRound(round);
-        std::vector<size_t> candidates = bloom_filter.filter(str_ptr, start_depth, results);
+        std::vector<size_t> candidates = bloom_filter.filter(str_ptr, start_depth, results, comm);
 
         for (size_t i = start_depth * 2; i < std::numeric_limits<size_t>::max(); i *= 2) {
             this->measuring_tool_.add(candidates.size(), "bloomfilter_numberCandidates");
             this->measuring_tool_.start("bloomfilter_allreduce");
-            bool no_candidates = candidates.empty();
-            bool all_empty = comm.allreduce(send_buf({no_candidates}), op(ops::logical_and<>{}))
-                                 .extract_recv_buffer()[0];
+            bool is_empty = candidates.empty();
+            auto result = comm.allreduce(kmp::send_buf({is_empty}), kmp::op(std::logical_and<>{}));
+            auto all_empty = result.extract_recv_buffer()[0];
             this->measuring_tool_.stop("bloomfilter_allreduce");
 
             if (all_empty) {
@@ -187,7 +188,7 @@ private:
             }
 
             this->measuring_tool_.setRound(++round);
-            candidates = bloom_filter.filter(str_ptr, i, candidates, results);
+            candidates = bloom_filter.filter(str_ptr, i, candidates, results, comm);
         }
         this->measuring_tool_.setRound(0);
         return results;
