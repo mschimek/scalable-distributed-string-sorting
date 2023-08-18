@@ -15,6 +15,8 @@
 #include <kamping/communicator.hpp>
 #include <mpi.h>
 
+#include "mpi/communicator.hpp"
+
 namespace dss_schimek {
 namespace mpi {
 
@@ -27,8 +29,16 @@ public:
     environment(environment&& other);
 
     template <template <typename...> typename Container, template <typename> typename... Plugins>
-    environment(kamping::Communicator<Container, Plugins...> comm)
-        : environment(comm.mpi_communicator()) {}
+    environment(kamping::Communicator<Container, Plugins...> const& comm)
+        : communicator_{comm.mpi_communicator()},
+          world_rank_{static_cast<uint32_t>(comm.rank())},
+          world_size_{static_cast<uint32_t>(comm.size())} {}
+
+    template <template <typename...> typename Container, template <typename> typename... Plugins>
+    environment(dss_mehnert::TrackingCommunicator<Container, Plugins...> const& comm)
+        : communicator_{comm.mpi_communicator()},
+          world_rank_{static_cast<uint32_t>(comm.rank())},
+          world_size_{static_cast<uint32_t>(comm.size())} {}
 
     environment& operator=(environment&& other);
 
