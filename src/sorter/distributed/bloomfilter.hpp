@@ -105,22 +105,27 @@ struct HashPEIndex {
 struct AllToAllHashesNaive {
     template <typename DataType>
     static std::vector<DataType> alltoallv(
-        std::vector<DataType>& sendData,
-        std::vector<size_t> const& intervalSizes,
-        std::vector<size_t> const&,
-        mpi::environment env
+        std::vector<DataType>& send_data,
+        std::vector<size_t> const& interval_sizes,
+        [[maybe_unused]] size_t filter_size,
+        Communicator const& comm
     ) {
-        return alltoallv(sendData, intervalSizes, env);
+        namespace kmp = kamping;
+
+        std::vector<int> send_counts{interval_sizes.begin(), interval_sizes.end()};
+        auto result = comm.alltoallv(kmp::send_buf(send_data), kmp::send_counts(send_counts));
+        return result.extract_recv_buffer();
     }
 
     template <typename DataType>
     static std::vector<DataType> alltoallv(
-        std::vector<DataType>& sendData,
-        std::vector<size_t> const& intervalSizes,
-        mpi::environment env
+        std::vector<DataType>& send_data,
+        std::vector<size_t> const& interval_sizes,
+        [[maybe_unused]] std::vector<size_t> const&,
+        Communicator const& comm
     ) {
-        using AllToAllv = mpi::AllToAllvCombined<mpi::AllToAllvSmall>;
-        return AllToAllv::alltoallv(sendData.data(), intervalSizes, env);
+        auto filter_size = std::numeric_limits<size_t>::max();
+        return alltoallv(send_data, interval_sizes, filter_size, comm);
     }
 
     static std::string getName() { return "noGolombEncoding"; }
@@ -129,9 +134,9 @@ struct AllToAllHashesNaive {
 struct AllToAllHashesGolomb {
     template <typename DataType>
     static inline std::vector<DataType> alltoallv(
-        std::vector<DataType>& sendData,
-        std::vector<size_t> const& intervalSizes,
-        const size_t bloomFilterSize,
+        std::vector<DataType>& send_data,
+        std::vector<size_t> const& interval_sizes,
+        size_t filter_size,
         mpi::environment env,
         const size_t b = 1048576
     ) {
@@ -142,23 +147,23 @@ struct AllToAllHashesGolomb {
         measuringTool.start("bloomfilter_golombEncoding");
         std::vector<size_t> encodedValuesSizes;
         std::vector<size_t> encodedValues;
-        encodedValues.reserve(sendData.size() + 2 + env.size());
+        encodedValues.reserve(send_data.size() + 2 + env.size());
 
-        auto begin = sendData.begin();
+        auto begin = send_data.begin();
 
-        if (intervalSizes.size() != env.size()) {
+        if (interval_sizes.size() != env.size()) {
             std::cout << "not same size" << std::endl;
             std::abort();
         }
-        for (size_t j = 0; j < intervalSizes.size(); ++j) {
-            auto const intervalSize = intervalSizes[j];
+        for (size_t j = 0; j < interval_sizes.size(); ++j) {
+            auto const intervalSize = interval_sizes[j];
             if (intervalSize == 0) {
                 encodedValuesSizes.push_back(0);
                 continue;
             }
             auto const end = begin + intervalSize;
             auto const encodedValuesSize = encodedValues.size();
-            size_t bFromBook = getB(bloomFilterSize / env.size(), intervalSize);
+            size_t bFromBook = getB(filter_size / env.size(), intervalSize);
             if (bFromBook == 1)
                 bFromBook = 20000000000;
             encodedValues.push_back(0); // dummy value
@@ -204,25 +209,25 @@ struct AllToAllHashesGolomb {
 
     template <typename DataType>
     static inline std::vector<DataType> alltoallv(
-        std::vector<DataType>& sendData,
-        std::vector<size_t> const& intervalSizes,
-        std::vector<size_t> const& intervalRange,
+        std::vector<DataType>& send_data,
+        std::vector<size_t> const& interval_sizes,
+        std::vector<size_t> const& interval_range,
         mpi::environment env
     ) {
         using AllToAllv = mpi::AllToAllvCombined<mpi::AllToAllvSmall>;
         std::vector<size_t> encodedValuesSizes;
         std::vector<size_t> encodedValues;
-        encodedValues.reserve(sendData.size() + 2 + env.size());
+        encodedValues.reserve(send_data.size() + 2 + env.size());
 
-        auto begin = sendData.begin();
+        auto begin = send_data.begin();
 
-        if (intervalSizes.size() != env.size()) {
+        if (interval_sizes.size() != env.size()) {
             std::cout << "not same size" << std::endl;
             std::abort();
         }
-        for (size_t j = 0; j < intervalSizes.size(); ++j) {
-            auto const intervalSize = intervalSizes[j];
-            auto const intervalMax = intervalRange[j];
+        for (size_t j = 0; j < interval_sizes.size(); ++j) {
+            auto const intervalSize = interval_sizes[j];
+            auto const intervalMax = interval_range[j];
             if (intervalSize == 0) {
                 encodedValuesSizes.push_back(0);
                 continue;
@@ -265,9 +270,27 @@ struct AllToAllHashesGolomb {
     static std::string getName() { return "sequentialGolombEncoding"; }
 };
 
-template <typename Communiuator>
-struct GridCommunicators {
-    std::vector<Communicator> comms;
+struct SipHasher {
+    static inline size_t hash(unsigned char const* str, size_t length, size_t filter_size) {
+        return tlx::siphash(str, length) % filter_size;
+    }
+};
+
+struct XXHasher {
+    static inline size_t hash(unsigned char const* str, size_t length, size_t filter_size) {
+        xxh::hash_state_t<64> hash_stream;
+        hash_stream.update(str, length);
+        xxh::hash_t<64> hashV = hash_stream.digest();
+        return hashV % filter_size;
+    }
+
+    static inline size_t
+    hash(unsigned char const* str, size_t length, size_t filter_size, size_t old_hash) {
+        xxh::hash_state_t<64> hash_stream;
+        hash_stream.update(str, length);
+        xxh::hash_t<64> new_hash = hash_stream.digest();
+        return (old_hash ^ new_hash) % filter_size;
+    }
 };
 
 struct RecvData {
@@ -308,22 +331,11 @@ public:
         auto recv_interval_sizes = interval_resut.extract_recv_buffer();
         measuringTool.stop("bloomfilter_sendToFilterSetup");
 
-        if constexpr (std::is_same_v<SendPolicy, AllToAllHashesNaive>) {
-            measuringTool.start("bloomfilter_sendEncodedValuesOverall");
-            auto result = SendPolicy::alltoallv(send_values, interval_sizes, comm);
-            measuringTool.stop("bloomfilter_sendEncodedValuesOverall");
-            return {std::move(result), std::move(recv_interval_sizes), std::move(offsets)};
+        measuringTool.start("bloomfilter_sendEncodedValuesOverall");
+        auto result = SendPolicy::alltoallv(send_values, interval_sizes, filter_size, comm);
+        measuringTool.stop("bloomfilter_sendEncodedValuesOverall");
 
-        } else if constexpr (std::is_same_v<SendPolicy, AllToAllHashesGolomb>) {
-            measuringTool.start("bloomfilter_sendEncodedValuesOverall");
-            auto result = SendPolicy::alltoallv(send_values, interval_sizes, filter_size, comm);
-            measuringTool.stop("bloomfilter_sendEncodedValuesOverall");
-            return {std::move(result), std::move(recv_interval_sizes), std::move(offsets)};
-
-        } else {
-            []<bool flag = false> { static_assert(flag, "unexpected SendPolicy"); }
-            ();
-        }
+        return {std::move(result), std::move(recv_interval_sizes), std::move(offsets)};
     }
 
     static std::vector<HashPEIndex> addPEIndex(RecvData const& recv_data) {
@@ -365,6 +377,7 @@ struct FindDuplicates {
         std::vector<HashPEIndex>& hash_triples, RecvData const& data, Communicator const& comm
     ) {
         namespace kmp = kamping;
+
         using Iterator = std::vector<HashPEIndex>::iterator;
         using IteratorPair = std::pair<Iterator, Iterator>;
 
@@ -445,67 +458,6 @@ struct FindDuplicates {
 
         return duplicates;
     }
-
-    static std::vector<size_t> getSortedIndicesOfDuplicates(
-        const size_t size,
-        std::vector<size_t>& local_hash_dups,
-        std::vector<size_t>& local_lcp_dups,
-        std::vector<size_t>& remote_dups,
-        std::vector<HashStringIndex> const& originalMapping
-    ) {
-        std::vector<size_t> sorted_remote_dups;
-        sorted_remote_dups.reserve(remote_dups.size());
-        for (auto const& idx: remote_dups) {
-            auto const& original = originalMapping[idx];
-            if (!original.isLocalDuplicateButSendAnyway) {
-                sorted_remote_dups.push_back(original.stringIndex);
-            }
-        }
-
-        ips4o::sort(sorted_remote_dups.begin(), sorted_remote_dups.end());
-        ips4o::sort(local_hash_dups.begin(), local_hash_dups.end());
-
-        using Iterator = std::vector<size_t>::iterator;
-        std::array<std::pair<Iterator, Iterator>, 3> iter_pairs{
-            {{local_hash_dups.begin(), local_hash_dups.end()},
-             {local_lcp_dups.begin(), local_lcp_dups.end()},
-             {sorted_remote_dups.begin(), sorted_remote_dups.end()}}};
-        size_t total_elems =
-            local_hash_dups.size() + local_lcp_dups.size() + sorted_remote_dups.size();
-
-        std::vector<size_t> merged_elems(total_elems);
-        tlx::multiway_merge(
-            iter_pairs.begin(),
-            iter_pairs.end(),
-            merged_elems.begin(),
-            total_elems
-        );
-        return merged_elems;
-    }
-};
-
-struct SipHasher {
-    static inline size_t hash(unsigned char const* str, size_t length, size_t bloomFilterSize) {
-        return tlx::siphash(str, length) % bloomFilterSize;
-    }
-};
-
-struct XXHasher {
-    static inline size_t hash(unsigned char const* str, size_t length, size_t bloomFilterSize) {
-        xxh::hash_state_t<64> hash_stream;
-        hash_stream.update(str, length);
-        xxh::hash_t<64> hashV = hash_stream.digest();
-        return hashV % bloomFilterSize;
-    }
-
-    static inline size_t hash(
-        unsigned char const* str, size_t length, size_t bloomFilterSize, const size_t oldHashValue
-    ) {
-        xxh::hash_state_t<64> hash_stream;
-        hash_stream.update(str, length);
-        xxh::hash_t<64> hashV = hash_stream.digest();
-        return (oldHashValue ^ hashV) % bloomFilterSize;
-    }
 };
 
 template <typename SendPolicy, typename FindDuplicatesPolicy>
@@ -529,6 +481,23 @@ public:
         return FindDuplicatesPolicy::findDuplicates(recvHashPEIndices, recv_data, comm);
     }
 };
+
+// template <typename Communiuator>
+// struct GridCommunicators {
+//     std::vector<Communicator> comms;
+// };
+//
+// template <typename SendPolicy, typename FindDuplicatesPolicy>
+// class MultiLevelPolicy {
+//     std::vector<size_t> findRemoteDuplicates(
+//         std::vector<HashStringIndex> const& hash_idx_pairs,
+//         size_t filter_size,
+//         GridCommunicators<Communicator> const& grid
+//     ) {
+//         for (auto const& comm: grid.comms) {
+//         }
+//     }
+// };
 
 template <
     typename StringSet,
@@ -585,14 +554,14 @@ public:
         measuringTool.stop("bloomfilter_indicesOfLocalDuplicates");
 
         measuringTool.start("bloomfilter_ReducedHashStringIndices");
-        std::erase_if(hash_idx_pairs, std::not_fn(should_send));
+        std::erase_if(hash_idx_pairs, std::not_fn(shouldSend));
         measuringTool.stop("bloomfilter_ReducedHashStringIndices");
 
         auto remote_dups =
             BloomFilterPolicy::findRemoteDuplicates(hash_idx_pairs, filter_size, comm);
 
         measuringTool.start("bloomfilter_getIndices");
-        auto indicesOfAllDuplicates = FindDuplicatesPolicy::getSortedIndicesOfDuplicates(
+        auto indicesOfAllDuplicates = getSortedIndicesOfDuplicates(
             strptr.active().size(),
             local_hash_dups,
             local_lcp_dups,
@@ -631,14 +600,14 @@ public:
         measuringTool.stop("bloomfilter_indicesOfLocalDuplicates");
 
         measuringTool.start("bloomfilter_ReducedHashStringIndices");
-        std::erase_if(hash_idx_pairs, std::not_fn(should_send));
+        std::erase_if(hash_idx_pairs, std::not_fn(shouldSend));
         measuringTool.stop("bloomfilter_ReducedHashStringIndices");
 
         auto remote_dups =
             BloomFilterPolicy::findRemoteDuplicates(hash_idx_pairs, filter_size, comm);
 
         measuringTool.start("bloomfilter_getIndices");
-        auto indicesOfAllDuplicates = FindDuplicatesPolicy::getSortedIndicesOfDuplicates(
+        auto indicesOfAllDuplicates = getSortedIndicesOfDuplicates(
             strptr.active().size(),
             local_hash_dups,
             local_lcp_dups,
@@ -794,7 +763,44 @@ private:
         return {std::move(hash_idx_pairs), std::move(local_lcp_dups), std::move(eos_candidates)};
     }
 
-    static bool should_send(HashStringIndex const& v) {
+    static std::vector<size_t> getSortedIndicesOfDuplicates(
+        const size_t size,
+        std::vector<size_t>& local_hash_dups,
+        std::vector<size_t>& local_lcp_dups,
+        std::vector<size_t>& remote_dups,
+        std::vector<HashStringIndex> const& orig_string_idxs
+    ) {
+        std::vector<size_t> sorted_remote_dups;
+        sorted_remote_dups.reserve(remote_dups.size());
+        for (auto const& idx: remote_dups) {
+            auto const& original = orig_string_idxs[idx];
+            if (!original.isLocalDuplicateButSendAnyway) {
+                sorted_remote_dups.push_back(original.stringIndex);
+            }
+        }
+
+        ips4o::sort(sorted_remote_dups.begin(), sorted_remote_dups.end());
+        ips4o::sort(local_hash_dups.begin(), local_hash_dups.end());
+
+        using Iterator = std::vector<size_t>::iterator;
+        std::array<std::pair<Iterator, Iterator>, 3> iter_pairs{
+            {{local_hash_dups.begin(), local_hash_dups.end()},
+             {local_lcp_dups.begin(), local_lcp_dups.end()},
+             {sorted_remote_dups.begin(), sorted_remote_dups.end()}}};
+        size_t total_elems =
+            local_hash_dups.size() + local_lcp_dups.size() + sorted_remote_dups.size();
+
+        std::vector<size_t> merged_elems(total_elems);
+        tlx::multiway_merge(
+            iter_pairs.begin(),
+            iter_pairs.end(),
+            merged_elems.begin(),
+            total_elems
+        );
+        return merged_elems;
+    }
+
+    static bool shouldSend(HashStringIndex const& v) {
         return !v.isLocalDuplicate || v.isLocalDuplicateButSendAnyway;
     }
 };
