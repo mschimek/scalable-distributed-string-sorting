@@ -261,7 +261,13 @@ struct AllToAllHashesGolomb {
 
         return decodedValues;
     }
+
     static std::string getName() { return "sequentialGolombEncoding"; }
+};
+
+template <typename Communiuator>
+struct GridCommunicators {
+    std::vector<Communicator> comms;
 };
 
 struct RecvData {
@@ -274,9 +280,7 @@ template <typename SendPolicy>
 class SendOnlyHashesToFilter : private SendPolicy {
 public:
     static RecvData sendToFilter(
-        std::vector<HashStringIndex> const& hashes,
-        size_t filter_size,
-        dss_mehnert::Communicator const& comm
+        std::vector<HashStringIndex> const& hashes, size_t filter_size, Communicator const& comm
     ) {
         namespace kmp = kamping;
         auto& measuringTool = measurement::MeasuringTool::measuringTool();
@@ -358,9 +362,7 @@ private:
 template <typename GolombPolicy>
 struct FindDuplicates {
     static inline std::vector<size_t> findDuplicates(
-        std::vector<HashPEIndex>& hash_triples,
-        RecvData const& data,
-        dss_mehnert::Communicator const& comm
+        std::vector<HashPEIndex>& hash_triples, RecvData const& data, Communicator const& comm
     ) {
         namespace kmp = kamping;
         using Iterator = std::vector<HashPEIndex>::iterator;
@@ -447,7 +449,7 @@ struct FindDuplicates {
     static std::vector<size_t> getSortedIndicesOfDuplicates(
         const size_t size,
         std::vector<size_t>& local_hash_dups,
-        std::vector<size_t>& local_dups,
+        std::vector<size_t>& local_lcp_dups,
         std::vector<size_t>& remote_dups,
         std::vector<HashStringIndex> const& originalMapping
     ) {
@@ -466,9 +468,10 @@ struct FindDuplicates {
         using Iterator = std::vector<size_t>::iterator;
         std::array<std::pair<Iterator, Iterator>, 3> iter_pairs{
             {{local_hash_dups.begin(), local_hash_dups.end()},
-             {local_dups.begin(), local_dups.end()},
+             {local_lcp_dups.begin(), local_lcp_dups.end()},
              {sorted_remote_dups.begin(), sorted_remote_dups.end()}}};
-        size_t total_elems = local_hash_dups.size() + local_dups.size() + sorted_remote_dups.size();
+        size_t total_elems =
+            local_hash_dups.size() + local_lcp_dups.size() + sorted_remote_dups.size();
 
         std::vector<size_t> merged_elems(total_elems);
         tlx::multiway_merge(
@@ -505,16 +508,38 @@ struct XXHasher {
     }
 };
 
+template <typename SendPolicy, typename FindDuplicatesPolicy>
+class SingleLevelPolicy {
+public:
+    static std::vector<size_t> findRemoteDuplicates(
+        std::vector<HashStringIndex> const& hash_idx_pairs,
+        size_t filter_size,
+        Communicator const& comm
+    ) {
+        auto& measuring_tool = measurement::MeasuringTool::measuringTool();
+
+        measuring_tool.start("bloomfilter_sendHashStringIndices");
+        RecvData recv_data = SendPolicy::sendToFilter(hash_idx_pairs, filter_size, comm);
+        measuring_tool.stop("bloomfilter_sendHashStringIndices");
+
+        measuring_tool.start("bloomfilter_addPEIndex");
+        auto recvHashPEIndices = SendPolicy::addPEIndex(recv_data);
+        measuring_tool.stop("bloomfilter_addPEIndex");
+
+        return FindDuplicatesPolicy::findDuplicates(recvHashPEIndices, recv_data, comm);
+    }
+};
+
 template <
     typename StringSet,
     typename FindDuplicatesPolicy,
     typename SendPolicy,
     typename HashPolicy>
 class BloomFilter {
-    using String = typename StringSet::String;
-    using Iterator = typename StringSet::Iterator;
-    using CharIt = typename StringSet::CharIterator;
     using StringLcpPtr = typename tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
+
+    // todo bikeshed name
+    using BloomFilterPolicy = SingleLevelPolicy<SendPolicy, FindDuplicatesPolicy>;
 
     size_t size;
     std::vector<size_t> hashValues;
@@ -542,10 +567,7 @@ public:
     };
 
     std::vector<size_t> filter(
-        StringLcpPtr strptr,
-        size_t depth,
-        std::vector<size_t>& results,
-        dss_mehnert::Communicator const& comm
+        StringLcpPtr strptr, size_t depth, std::vector<size_t>& results, Communicator const& comm
     ) {
         auto& measuringTool = measurement::MeasuringTool::measuringTool();
 
@@ -559,30 +581,22 @@ public:
         measuringTool.stop("bloomfilter_sortHashStringIndices");
 
         measuringTool.start("bloomfilter_indicesOfLocalDuplicates");
-        auto local_dups = localDuplicateIndices(hash_idx_pairs);
+        auto local_hash_dups = localDuplicateIndices(hash_idx_pairs);
         measuringTool.stop("bloomfilter_indicesOfLocalDuplicates");
 
         measuringTool.start("bloomfilter_ReducedHashStringIndices");
         std::erase_if(hash_idx_pairs, std::not_fn(should_send));
         measuringTool.stop("bloomfilter_ReducedHashStringIndices");
 
-        measuringTool.start("bloomfilter_sendHashStringIndices");
-        RecvData recvData = SendPolicy::sendToFilter(hash_idx_pairs, filter_size, comm);
-        measuringTool.stop("bloomfilter_sendHashStringIndices");
-
-        measuringTool.start("bloomfilter_addPEIndex");
-        auto recvHashPEIndices = SendPolicy::addPEIndex(recvData);
-        measuringTool.stop("bloomfilter_addPEIndex");
-
-        auto indicesOfRemoteDuplicates =
-            FindDuplicatesPolicy::findDuplicates(recvHashPEIndices, recvData, comm);
+        auto remote_dups =
+            BloomFilterPolicy::findRemoteDuplicates(hash_idx_pairs, filter_size, comm);
 
         measuringTool.start("bloomfilter_getIndices");
         auto indicesOfAllDuplicates = FindDuplicatesPolicy::getSortedIndicesOfDuplicates(
             strptr.active().size(),
-            local_dups,
+            local_hash_dups,
             local_lcp_dups,
-            indicesOfRemoteDuplicates,
+            remote_dups,
             hash_idx_pairs
         );
         measuringTool.stop("bloomfilter_getIndices");
@@ -599,7 +613,7 @@ public:
         size_t depth,
         std::vector<size_t> const& candidates,
         std::vector<size_t>& results,
-        dss_mehnert::Communicator const& comm
+        Communicator const& comm
     ) {
         auto& measuringTool = measurement::MeasuringTool::measuringTool();
 
@@ -613,30 +627,22 @@ public:
         measuringTool.stop("bloomfilter_sortHashStringIndices");
 
         measuringTool.start("bloomfilter_indicesOfLocalDuplicates");
-        auto local_dups = localDuplicateIndices(hash_idx_pairs);
+        auto local_hash_dups = localDuplicateIndices(hash_idx_pairs);
         measuringTool.stop("bloomfilter_indicesOfLocalDuplicates");
 
         measuringTool.start("bloomfilter_ReducedHashStringIndices");
         std::erase_if(hash_idx_pairs, std::not_fn(should_send));
         measuringTool.stop("bloomfilter_ReducedHashStringIndices");
 
-        measuringTool.start("bloomfilter_sendHashStringIndices");
-        RecvData recvData = SendPolicy::sendToFilter(hash_idx_pairs, filter_size, comm);
-        measuringTool.stop("bloomfilter_sendHashStringIndices");
-
-        measuringTool.start("bloomfilter_addPEIndex");
-        auto recvHashPEIndices = SendPolicy::addPEIndex(recvData);
-        measuringTool.stop("bloomfilter_addPEIndex");
-
-        auto indicesOfRemoteDuplicates =
-            FindDuplicatesPolicy::findDuplicates(recvHashPEIndices, recvData, comm);
+        auto remote_dups =
+            BloomFilterPolicy::findRemoteDuplicates(hash_idx_pairs, filter_size, comm);
 
         measuringTool.start("bloomfilter_getIndices");
         auto indicesOfAllDuplicates = FindDuplicatesPolicy::getSortedIndicesOfDuplicates(
             strptr.active().size(),
-            local_dups,
+            local_hash_dups,
             local_lcp_dups,
-            indicesOfRemoteDuplicates,
+            remote_dups,
             hash_idx_pairs
         );
         measuringTool.stop("bloomfilter_getIndices");
