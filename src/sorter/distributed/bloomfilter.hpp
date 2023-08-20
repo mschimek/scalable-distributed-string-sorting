@@ -25,11 +25,8 @@
 #include <tlx/sort/strings/radix_sort.hpp>
 #include <tlx/sort/strings/string_ptr.hpp>
 
-#include "encoding/golomb_encoding.hpp"
 #include "hash/xxhash.hpp"
-#include "mpi/alltoall.hpp"
 #include "mpi/communicator.hpp"
-#include "mpi/environment.hpp"
 #include "util/measuringTool.hpp"
 
 namespace dss_mehnert {
@@ -107,167 +104,15 @@ struct AllToAllHashesNaive {
     static std::vector<DataType> alltoallv(
         std::vector<DataType>& send_data,
         std::vector<size_t> const& interval_sizes,
-        [[maybe_unused]] size_t filter_size,
         Communicator const& comm
     ) {
         namespace kmp = kamping;
 
+        // todo use vector<int> everywhere in bloomfilter
         std::vector<int> send_counts{interval_sizes.begin(), interval_sizes.end()};
         auto result = comm.alltoallv(kmp::send_buf(send_data), kmp::send_counts(send_counts));
         return result.extract_recv_buffer();
     }
-
-    template <typename DataType>
-    static std::vector<DataType> alltoallv(
-        std::vector<DataType>& send_data,
-        std::vector<size_t> const& interval_sizes,
-        [[maybe_unused]] std::vector<size_t> const&,
-        Communicator const& comm
-    ) {
-        auto filter_size = std::numeric_limits<size_t>::max();
-        return alltoallv(send_data, interval_sizes, filter_size, comm);
-    }
-
-    static std::string getName() { return "noGolombEncoding"; }
-};
-
-struct AllToAllHashesGolomb {
-    template <typename DataType>
-    static inline std::vector<DataType> alltoallv(
-        std::vector<DataType>& send_data,
-        std::vector<size_t> const& interval_sizes,
-        size_t filter_size,
-        mpi::environment env,
-        const size_t b = 1048576
-    ) {
-        using AllToAllv = mpi::AllToAllvCombined<mpi::AllToAllvSmall>;
-
-        auto& measuringTool = measurement::MeasuringTool::measuringTool();
-
-        measuringTool.start("bloomfilter_golombEncoding");
-        std::vector<size_t> encodedValuesSizes;
-        std::vector<size_t> encodedValues;
-        encodedValues.reserve(send_data.size() + 2 + env.size());
-
-        auto begin = send_data.begin();
-
-        if (interval_sizes.size() != env.size()) {
-            std::cout << "not same size" << std::endl;
-            std::abort();
-        }
-        for (size_t j = 0; j < interval_sizes.size(); ++j) {
-            auto const intervalSize = interval_sizes[j];
-            if (intervalSize == 0) {
-                encodedValuesSizes.push_back(0);
-                continue;
-            }
-            auto const end = begin + intervalSize;
-            auto const encodedValuesSize = encodedValues.size();
-            size_t bFromBook = getB(filter_size / env.size(), intervalSize);
-            if (bFromBook == 1)
-                bFromBook = 20000000000;
-            encodedValues.push_back(0); // dummy value
-            auto refToSize = encodedValues.size() - 1;
-            encodedValues.push_back(bFromBook);
-
-            getDeltaEncoding(begin, end, std::back_inserter(encodedValues), bFromBook);
-            const size_t sizeEncodedValues = encodedValues.size() - encodedValuesSize;
-            encodedValues[refToSize] = sizeEncodedValues - 1;
-            encodedValuesSizes.push_back(sizeEncodedValues);
-            begin = end;
-        }
-        measuringTool.stop("bloomfilter_golombEncoding");
-
-        measuringTool.start("bloomfilter_sendEncodedValues");
-        std::vector<size_t> recvEncodedValues =
-            AllToAllv::alltoallv(encodedValues.data(), encodedValuesSizes, env);
-        measuringTool.stop("bloomfilter_sendEncodedValues");
-        measuringTool.add(
-            std::accumulate(
-                encodedValuesSizes.begin(),
-                encodedValuesSizes.end(),
-                static_cast<uint64_t>(0)
-            ) * sizeof(size_t),
-            "bloomfilter_sentEncodedValues"
-        );
-        measuringTool.start("bloomfilter_golombDecoding");
-        std::vector<size_t> decodedValues;
-
-        decodedValues.reserve(recvEncodedValues.size());
-        auto curDecodeIt = recvEncodedValues.begin();
-
-        for (size_t i = 0; i < env.size() && curDecodeIt != recvEncodedValues.end(); ++i) {
-            size_t const encodedIntervalSizes = *(curDecodeIt++);
-            auto const end = curDecodeIt + encodedIntervalSizes;
-            size_t const bFromBook = *(curDecodeIt++);
-            getDeltaDecoding(curDecodeIt, end, std::back_inserter(decodedValues), bFromBook);
-            curDecodeIt = end;
-        }
-        measuringTool.stop("bloomfilter_golombDecoding");
-        return decodedValues;
-    }
-
-    template <typename DataType>
-    static inline std::vector<DataType> alltoallv(
-        std::vector<DataType>& send_data,
-        std::vector<size_t> const& interval_sizes,
-        std::vector<size_t> const& interval_range,
-        mpi::environment env
-    ) {
-        using AllToAllv = mpi::AllToAllvCombined<mpi::AllToAllvSmall>;
-        std::vector<size_t> encodedValuesSizes;
-        std::vector<size_t> encodedValues;
-        encodedValues.reserve(send_data.size() + 2 + env.size());
-
-        auto begin = send_data.begin();
-
-        if (interval_sizes.size() != env.size()) {
-            std::cout << "not same size" << std::endl;
-            std::abort();
-        }
-        for (size_t j = 0; j < interval_sizes.size(); ++j) {
-            auto const intervalSize = interval_sizes[j];
-            auto const intervalMax = interval_range[j];
-            if (intervalSize == 0) {
-                encodedValuesSizes.push_back(0);
-                continue;
-            }
-            auto const end = begin + intervalSize;
-            auto const encodedValuesSize = encodedValues.size();
-
-            size_t bFromBook = getB(intervalMax, intervalSize);
-            if (bFromBook < 8)
-                bFromBook = 8;
-            encodedValues.push_back(0); // dummy value
-            auto refToSize = encodedValues.size() - 1;
-            encodedValues.push_back(bFromBook);
-
-            getDeltaEncoding(begin, end, std::back_inserter(encodedValues), bFromBook);
-            const size_t sizeEncodedValues = encodedValues.size() - encodedValuesSize;
-            encodedValues[refToSize] = sizeEncodedValues - 1;
-            encodedValuesSizes.push_back(sizeEncodedValues);
-            begin = end;
-        }
-
-        std::vector<size_t> recvEncodedValues =
-            AllToAllv::alltoallv(encodedValues.data(), encodedValuesSizes, env);
-        std::vector<size_t> decodedValues;
-
-        decodedValues.reserve(recvEncodedValues.size());
-        auto curDecodeIt = recvEncodedValues.begin();
-
-        for (size_t i = 0; i < env.size() && curDecodeIt != recvEncodedValues.end(); ++i) {
-            const size_t encodedIntervalSizes = *(curDecodeIt++);
-            auto const end = curDecodeIt + encodedIntervalSizes;
-            const size_t bFromBook = *(curDecodeIt++);
-            getDeltaDecoding(curDecodeIt, end, std::back_inserter(decodedValues), bFromBook);
-            curDecodeIt = end;
-        }
-
-        return decodedValues;
-    }
-
-    static std::string getName() { return "sequentialGolombEncoding"; }
 };
 
 struct SipHasher {

@@ -126,7 +126,6 @@ struct CombinationKey {
     bool prefix_compression;
     bool lcp_compression;
     bool prefix_doubling;
-    bool golomb_encoding;
 
     auto operator<=>(CombinationKey const&) const = default;
 };

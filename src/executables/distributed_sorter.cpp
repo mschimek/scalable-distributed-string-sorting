@@ -77,7 +77,6 @@ template <
     typename StringGenerator,
     typename SamplePolicy,
     typename MPIAllToAllRoutine,
-    typename GolombEncoding,
     typename Subcommunicators,
     typename LcpCompression,
     typename PrefixCompression>
@@ -155,7 +154,6 @@ template <
     typename StringGenerator,
     typename SamplePolicy,
     typename MPIAllToAllRoutine,
-    typename GolombEncoding,
     typename Subcommunicators,
     typename LcpCompression,
     typename PrefixCompression>
@@ -202,13 +200,15 @@ void run_prefix_doubling(
     Subcommunicators comms{first_level, args.levels.end(), comm};
     measuring_tool.stop("none", "create_communicators", comm);
 
+    // todo remove completely
+    using dss_mehnert::bloomfilter::AllToAllHashesNaive;
     using dss_mehnert::sorter::PrefixDoublingMergeSort;
     PrefixDoublingMergeSort<
         StringLcpPtr,
         Subcommunicators,
         AllToAllPolicy,
         SamplePolicy,
-        GolombEncoding>
+        AllToAllHashesNaive>
         merge_sort;
     auto permutation = merge_sort.sort(std::move(input_container), comms);
 
@@ -274,7 +274,6 @@ template <
     typename StringGenerator,
     typename SamplePolicy,
     typename MPIAllToAllRoutine,
-    typename GolombEncoding,
     typename Subcommunicators,
     typename LcpCompression,
     typename PrefixCompression>
@@ -285,7 +284,6 @@ void print_config(
     std::cout << prefix << " key=string_generator name=" << StringGenerator::getName() << "\n";
     std::cout << prefix << " key=sampler name=" << SamplePolicy::getName() << "\n";
     std::cout << prefix << " key=alltoall_routine name=" << MPIAllToAllRoutine::getName() << "\n";
-    std::cout << prefix << " key=golomb_encoding name=" << GolombEncoding::getName() << "\n";
     std::cout << prefix << " key=subcomms name=" << Subcommunicators::get_name() << "\n";
 }
 
@@ -294,7 +292,7 @@ void die_with_feature(std::string_view feature) {
 }
 
 template <typename... Args>
-void arg8(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
+void arg7(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
     dss_mehnert::Communicator comm;
     auto prefix = get_result_prefix(args, key, comm);
     if (comm.is_root()) {
@@ -313,19 +311,10 @@ void arg8(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
 }
 
 template <typename... Args>
-void arg7(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
+void arg6(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
     using namespace dss_schimek;
 
     if (key.prefix_compression) {
-        arg8<Args..., std::true_type>(key, args);
-    } else {
-        arg8<Args..., std::false_type>(key, args);
-    }
-}
-
-template <typename... Args>
-void arg6(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
-    if (key.lcp_compression) {
         arg7<Args..., std::true_type>(key, args);
     } else {
         arg7<Args..., std::false_type>(key, args);
@@ -334,13 +323,22 @@ void arg6(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
 
 template <typename... Args>
 void arg5(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
+    if (key.lcp_compression) {
+        arg6<Args..., std::true_type>(key, args);
+    } else {
+        arg6<Args..., std::false_type>(key, args);
+    }
+}
+
+template <typename... Args>
+void arg4(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
     using namespace dss_mehnert::multi_level;
     using dss_mehnert::Communicator;
 
     switch (key.subcomms) {
         case PolicyEnums::Subcommunicators::none: {
             if constexpr (CliOptions::enable_split) {
-                arg6<Args..., NoSplit<Communicator>>(key, args);
+                arg5<Args..., NoSplit<Communicator>>(key, args);
             } else {
                 die_with_feature("CLI_ENABLE_SPLIT");
             }
@@ -348,31 +346,16 @@ void arg5(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
         }
         case PolicyEnums::Subcommunicators::naive: {
             if constexpr (CliOptions::enable_split) {
-                arg6<Args..., NaiveSplit<Communicator>>(key, args);
+                arg5<Args..., NaiveSplit<Communicator>>(key, args);
             } else {
                 die_with_feature("CLI_ENABLE_SPLIT");
             }
             break;
         }
         case PolicyEnums::Subcommunicators::grid: {
-            arg6<Args..., GridwiseSplit<Communicator>>(key, args);
+            arg5<Args..., GridwiseSplit<Communicator>>(key, args);
             break;
         }
-    }
-}
-
-template <typename... Args>
-void arg4(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
-    using namespace dss_schimek;
-
-    if (key.golomb_encoding) {
-        if constexpr (CliOptions::enable_golomb) {
-            arg5<Args..., AllToAllHashesGolomb>(key, args);
-        } else {
-            die_with_feature("CLI_ENABLE_GOLOMB");
-        }
-    } else {
-        arg5<Args..., AllToAllHashesNaive>(key, args);
     }
 }
 
@@ -468,7 +451,6 @@ int main(int argc, char* argv[]) {
     bool prefix_compression = false;
     bool lcp_compression = false;
     bool prefix_doubling = false;
-    bool golomb_encoding = false;
     unsigned int generator = static_cast<int>(PolicyEnums::StringGenerator::DNRatioGenerator);
     unsigned int sample_policy = static_cast<int>(PolicyEnums::SampleString::numStrings);
     unsigned int alltoall_routine = static_cast<int>(PolicyEnums::MPIRoutineAllToAll::combined);
@@ -522,7 +504,6 @@ int main(int argc, char* argv[]) {
         "use LCP compression during string exchange"
     );
     cp.add_flag('d', "prefix-doubling", prefix_doubling, "use prefix doubling merge sort");
-    cp.add_flag('g', "golomb", golomb_encoding, "use Golomb encoding during prefix doubling");
     cp.add_unsigned(
         'a',
         "alltoall-routine",
@@ -567,7 +548,6 @@ int main(int argc, char* argv[]) {
         .prefix_compression = prefix_compression,
         .lcp_compression = lcp_compression,
         .prefix_doubling = prefix_doubling,
-        .golomb_encoding = golomb_encoding,
     };
 
     GeneratedStringsArgs generator_args{
@@ -587,9 +567,15 @@ int main(int argc, char* argv[]) {
         tlx_die("the given group sizes must be decreasing");
     }
 
+    auto& measuring_tool = measurement::MeasuringTool::measuringTool();
+
+    measuring_tool.disableCommVolume();
+
     // todo does this make sense? maybe discard first round instead?
     auto num_bytes = std::min<size_t>(num_strings * 5, 100000u);
     dss_schimek::mpi::randomDataAllToAllExchange(num_bytes);
+
+    measuring_tool.enableCommVolume();
 
     for (size_t i = 0; i < num_iterations; ++i) {
         SorterArgs args{
