@@ -41,8 +41,7 @@ template <
     typename StringPtr,
     typename Subcommunicators,
     typename AllToAllStringPolicy,
-    typename SamplePolicy,
-    typename GolombPolicy>
+    typename SamplePolicy>
 class PrefixDoublingMergeSort
     : private BaseDistributedMergeSort<Subcommunicators, AllToAllStringPolicy, SamplePolicy> {
 public:
@@ -165,11 +164,7 @@ private:
     ) {
         namespace kmp = kamping;
 
-        using BloomFilter = bloomfilter::BloomFilter<
-            StringPEIndexSet,
-            bloomfilter::FindDuplicates<GolombPolicy>,
-            bloomfilter::SendOnlyHashesToFilter<GolombPolicy>,
-            bloomfilter::XXHasher>;
+        using BloomFilter = bloomfilter::BloomFilter<StringPEIndexSet, bloomfilter::XXHasher>;
 
         this->measuring_tool_.start("bloomfilter_init");
         auto const& ss = str_ptr.active();

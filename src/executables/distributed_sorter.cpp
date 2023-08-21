@@ -24,7 +24,6 @@
 #include "mpi/communicator.hpp"
 #include "mpi/is_sorted.hpp"
 #include "mpi/warmup.hpp"
-#include "sorter/distributed/bloomfilter.hpp"
 #include "sorter/distributed/merge_sort.hpp"
 #include "sorter/distributed/multi_level.hpp"
 #include "sorter/distributed/prefix_doubling.hpp"
@@ -201,14 +200,8 @@ void run_prefix_doubling(
     measuring_tool.stop("none", "create_communicators", comm);
 
     // todo remove completely
-    using dss_mehnert::bloomfilter::AllToAllHashesNaive;
     using dss_mehnert::sorter::PrefixDoublingMergeSort;
-    PrefixDoublingMergeSort<
-        StringLcpPtr,
-        Subcommunicators,
-        AllToAllPolicy,
-        SamplePolicy,
-        AllToAllHashesNaive>
+    PrefixDoublingMergeSort<StringLcpPtr, Subcommunicators, AllToAllPolicy, SamplePolicy>
         merge_sort;
     auto permutation = merge_sort.sort(std::move(input_container), comms);
 

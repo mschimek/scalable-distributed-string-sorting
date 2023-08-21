@@ -51,6 +51,7 @@ struct HashStringIndex {
 };
 
 struct HashPEIndex {
+    // todo update member naming scheme
     size_t hashValue;
     size_t PEIndex;
 
@@ -58,23 +59,6 @@ struct HashPEIndex {
 
     friend std::ostream& operator<<(std::ostream& stream, HashPEIndex const& hashPEIndex) {
         return stream << "[" << hashPEIndex.hashValue << ", " << hashPEIndex.PEIndex << "]";
-    }
-};
-
-// todo remove this additional abstraction
-struct AllToAllHashesNaive {
-    template <typename DataType>
-    static std::vector<DataType> alltoallv(
-        std::vector<DataType>& send_data,
-        std::vector<size_t> const& interval_sizes,
-        Communicator const& comm
-    ) {
-        namespace kmp = kamping;
-
-        // todo use vector<int> everywhere in bloomfilter
-        std::vector<int> send_counts{interval_sizes.begin(), interval_sizes.end()};
-        auto result = comm.alltoallv(kmp::send_buf(send_data), kmp::send_counts(send_counts));
-        return result.extract_recv_buffer();
     }
 };
 
@@ -122,11 +106,11 @@ struct HashRange {
 
 namespace _internal {
 
-inline std::vector<size_t> compute_interval_sizes(
+inline std::vector<int> compute_interval_sizes(
     std::vector<size_t> const& hashes, HashRange hash_range, size_t num_intervals
 ) {
     // todo get rid of push_back
-    std::vector<size_t> intervals;
+    std::vector<int> intervals;
     intervals.reserve(num_intervals);
 
     auto current_pos = hashes.begin();
@@ -145,7 +129,7 @@ inline std::vector<size_t> compute_interval_sizes(
 
 template <typename T>
 inline std::vector<T>
-merge_intervals(std::vector<T>&& values, std::vector<size_t> const& interval_sizes) {
+merge_intervals(std::vector<T>&& values, std::vector<int> const& interval_sizes) {
     using Iterator = std::vector<T>::iterator;
     using IteratorPair = std::pair<Iterator, Iterator>;
 
@@ -176,8 +160,8 @@ inline std::vector<size_t> extract_hash_values(std::vector<T> const& values) {
 
 struct RecvData {
     std::vector<size_t> hashes;
-    std::vector<size_t> interval_sizes;
-    std::vector<size_t> global_offsets;
+    std::vector<int> interval_sizes;
+    std::vector<int> global_offsets;
 
     std::vector<HashPEIndex> compute_hash_rank_pairs() const {
         std::vector<HashPEIndex> hash_pairs(hashes.size());
@@ -195,8 +179,7 @@ struct RecvData {
     }
 };
 
-template <typename SendPolicy>
-class SendOnlyHashesToFilter : private SendPolicy {
+class SendOnlyHashesToFilter {
 public:
     static RecvData
     send_to_filter(std::vector<size_t>& hashes, HashRange hash_range, Communicator const& comm) {
@@ -206,26 +189,28 @@ public:
         // measuringTool.start("bloomfilter_send_to_filterSetup");
         auto interval_sizes = _internal::compute_interval_sizes(hashes, hash_range, comm.size());
 
-        std::vector<size_t> offsets{interval_sizes};
-        std::exclusive_scan(offsets.begin(), offsets.end(), offsets.begin(), size_t{0});
-        assert_equal(offsets.back() + interval_sizes.back(), hashes.size());
+        std::vector<int> offsets{interval_sizes};
+        std::exclusive_scan(offsets.begin(), offsets.end(), offsets.begin(), 0);
+        assert_equal(offsets.back() + interval_sizes.back(), std::ssize(hashes));
         // measuringTool.stop("bloomfilter_send_to_filterSetup");
 
         // measuringTool.start("bloomfilter_sendEncodedValuesOverall");
         auto offset_result = comm.alltoall(kmp::send_buf(offsets));
-        auto interval_resut = comm.alltoall(kmp::send_buf(interval_sizes));
-        auto result = SendPolicy::alltoallv(hashes, interval_sizes, comm);
+        auto result = comm.alltoallv(
+            kmp::send_buf(hashes),
+            kmp::send_counts(interval_sizes),
+            kmp::send_displs(offsets)
+        );
         // measuringTool.stop("bloomfilter_sendEncodedValuesOverall");
 
         return {
-            std::move(result),
-            interval_resut.extract_recv_buffer(),
+            result.extract_recv_buffer(),
+            result.extract_recv_counts(),
             offset_result.extract_recv_buffer()};
     }
 };
 
 // todo return an optional here
-template <typename SendPolicy>
 struct FindDuplicates {
     static inline std::vector<size_t> find_duplicates(
         std::vector<HashPEIndex> const& hash_rank_pairs, RecvData&& data, Communicator const& comm
@@ -238,7 +223,7 @@ struct FindDuplicates {
         measuring_tool.start("bloomfilter_findDuplicatesOverallIntern");
 
         measuring_tool.start("bloomfilter_findDuplicatesFind");
-        auto [send_buf, send_counts] = compute_duplicate_indices(
+        auto [duplicates_idxs, interval_sizes] = compute_duplicate_indices(
             hash_rank_pairs,
             data.interval_sizes,
             std::move(data.global_offsets) // offsets are invalidated here
@@ -246,13 +231,15 @@ struct FindDuplicates {
         measuring_tool.stop("bloomfilter_findDuplicatesFind");
 
         measuring_tool.start("bloomfilter_findDuplicatesSendDups");
-        bool any_dups = !send_buf.empty();
+        bool any_dups = !duplicates_idxs.empty();
         auto result = comm.allreduce(kmp::send_buf({any_dups}), kmp::op(std::logical_or<>{}));
         auto any_global_dups = result.extract_recv_buffer()[0];
 
         std::vector<size_t> duplicates;
         if (any_global_dups) {
-            duplicates = SendPolicy::alltoallv(send_buf, send_counts, comm);
+            duplicates =
+                comm.alltoallv(kmp::send_buf(duplicates_idxs), kmp::send_counts(interval_sizes))
+                    .extract_recv_buffer();
         }
 
         measuring_tool.stop("bloomfilter_findDuplicatesSendDups");
@@ -262,15 +249,16 @@ struct FindDuplicates {
     }
 
 private:
-    static std::pair<std::vector<size_t>, std::vector<size_t>> compute_duplicate_indices(
+    static std::pair<std::vector<size_t>, std::vector<int>> compute_duplicate_indices(
         std::vector<HashPEIndex> const& hash_rank_pairs,
-        std::vector<size_t> const& interval_sizes,
-        std::vector<size_t>&& global_offsets
+        std::vector<int> const& interval_sizes,
+        std::vector<int>&& global_offsets
     ) {
         std::vector<std::vector<size_t>> result_sets(interval_sizes.size());
         auto counters = std::move(global_offsets);
 
         if (!hash_rank_pairs.empty()) {
+            // todo improve this loop
             bool duplicate = false;
             auto prev = hash_rank_pairs.begin();
             for (auto curr = prev + 1; curr != hash_rank_pairs.end(); ++prev, ++curr) {
@@ -288,7 +276,7 @@ private:
             }
         }
 
-        std::vector<size_t> send_counts(result_sets.size());
+        std::vector<int> send_counts(result_sets.size());
         auto get_size = std::size<std::vector<size_t>>;
         std::transform(result_sets.begin(), result_sets.end(), send_counts.begin(), get_size);
 
@@ -306,7 +294,6 @@ private:
 };
 
 // todo use CRTP here instead
-template <typename SendPolicy, typename FindDuplicatesPolicy>
 class SingleLevelPolicy {
 public:
     static std::vector<size_t> find_remote_duplicates(
@@ -320,18 +307,17 @@ public:
         measuring_tool.start("bloomfilter_sendHashStringIndices");
         auto hash_values = _internal::extract_hash_values(hash_str_pairs);
         HashRange hash_range{0, filter_size};
-        auto recv_data = SendPolicy::send_to_filter(hash_values, hash_range, comm);
+        auto recv_data = SendOnlyHashesToFilter::send_to_filter(hash_values, hash_range, comm);
         auto hash_rank_pairs = _internal::merge_intervals(
             recv_data.compute_hash_rank_pairs(),
             recv_data.interval_sizes
         );
         measuring_tool.stop("bloomfilter_sendHashStringIndices");
 
-        return FindDuplicatesPolicy::find_duplicates(hash_rank_pairs, std::move(recv_data), comm);
+        return FindDuplicates::find_duplicates(hash_rank_pairs, std::move(recv_data), comm);
     }
 };
 
-template <typename SendPolicy, typename FindDuplicatesPolicy>
 class MultiLevelPolicy {
 public:
     static std::vector<size_t> find_remote_duplicates(
@@ -362,18 +348,14 @@ private:
 
         // todo add correct timing
         auto hash_values = _internal::extract_hash_values(hash_pairs);
-        auto recv_data = SendPolicy::send_to_filter(hash_values, hash_range, comm);
+        auto recv_data = SendOnlyHashesToFilter::send_to_filter(hash_values, hash_range, comm);
         auto hash_rank_pairs = _internal::merge_intervals(
             recv_data.compute_hash_rank_pairs(),
             recv_data.interval_sizes
         );
 
         if (comm_first + 1 == comm_last) {
-            return FindDuplicatesPolicy::find_duplicates(
-                hash_rank_pairs,
-                std::move(recv_data),
-                comm
-            );
+            return FindDuplicates::find_duplicates(hash_rank_pairs, std::move(recv_data), comm);
         } else {
             // todo could discard hash_value during merge?!
             // todo is this actually better than computing the string index with counters later
@@ -416,17 +398,12 @@ private:
     }
 };
 
-template <
-    typename StringSet,
-    typename FindDuplicatesPolicy,
-    typename SendPolicy,
-    typename HashPolicy>
+template <typename StringSet, typename HashPolicy>
 class BloomFilter {
     using StringLcpPtr = typename tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
 
     // todo bikeshed name
-    // using BloomFilterPolicy = SingleLevelPolicy<SendPolicy, FindDuplicatesPolicy>;
-    using BloomFilterPolicy = MultiLevelPolicy<SendPolicy, FindDuplicatesPolicy>;
+    using BloomFilterPolicy = MultiLevelPolicy;
 
 public:
     static constexpr size_t filter_size = std::numeric_limits<uint64_t>::max();
