@@ -12,6 +12,7 @@
 
 #include <bits/iterator_concepts.h>
 #include <kamping/checking_casts.hpp>
+#include <kamping/communicator.hpp>
 #include <kamping/rank_ranges.hpp>
 #include <tlx/die.hpp>
 
@@ -71,6 +72,54 @@ private:
 };
 
 template <typename Communicator>
+struct RowCommunicators {
+    std::vector<Communicator> comms;
+
+    template <typename LevelIt>
+    RowCommunicators(LevelIt first_level, LevelIt last_level, Communicator const& root) {
+        comms.reserve(std::distance(first_level, last_level) + 1);
+
+        Communicator comm{root};
+        for (auto level = first_level; level != last_level; ++level) {
+            auto group_size = kamping::asserting_cast<int>(*level);
+            tlx_die_unless(comm.size_signed() % group_size == 0);
+            tlx_die_unless(1 < group_size && group_size < comm.size_signed());
+
+            int first = (comm.rank_signed() / group_size) * group_size;
+            int last = first + group_size - 1;
+            kamping::RankRange range{first, last, 1};
+
+            auto comm_group = comm.create_subcommunicators({std::array{range}});
+            comms.emplace_back(std::exchange(comm, std::move(comm_group)));
+        }
+        comms.emplace_back(std::move(comm));
+    }
+};
+
+template <typename Communicator>
+struct ColumnCommunicators {
+    std::vector<Communicator> comms;
+
+    ColumnCommunicators(RowCommunicators<Communicator> const& rows_) {
+        assert(!rows_.comms.empty());
+
+        auto const& rows = rows_.comms;
+        comms.reserve(rows.size() - 1);
+
+        for (auto curr = rows.begin(), next = curr + 1; next != rows.end(); ++curr, ++next) {
+            auto group_size = kamping::asserting_cast<int>(next->size());
+
+            int col_first = curr->rank_signed() % group_size;
+            int col_last = curr->size_signed() - group_size + col_first;
+            kamping::RankRange col_range{col_first, col_last, group_size};
+
+            auto comm = curr->create_subcommunicators({std::array{col_range}});
+            comms.emplace_back(std::move(comm));
+        }
+    }
+};
+
+template <typename Communicator>
 class NoSplit {
 public:
     using iterator = LevelIter<NoSplit<Communicator>, Communicator>;
@@ -108,33 +157,18 @@ public:
 
     static constexpr std::string_view get_name() { return "naive_split"; }
 
-    NaiveSplit(auto first_level, auto last_level, Communicator const& root) {
-        communicators_.reserve(std::distance(first_level, last_level) + 1);
-
-        Communicator comm{root};
-        for (auto level = first_level; level != last_level; ++level) {
-            auto group_size = kamping::asserting_cast<int>(*level);
-            tlx_die_unless(comm.size_signed() % group_size == 0);
-            tlx_die_unless(1 < group_size && group_size < comm.size_signed());
-
-            int first = (comm.rank_signed() / group_size) * group_size;
-            int last = first + group_size - 1;
-            kamping::RankRange range{first, last, 1};
-
-            auto comm_group = comm.create_subcommunicators({std::array{range}});
-            communicators_.emplace_back(std::exchange(comm, std::move(comm_group)));
-        }
-        communicators_.emplace_back(std::move(comm));
-    }
+    NaiveSplit(auto first_level, auto last_level, Communicator const& root)
+        : rows_{first_level, last_level, root} {}
 
     iterator begin() const { return {*this, 0}; }
-    iterator end() const { return {*this, communicators_.size() - 1}; }
+    iterator end() const { return {*this, rows_.comms.size() - 1}; }
 
-    Communicator const& comm_root() const { return communicators_.front(); }
-    Communicator const& comm_final() const { return communicators_.back(); }
+    Communicator const& comm_root() const { return rows_.comms.front(); }
+    Communicator const& comm_final() const { return rows_.comms.back(); }
+    RowCommunicators<Communicator> const& comms_row() const { return rows_; };
 
     Level<Communicator> level(size_t level) const {
-        return {communicators_[level], communicators_[level], communicators_[level + 1]};
+        return {rows_.comms[level], rows_.comms[level], rows_.comms[level + 1]};
     }
 
     static std::vector<size_t>
@@ -156,7 +190,7 @@ public:
     }
 
 private:
-    std::vector<Communicator> communicators_;
+    RowCommunicators<Communicator> rows_;
 };
 
 
@@ -167,41 +201,20 @@ public:
 
     static constexpr std::string_view get_name() { return "grid_split"; }
 
-    GridwiseSplit(auto first_level, auto last_level, Communicator const& root) {
-        comms_row_.reserve(std::distance(first_level, last_level) + 1);
-        comms_col_.reserve(std::distance(first_level, last_level));
-
-        Communicator comm{root};
-        for (auto level = first_level; level != last_level; ++level) {
-            auto group_size = kamping::asserting_cast<int>(*level);
-            tlx_die_unless(comm.size_signed() % group_size == 0);
-            tlx_die_unless(1 < group_size && group_size < comm.size_signed());
-
-            int col_first = comm.rank_signed() % group_size;
-            int col_last = comm.size_signed() - group_size + col_first;
-            kamping::RankRange col_range{col_first, col_last, group_size};
-
-            auto comm_col = comm.create_subcommunicators({std::array{col_range}});
-            comms_col_.emplace_back(std::move(comm_col));
-
-            int row_first = (comm.rank_signed() / group_size) * group_size;
-            int row_last = row_first + group_size - 1;
-            kamping::RankRange row_range{row_first, row_last, 1};
-
-            Communicator comm_row{comm.create_subcommunicators({std::array{row_range}})};
-            comms_row_.emplace_back(std::exchange(comm, std::move(comm_row)));
-        }
-        comms_row_.emplace_back(std::move(comm));
-    }
+    GridwiseSplit(auto first_level, auto last_level, Communicator const& root)
+        : rows_{first_level, last_level, root},
+          cols_{rows_} {}
 
     iterator begin() const { return {*this, 0}; }
-    iterator end() const { return {*this, comms_col_.size()}; }
+    iterator end() const { return {*this, cols_.comms.size()}; }
 
-    Communicator const& comm_root() const { return comms_row_.front(); }
-    Communicator const& comm_final() const { return comms_row_.back(); }
+    Communicator const& comm_root() const { return rows_.comms.front(); }
+    Communicator const& comm_final() const { return rows_.comms.back(); }
+    RowCommunicators<Communicator> const& comms_row() const { return rows_; }
+    ColumnCommunicators<Communicator> const& comms_col() const { return cols_; }
 
     Level<Communicator> level(size_t level) const {
-        return {comms_row_[level], comms_col_[level], comms_row_[level + 1]};
+        return {rows_.comms[level], cols_.comms[level], rows_.comms[level + 1]};
     }
 
     static std::vector<size_t>
@@ -212,8 +225,27 @@ public:
     }
 
 private:
-    std::vector<Communicator> comms_row_;
-    std::vector<Communicator> comms_col_;
+    RowCommunicators<Communicator> rows_;
+    ColumnCommunicators<Communicator> cols_;
+};
+
+
+template <typename Communicator>
+struct GridCommunicators {
+    std::vector<Communicator> comms;
+
+    explicit GridCommunicators(NoSplit<Communicator> const& no_split)
+        : comms{no_split.comm_final()} {}
+
+    explicit GridCommunicators(NaiveSplit<Communicator> const& naive_split)
+        : comms{naive_split.comms_row().comms} {
+        comms.emplace_back(naive_split.comm_final());
+    }
+
+    explicit GridCommunicators(GridwiseSplit<Communicator> const& grid_split)
+        : comms{grid_split.comms_col().comms} {
+        comms.emplace_back(grid_split.comm_final());
+    }
 };
 
 } // namespace multi_level
