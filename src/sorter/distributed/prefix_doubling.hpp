@@ -17,9 +17,11 @@
 #include <tlx/sort/strings/radix_sort.hpp>
 #include <tlx/sort/strings/string_ptr.hpp>
 
+#include "mpi/alltoall.hpp"
 #include "mpi/communicator.hpp"
 #include "sorter/distributed/bloomfilter.hpp"
 #include "sorter/distributed/merge_sort.hpp"
+#include "sorter/distributed/multi_level.hpp"
 #include "sorter/distributed/sample.hpp"
 #include "strings/stringcontainer.hpp"
 
@@ -85,7 +87,8 @@ public:
         this->measuring_tool_.stop("local_sorting", "sort_locally", comms.comm_root());
 
         this->measuring_tool_.start("bloomfilter", "bloomfilter_overall");
-        auto prefixes = compute_distinguishing_prefixes(string_ptr, comms.comm_root());
+        multi_level::GridCommunicators grid{comms};
+        auto prefixes = compute_distinguishing_prefixes(string_ptr, comms.comm_root(), grid);
         this->measuring_tool_.stop("bloomfilter", "bloomfilter_overall", comms.comm_root());
 
         std::tuple<sample::DistPrefixes> sample_args{{prefixes}};
@@ -155,8 +158,11 @@ private:
         return permutation;
     }
 
-    std::vector<size_t>
-    compute_distinguishing_prefixes(StringPEIndexPtr str_ptr, Communicator const& comm) {
+    std::vector<size_t> compute_distinguishing_prefixes(
+        StringPEIndexPtr str_ptr,
+        Communicator const& root,
+        multi_level::GridCommunicators<Communicator> const& grid
+    ) {
         namespace kmp = kamping;
 
         using BloomFilter = bloomfilter::BloomFilter<
@@ -173,13 +179,13 @@ private:
 
         size_t round = 0;
         this->measuring_tool_.setRound(round);
-        std::vector<size_t> candidates = bloom_filter.filter(str_ptr, start_depth, results, comm);
+        std::vector<size_t> candidates = bloom_filter.filter(str_ptr, start_depth, results, grid);
 
         for (size_t i = start_depth * 2; i < std::numeric_limits<size_t>::max(); i *= 2) {
             this->measuring_tool_.add(candidates.size(), "bloomfilter_numberCandidates");
             this->measuring_tool_.start("bloomfilter_allreduce");
             bool is_empty = candidates.empty();
-            auto result = comm.allreduce(kmp::send_buf({is_empty}), kmp::op(std::logical_and<>{}));
+            auto result = root.allreduce(kmp::send_buf({is_empty}), kmp::op(std::logical_and<>{}));
             auto all_empty = result.extract_recv_buffer()[0];
             this->measuring_tool_.stop("bloomfilter_allreduce");
 
@@ -188,8 +194,9 @@ private:
             }
 
             this->measuring_tool_.setRound(++round);
-            candidates = bloom_filter.filter(str_ptr, i, candidates, results, comm);
+            candidates = bloom_filter.filter(str_ptr, i, candidates, results, grid);
         }
+
         this->measuring_tool_.setRound(0);
         return results;
     }
