@@ -166,7 +166,7 @@ private:
 
         this->measuring_tool_.start("bloomfilter_init");
         auto const& ss = str_ptr.active();
-        BloomFilterPolicy bloom_filter{ss.size(), start_depth};
+        BloomFilterPolicy bloom_filter{ss.size()};
         std::vector<size_t> results(ss.size());
         this->measuring_tool_.stop("bloomfilter_init");
 
