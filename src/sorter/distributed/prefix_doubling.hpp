@@ -19,7 +19,6 @@
 
 #include "mpi/alltoall.hpp"
 #include "mpi/communicator.hpp"
-#include "sorter/distributed/bloomfilter.hpp"
 #include "sorter/distributed/merge_sort.hpp"
 #include "sorter/distributed/multi_level.hpp"
 #include "sorter/distributed/sample.hpp"
@@ -41,7 +40,8 @@ template <
     typename StringPtr,
     typename Subcommunicators,
     typename AllToAllStringPolicy,
-    typename SamplePolicy>
+    typename SamplePolicy,
+    typename BloomFilterPolicy>
 class PrefixDoublingMergeSort
     : private BaseDistributedMergeSort<Subcommunicators, AllToAllStringPolicy, SamplePolicy> {
 public:
@@ -164,11 +164,9 @@ private:
     ) {
         namespace kmp = kamping;
 
-        using BloomFilter = bloomfilter::BloomFilter<StringPEIndexSet, bloomfilter::XXHasher>;
-
         this->measuring_tool_.start("bloomfilter_init");
         auto const& ss = str_ptr.active();
-        BloomFilter bloom_filter{ss.size(), start_depth};
+        BloomFilterPolicy bloom_filter{ss.size(), start_depth};
         std::vector<size_t> results(ss.size());
         this->measuring_tool_.stop("bloomfilter_init");
 
