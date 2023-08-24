@@ -41,7 +41,7 @@ template <
     typename Subcommunicators,
     typename AllToAllStringPolicy,
     typename SamplePolicy,
-    typename BloomFilterPolicy>
+    typename BloomFilter>
 class PrefixDoublingMergeSort
     : private BaseDistributedMergeSort<Subcommunicators, AllToAllStringPolicy, SamplePolicy> {
 public:
@@ -166,13 +166,13 @@ private:
 
         this->measuring_tool_.start("bloomfilter_init");
         auto const& ss = str_ptr.active();
-        BloomFilterPolicy bloom_filter{ss.size()};
+        BloomFilter bloom_filter{root, grid};
         std::vector<size_t> results(ss.size());
         this->measuring_tool_.stop("bloomfilter_init");
 
         size_t round = 0;
         this->measuring_tool_.setRound(round);
-        std::vector<size_t> candidates = bloom_filter.filter(str_ptr, start_depth, results, grid);
+        std::vector<size_t> candidates = bloom_filter.filter(str_ptr, start_depth, results);
 
         for (size_t i = start_depth * 2; i < std::numeric_limits<size_t>::max(); i *= 2) {
             this->measuring_tool_.add(candidates.size(), "bloomfilter_numberCandidates");
@@ -187,7 +187,7 @@ private:
             }
 
             this->measuring_tool_.setRound(++round);
-            candidates = bloom_filter.filter(str_ptr, i, candidates, results, grid);
+            candidates = bloom_filter.filter(str_ptr, i, results, candidates);
         }
 
         this->measuring_tool_.setRound(0);
