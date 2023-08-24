@@ -9,5 +9,4 @@ target_sources(dss_base
         partition.hpp
         prefix_doubling.hpp
         sample.hpp
-        tracker.hpp
 )
