@@ -437,7 +437,7 @@ private:
         }
 
         std::vector<size_t> local_duplicates;
-        for (auto it = local_values.begin(); it != local_values.end() - 1;) {
+        for (auto it = local_values.begin(); it < local_values.end() - 1;) {
             auto& pivot = *it++;
             if (it->hash_value == pivot.hash_value) {
                 pivot.is_local_dup = true;
