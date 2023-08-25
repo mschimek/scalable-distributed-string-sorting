@@ -182,19 +182,17 @@ inline std::vector<hash_t> extract_hash_values(std::vector<T> const& values) {
 inline RecvData send_hash_values(
     std::vector<hash_t> const& hashes, HashRange const hash_range, Communicator const& comm
 ) {
-    namespace kmp = kamping;
-
     auto interval_sizes = _internal::compute_interval_sizes(hashes, hash_range, comm.size());
 
     std::vector<int> offsets{interval_sizes};
     std::exclusive_scan(offsets.begin(), offsets.end(), offsets.begin(), 0);
     assert_equal(offsets.back() + interval_sizes.back(), std::ssize(hashes));
 
-    auto offset_result = comm.alltoall(kmp::send_buf(offsets));
+    auto offset_result = comm.alltoall(kamping::send_buf(offsets));
     auto result = comm.alltoallv(
-        kmp::send_buf(hashes),
-        kmp::send_counts(interval_sizes),
-        kmp::send_displs(offsets)
+        kamping::send_buf(hashes),
+        kamping::send_counts(interval_sizes),
+        kamping::send_displs(offsets)
     );
 
     return {
@@ -210,7 +208,9 @@ inline std::tuple<std::vector<int>, std::vector<int>, std::vector<int>> compute_
     std::vector<int>&& global_offsets
 ) {
     if (hash_rank_pairs.empty()) {
-        return {};
+        std::vector<int> send_counts(interval_sizes.size());
+        std::vector<int> send_displs(interval_sizes.size());
+        return {{}, std::move(send_counts), std::move(send_displs)};
     }
 
     auto& counters = global_offsets;
@@ -269,18 +269,16 @@ inline std::optional<std::vector<int>> send_duplicates(
     Communicator const& comm_send,
     Communicator const& comm_global
 ) {
-    namespace kmp = kamping;
-
     auto any_global_dups = comm_global.allreduce_single(
-        kmp::send_buf({!duplicates.empty()}),
-        kmp::op(std::logical_or<>{})
+        kamping::send_buf({!duplicates.empty()}),
+        kamping::op(std::logical_or<>{})
     );
 
     if (any_global_dups) {
         auto result = comm_send.alltoallv(
-            kmp::send_buf(duplicates),
-            kmp::send_counts(send_counts),
-            kmp::send_displs(send_displs)
+            kamping::send_buf(duplicates),
+            kamping::send_counts(send_counts),
+            kamping::send_displs(send_displs)
         );
         return result.extract_recv_buffer();
     } else {
@@ -676,8 +674,6 @@ private:
         std::vector<int>& global_offsets,
         Communicator const& comm
     ) {
-        namespace kmp = kamping;
-
         std::vector<int> send_counts(global_offsets.size());
         for (auto const& duplicate: duplicates) {
             send_counts[hash_rank_pairs[duplicate].rank]++;
@@ -690,7 +686,7 @@ private:
         std::vector<int> remote_idxs(duplicates.size());
         auto counters = std::move(global_offsets);
         for (int i = 0; auto const& duplicate: duplicates) {
-            // todo this loop should probably use and iterator
+            // todo this loop should probably use an iterator
             for (; i < duplicate; ++i) {
                 counters[hash_rank_pairs[i].rank]++;
             }
@@ -699,9 +695,9 @@ private:
         }
 
         auto result = comm.alltoallv(
-            kmp::send_buf(remote_idxs),
-            kmp::send_counts(send_counts),
-            kmp::send_displs(send_displs)
+            kamping::send_buf(remote_idxs),
+            kamping::send_counts(send_counts),
+            kamping::send_displs(send_displs)
         );
         return result.extract_recv_buffer();
     }

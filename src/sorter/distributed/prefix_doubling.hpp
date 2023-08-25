@@ -162,8 +162,6 @@ private:
         Communicator const& root,
         multi_level::GridCommunicators<Communicator> const& grid
     ) {
-        namespace kmp = kamping;
-
         this->measuring_tool_.start("bloomfilter_init");
         auto const& ss = str_ptr.active();
         BloomFilter bloom_filter{root, grid};
@@ -178,8 +176,10 @@ private:
             this->measuring_tool_.add(candidates.size(), "bloomfilter_numberCandidates");
             this->measuring_tool_.start("bloomfilter_allreduce");
             bool is_empty = candidates.empty();
-            auto result = root.allreduce(kmp::send_buf({is_empty}), kmp::op(std::logical_and<>{}));
-            auto all_empty = result.extract_recv_buffer()[0];
+            auto all_empty = root.allreduce_single(
+                kamping::send_buf({is_empty}),
+                kamping::op(std::logical_and<>{})
+            );
             this->measuring_tool_.stop("bloomfilter_allreduce");
 
             if (all_empty) {
