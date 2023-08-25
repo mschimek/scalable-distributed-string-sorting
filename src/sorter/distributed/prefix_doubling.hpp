@@ -53,7 +53,6 @@ public:
 
     std::vector<StringIndexPEIndex>
     sort(StringLcpContainer&& container_, Subcommunicators const& comms) {
-        using namespace kamping;
         using std::begin;
         using std::end;
 
@@ -202,18 +201,18 @@ template <typename StringSet>
 dss_schimek::StringLcpContainer<StringSet> receive_strings(
     dss_schimek::StringLcpContainer<StringSet>&& container,
     std::vector<StringIndexPEIndex> const& permutation,
-    dss_schimek::mpi::environment env
+    Communicator const& comm
 ) {
     using namespace dss_schimek;
     using MPIRoutine = mpi::AllToAllvCombined<mpi::AllToAllvSmall>;
     using std::begin;
 
-    std::vector<size_t> req_sizes(env.size());
+    std::vector<int> req_sizes(comm.size());
     for (auto const& elem: permutation) {
         ++req_sizes[elem.PEIndex];
     }
 
-    std::vector<size_t> offsets(env.size());
+    std::vector<size_t> offsets(comm.size());
     std::exclusive_scan(req_sizes.begin(), req_sizes.end(), offsets.begin(), size_t{0});
 
     std::vector<size_t> requests(permutation.size());
@@ -221,14 +220,15 @@ dss_schimek::StringLcpContainer<StringSet> receive_strings(
         requests[offsets[elem.PEIndex]++] = elem.stringIndex;
     }
 
-    auto recv_req_sizes = mpi::alltoall(req_sizes, env);
-    auto recv_requests = MPIRoutine::alltoallv(requests.data(), req_sizes, env);
+    auto result = comm.alltoallv(kamping::send_buf(requests), kamping::send_counts(req_sizes));
+    auto recv_requests = result.extract_recv_buffer();
+    auto recv_req_sizes = result.extract_recv_counts();
 
     auto const& ss = container.make_string_set();
     std::vector<unsigned char> raw_strs;
-    std::vector<size_t> raw_str_sizes(env.size());
-    for (size_t rank = 0, offset = 0; rank < env.size(); ++rank) {
-        for (size_t i = 0; i < recv_req_sizes[rank]; ++i, ++offset) {
+    std::vector<size_t> raw_str_sizes(comm.size());
+    for (size_t rank = 0, offset = 0; rank < comm.size(); ++rank) {
+        for (size_t i = 0; i < static_cast<size_t>(recv_req_sizes[rank]); ++i, ++offset) {
             auto const& str = ss[begin(ss) + recv_requests[offset]];
             auto str_len = ss.get_length(str) + 1;
             auto str_chars = ss.get_chars(str, 0);
@@ -237,7 +237,7 @@ dss_schimek::StringLcpContainer<StringSet> receive_strings(
         }
     }
 
-    auto recv_chars = MPIRoutine::alltoallv(raw_strs.data(), raw_str_sizes, env);
+    auto recv_chars = MPIRoutine::alltoallv(raw_strs.data(), raw_str_sizes, comm);
     return StringLcpContainer<StringSet>{std::move(recv_chars)};
 }
 
@@ -245,11 +245,11 @@ template <typename StringSet>
 std::vector<typename StringSet::String> reordered_strings(
     StringSet const& ss,
     std::vector<StringIndexPEIndex> const& permutation,
-    dss_schimek::mpi::environment env
+    Communicator const& comm
 ) {
     using std::begin;
 
-    std::vector<size_t> offsets(env.size());
+    std::vector<size_t> offsets(comm.size());
     for (auto const& elem: permutation) {
         ++offsets[elem.PEIndex];
     }
@@ -273,13 +273,13 @@ template <typename StringSet>
 dss_schimek::StringLcpContainer<StringSet> apply_permutation(
     dss_schimek::StringLcpContainer<StringSet>&& container,
     std::vector<StringIndexPEIndex> const& permutation,
-    dss_schimek::mpi::environment env
+    Communicator const& comm
 ) {
-    auto output_container = _internal::receive_strings(std::move(container), permutation, env);
+    auto output_container = _internal::receive_strings(std::move(container), permutation, comm);
     assert_equal(output_container.size(), permutation.size());
 
     auto ss = output_container.make_string_set();
-    output_container.set(_internal::reordered_strings(ss, permutation, env));
+    output_container.set(_internal::reordered_strings(ss, permutation, comm));
 
     return output_container;
 }
