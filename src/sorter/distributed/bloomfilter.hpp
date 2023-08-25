@@ -33,22 +33,19 @@ namespace bloomfilter {
 
 using hash_t = std::uint64_t;
 
-// todo use uint64_t for hash_values
+template <typename T>
+struct hash_less {
+    inline constexpr bool operator()(T const& lhs, T const& rhs) const {
+        return lhs.hash_value < rhs.hash_value;
+    }
+};
+
 struct HashStringIndex {
     hash_t hash_value;
     size_t string_index;
     bool is_local_dup = false;
     bool send_anyway = false;
     bool is_lcp_root = false;
-
-    bool operator<(HashStringIndex const& rhs) const { return hash_value < rhs.hash_value; }
-
-    friend std::ostream& operator<<(std::ostream& stream, HashStringIndex const& hash_pair) {
-        return stream << "[" << hash_pair.hash_value << ", " << hash_pair.string_index
-                      << (hash_pair.is_local_dup ? ", is_local_dup: " : "")
-                      << (hash_pair.send_anyway ? ", send_anyway" : "")
-                      << (hash_pair.is_lcp_root ? ", is_lcp_root" : "") << "]";
-    }
 };
 
 struct HashRank {
@@ -59,8 +56,6 @@ struct HashRank {
     };
     int rank;
 };
-
-static_assert(sizeof(HashRank) == 16);
 
 struct SipHasher {
     static inline hash_t hash(unsigned char const* str, size_t length, size_t filter_size) {
@@ -81,7 +76,7 @@ struct HashRange {
     hash_t lower;
     hash_t upper;
 
-    HashRange bucket(size_t idx, size_t num_buckets) const {
+    HashRange bucket(size_t const idx, size_t const num_buckets) const {
         auto bucket_size = this->bucket_size(num_buckets);
         auto bucket_lower = lower + idx * bucket_size;
         auto bucket_upper = lower + (idx + 1) * bucket_size - 1;
@@ -93,7 +88,7 @@ struct HashRange {
         }
     }
 
-    size_t bucket_size(size_t num_buckets) const { return (upper - lower) / num_buckets; }
+    size_t bucket_size(size_t const num_buckets) const { return (upper - lower) / num_buckets; }
 };
 
 struct RecvData {
@@ -127,6 +122,7 @@ inline std::vector<int> compute_interval_sizes(
 
     auto bucket_size = hash_range.bucket_size(num_intervals);
 
+    // todo not a fan of this loop
     auto current_pos = hashes.begin();
     for (size_t i = 0; i + 1 < num_intervals; ++i) {
         hash_t upper_limit = hash_range.lower + (i + 1) * bucket_size - 1;
@@ -162,15 +158,12 @@ inline std::vector<HashRank> merge_intervals(
     );
 
     std::vector<HashRank> merged_values(values.size());
-    auto compare_hash = [](auto const& lhs, auto const& rhs) {
-        return lhs.hash_value < rhs.hash_value;
-    };
     tlx::multiway_merge(
         iter_pairs.begin(),
         iter_pairs.end(),
         merged_values.begin(),
         values.size(),
-        compare_hash
+        hash_less<HashRank>{}
     );
     return merged_values;
 }
@@ -325,7 +318,7 @@ public:
         auto hash_pairs = generate_hash_pairs(ss, candidates..., depth, strptr.lcp());
         auto& hash_idx_pairs = hash_pairs.hash_idx_pairs;
 
-        ips4o::sort(hash_idx_pairs.begin(), hash_idx_pairs.end());
+        ips4o::sort(hash_idx_pairs.begin(), hash_idx_pairs.end(), hash_less<HashStringIndex>{});
         auto local_hash_dups = get_local_duplicates(hash_idx_pairs);
         std::erase_if(hash_idx_pairs, std::not_fn(should_send));
         measuringTool.stop("bloomfilter_find_local_duplicates");
@@ -491,7 +484,6 @@ private:
         std::vector<size_t>& local_lcp_dups,
         std::vector<size_t>& remote_dups
     ) {
-        // todo could this use multiway merge instead?
         ips4o::sort(remote_dups.begin(), remote_dups.end());
         ips4o::sort(local_hash_dups.begin(), local_hash_dups.end());
 
@@ -635,7 +627,6 @@ private:
         assert(comm_first != comm_last);
         auto const& comm = *comm_first;
 
-        // todo add correct timing
         auto hash_values = _internal::extract_hash_values(hash_pairs);
         auto recv_data = _internal::send_hash_values(hash_values, hash_range, comm);
         auto hash_rank_pairs = _internal::merge_intervals(

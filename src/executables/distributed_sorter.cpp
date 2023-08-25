@@ -79,7 +79,8 @@ template <
     typename MPIAllToAllRoutine,
     typename Subcommunicators,
     typename LcpCompression,
-    typename PrefixCompression>
+    typename PrefixCompression,
+    typename BloomFilterPolicy>
 void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicator const& comm) {
     using namespace dss_schimek;
 
@@ -156,7 +157,8 @@ template <
     typename MPIAllToAllRoutine,
     typename Subcommunicators,
     typename LcpCompression,
-    typename PrefixCompression>
+    typename PrefixCompression,
+    typename BloomFilterPolicy>
 void run_prefix_doubling(
     SorterArgs args, std::string prefix, dss_mehnert::Communicator const& comm
 ) {
@@ -200,11 +202,7 @@ void run_prefix_doubling(
     Subcommunicators comms{first_level, args.levels.end(), comm};
     measuring_tool.stop("none", "create_communicators", comm);
 
-    using HashPolicy = dss_mehnert::bloomfilter::XXHasher;
-    // todo add CLI parameter
-    using BloomFilterPolicy = dss_mehnert::bloomfilter::MultiLevel<HashPolicy>;
-    using dss_mehnert::sorter::PrefixDoublingMergeSort;
-    PrefixDoublingMergeSort<
+    dss_mehnert::sorter::PrefixDoublingMergeSort<
         StringLcpPtr,
         Subcommunicators,
         AllToAllPolicy,
@@ -266,6 +264,7 @@ std::string get_result_prefix(
            + " lcp_compression=" + std::to_string(key.lcp_compression)
            + " prefix_compression=" + std::to_string(key.prefix_compression)
            + " prefix_doubling=" + std::to_string(key.prefix_doubling)
+           + " grid_bloomfilter=" + std::to_string(key.grid_bloomfilter)
            + " dn_ratio=" + std::to_string(args.generator_args.DN_ratio);
     // clang-format on
 }
@@ -277,7 +276,8 @@ template <
     typename MPIAllToAllRoutine,
     typename Subcommunicators,
     typename LcpCompression,
-    typename PrefixCompression>
+    typename PrefixCompression,
+    typename BloomFilterPolicy>
 void print_config(
     std::string_view prefix, SorterArgs const& args, PolicyEnums::CombinationKey const& key
 ) {
@@ -293,7 +293,7 @@ void die_with_feature(std::string_view feature) {
 }
 
 template <typename... Args>
-void arg7(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
+void arg8(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
     dss_mehnert::Communicator comm;
     auto prefix = get_result_prefix(args, key, comm);
     if (comm.is_root()) {
@@ -308,6 +308,17 @@ void arg7(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
         }
     } else {
         run_merge_sort<Args...>(args, prefix, comm);
+    }
+}
+
+template <typename... Args>
+void arg7(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
+    using namespace dss_mehnert::bloomfilter;
+
+    if (key.grid_bloomfilter) {
+        arg8<Args..., MultiLevel<XXHasher>>(key, args);
+    } else {
+        arg8<Args..., SingleLevel<XXHasher>>(key, args);
     }
 }
 
@@ -452,6 +463,7 @@ int main(int argc, char* argv[]) {
     bool prefix_compression = false;
     bool lcp_compression = false;
     bool prefix_doubling = false;
+    bool grid_bloomfilter = false;
     unsigned int generator = static_cast<int>(PolicyEnums::StringGenerator::DNRatioGenerator);
     unsigned int sample_policy = static_cast<int>(PolicyEnums::SampleString::numStrings);
     unsigned int alltoall_routine = static_cast<int>(PolicyEnums::MPIRoutineAllToAll::combined);
@@ -483,7 +495,7 @@ int main(int argc, char* argv[]) {
     cp.add_size_t('m', "len-strings", string_length, "length of generated strings");
     cp.add_size_t('b', "min-len-strings", len_strings_min, "minimum length of generated strings");
     cp.add_size_t('B', "max-len-strings", len_strings_max, "maximum length of generated strings");
-    cp.add_size_t('i', "num-iterations", num_iterations, "numer of sorting iterations to run");
+    cp.add_size_t('i', "num-iterations", num_iterations, "number of sorting iterations to run");
     cp.add_flag('x', "strong-scaling", strong_scaling, "perform a strong scaling experiment");
     cp.add_unsigned(
         's',
@@ -505,6 +517,7 @@ int main(int argc, char* argv[]) {
         "use LCP compression during string exchange"
     );
     cp.add_flag('d', "prefix-doubling", prefix_doubling, "use prefix doubling merge sort");
+    cp.add_flag('g', "grid-bloomfilter", grid_bloomfilter, "use gridwise bloom filter");
     cp.add_unsigned(
         'a',
         "alltoall-routine",
@@ -549,6 +562,7 @@ int main(int argc, char* argv[]) {
         .prefix_compression = prefix_compression,
         .lcp_compression = lcp_compression,
         .prefix_doubling = prefix_doubling,
+        .grid_bloomfilter = grid_bloomfilter,
     };
 
     GeneratedStringsArgs generator_args{

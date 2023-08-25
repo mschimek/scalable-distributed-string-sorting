@@ -126,6 +126,7 @@ struct CombinationKey {
     bool prefix_compression;
     bool lcp_compression;
     bool prefix_doubling;
+    bool grid_bloomfilter;
 
     auto operator<=>(CombinationKey const&) const = default;
 };
