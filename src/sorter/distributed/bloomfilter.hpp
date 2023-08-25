@@ -52,16 +52,15 @@ struct HashStringIndex {
 };
 
 struct HashRank {
-    hash_t hash_value;
-    // todo update PEIndex to use int
+    //! this slightly dodgy union is used during remote duplicate detection
+    union {
+        hash_t hash_value;
+        int global_index;
+    };
     int rank;
-
-    bool operator<(HashRank const& rhs) const { return hash_value < rhs.hash_value; }
-
-    friend std::ostream& operator<<(std::ostream& stream, HashRank const& hash_pair) {
-        return stream << "[" << hash_pair.hash_value << ", " << hash_pair.rank << "]";
-    }
 };
+
+static_assert(sizeof(HashRank) == 16);
 
 struct SipHasher {
     static inline hash_t hash(unsigned char const* str, size_t length, size_t filter_size) {
@@ -75,14 +74,6 @@ struct XXHasher {
         hash_stream.update(str, length);
         xxh::hash_t<64> hashV = hash_stream.digest();
         return hashV % filter_size;
-    }
-
-    static inline hash_t
-    hash(unsigned char const* str, size_t length, size_t filter_size, hash_t old_hash) {
-        xxh::hash_state_t<64> hash_stream;
-        hash_stream.update(str, length);
-        xxh::hash_t<64> new_hash = hash_stream.digest();
-        return (old_hash ^ new_hash) % filter_size;
     }
 };
 
@@ -118,7 +109,7 @@ struct RecvData {
         auto dest_it = hash_pairs.begin();
         for (int rank = 0; auto const& interval: interval_sizes) {
             for (auto const end = hash_it + interval; hash_it != end; ++hash_it) {
-                *dest_it++ = HashRank{*hash_it, rank};
+                *dest_it++ = HashRank{{.hash_value = *hash_it}, rank};
             }
             ++rank;
         }
@@ -171,7 +162,16 @@ inline std::vector<HashRank> merge_intervals(
     );
 
     std::vector<HashRank> merged_values(values.size());
-    tlx::multiway_merge(iter_pairs.begin(), iter_pairs.end(), merged_values.begin(), values.size());
+    auto compare_hash = [](auto const& lhs, auto const& rhs) {
+        return lhs.hash_value < rhs.hash_value;
+    };
+    tlx::multiway_merge(
+        iter_pairs.begin(),
+        iter_pairs.end(),
+        merged_values.begin(),
+        values.size(),
+        compare_hash
+    );
     return merged_values;
 }
 
@@ -211,63 +211,85 @@ inline RecvData send_hash_values(
         offset_result.extract_recv_buffer()};
 }
 
-inline std::pair<std::vector<int>, std::vector<int>> compute_duplicates(
-    std::vector<HashRank> const& hash_rank_pairs,
+inline std::tuple<std::vector<int>, std::vector<int>, std::vector<int>> compute_duplicates(
+    std::vector<HashRank>&& hash_rank_pairs,
     std::vector<int> const& interval_sizes,
     std::vector<int>&& global_offsets
 ) {
-    // todo rewrite with unique
-    std::vector<std::vector<int>> result_sets(interval_sizes.size());
-    auto counters = std::move(global_offsets);
-
-    if (!hash_rank_pairs.empty()) {
-        // todo improve this loop
-        bool duplicate = false;
-        auto prev = hash_rank_pairs.begin();
-        for (auto curr = prev + 1; curr != hash_rank_pairs.end(); ++prev, ++curr) {
-            auto idx = counters[prev->rank]++;
-            if (prev->hash_value == curr->hash_value) {
-                result_sets[prev->rank].push_back(idx);
-                duplicate = true;
-            } else if (duplicate) {
-                result_sets[prev->rank].push_back(idx);
-                duplicate = false;
-            }
-        }
-        if (duplicate) {
-            result_sets[prev->rank].push_back(counters[prev->rank]++);
-        }
+    if (hash_rank_pairs.empty()) {
+        return {};
     }
 
-    std::vector<int> send_counts(result_sets.size());
-    auto get_size = [](auto const& set) { return set.size(); };
-    std::transform(result_sets.begin(), result_sets.end(), send_counts.begin(), get_size);
+    auto& counters = global_offsets;
 
-    auto num_duplicates = std::accumulate(send_counts.begin(), send_counts.end(), 0);
+    // find position of the first duplicate hash value
+    auto const begin = hash_rank_pairs.begin(), end = hash_rank_pairs.end();
+    auto first_dup = std::adjacent_find(begin, end, [](auto const& lhs, auto const& rhs) {
+        return lhs.hash_value == rhs.hash_value;
+    });
 
-    std::vector<int> send_buf(num_duplicates);
-    for (auto dest_it = send_buf.begin(); auto const& set: result_sets) {
-        dest_it = std::copy(set.begin(), set.end(), dest_it);
+    // remove all non-duplicate hash_values (similar to std::unique)
+    auto dest = begin;
+    auto is_duplicate = false;
+    for (auto it = first_dup; it < end - 1; ++it) {
+        auto const &curr = *it, &next = *(it + 1);
+
+        auto global_idx = counters[curr.rank]++;
+        if (curr.hash_value == next.hash_value) {
+            *dest++ = HashRank{{.global_index = global_idx}, curr.rank};
+            is_duplicate = true;
+        } else if (is_duplicate) {
+            *dest++ = HashRank{{.global_index = global_idx}, curr.rank};
+            is_duplicate = false;
+        }
+    }
+    if (is_duplicate) {
+        auto rank = hash_rank_pairs.back().rank;
+        *dest++ = HashRank{{.global_index = counters[rank]}, rank};
     }
 
-    return {std::move(send_buf), std::move(send_counts)};
+    // `global_index` is now the active member for [dups_begin, dups_end)
+    auto const dups_begin = hash_rank_pairs.begin(), dups_end = dest;
+
+    // finally compute offsets and write duplicates into a new array
+    std::vector<int> send_counts(interval_sizes.size());
+    for (auto it = dups_begin; it != dups_end; ++it) {
+        send_counts[it->rank]++;
+    }
+
+    std::vector<int> offsets{send_counts};
+    std::exclusive_scan(offsets.begin(), offsets.end(), offsets.begin(), size_t{0});
+    std::vector<int> send_displs{offsets};
+
+    std::vector<int> duplicates(std::distance(dups_begin, dups_end));
+    for (auto it = dups_begin; it != dups_end; ++it) {
+        duplicates[offsets[it->rank]++] = it->global_index;
+    }
+
+    return {std::move(duplicates), std::move(send_counts), std::move(send_displs)};
 }
 
 inline std::optional<std::vector<int>> send_duplicates(
     std::vector<int> const& duplicates,
-    std::vector<int> const& interval_sizes,
+    std::vector<int> const& send_counts,
+    std::vector<int> const& send_displs,
     Communicator const& comm_send,
     Communicator const& comm_global
 ) {
     namespace kmp = kamping;
 
-    bool any_dups = !duplicates.empty();
-    auto result = comm_global.allreduce(kmp::send_buf({any_dups}), kmp::op(std::logical_or<>{}));
-    auto any_global_dups = result.extract_recv_buffer()[0];
+    auto any_global_dups = comm_global.allreduce_single(
+        kmp::send_buf({!duplicates.empty()}),
+        kmp::op(std::logical_or<>{})
+    );
 
     if (any_global_dups) {
-        return comm_send.alltoallv(kmp::send_buf(duplicates), kmp::send_counts(interval_sizes))
-            .extract_recv_buffer();
+        auto result = comm_send.alltoallv(
+            kmp::send_buf(duplicates),
+            kmp::send_counts(send_counts),
+            kmp::send_displs(send_displs)
+        );
+        return result.extract_recv_buffer();
     } else {
         return {};
     }
@@ -561,8 +583,8 @@ private:
         measuring_tool.stop("bloomfilter_send_hashes");
 
         measuring_tool.start("bloomfilter_compute_remote_duplicates");
-        auto [duplicates, interval_sizes] = _internal::compute_duplicates(
-            hash_rank_pairs,
+        auto [duplicates, send_counts, send_displs] = _internal::compute_duplicates(
+            std::move(hash_rank_pairs),
             recv_data.interval_sizes,
             std::move(recv_data.global_offsets)
         );
@@ -570,8 +592,13 @@ private:
         measuring_tool.stop("bloomfilter_compute_remote_duplicates");
 
         measuring_tool.start("bloomfilter_send_indices");
-        auto remote_dups =
-            _internal::send_duplicates(duplicates, interval_sizes, comm, this->comm_global_);
+        auto remote_dups = _internal::send_duplicates(
+            duplicates,
+            send_counts,
+            send_displs,
+            comm,
+            this->comm_global_
+        );
         measuring_tool.stop("bloomfilter_send_indices");
 
         return remote_dups;
@@ -622,8 +649,8 @@ private:
             measuring_tool.stop("bloomfilter_send_hashes");
 
             measuring_tool.start("bloomfilter_compute_remote_duplicates");
-            auto [duplicates, interval_sizes] = _internal::compute_duplicates(
-                hash_rank_pairs,
+            auto [duplicates, send_counts, send_displs] = _internal::compute_duplicates(
+                std::move(hash_rank_pairs),
                 recv_data.interval_sizes,
                 std::move(recv_data.global_offsets)
             );
@@ -631,7 +658,13 @@ private:
             measuring_tool.stop("bloomfilter_compute_remote_duplicates");
 
             measuring_tool.start("bloomfilter_send_indices");
-            return _internal::send_duplicates(duplicates, interval_sizes, comm, this->comm_global_);
+            return _internal::send_duplicates(
+                duplicates,
+                send_counts,
+                send_displs,
+                comm,
+                this->comm_global_
+            );
 
         } else {
             auto bucket = hash_range.bucket(comm.rank(), comm.size());
