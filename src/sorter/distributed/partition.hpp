@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "mpi/allgather.hpp"
 #include "mpi/communicator.hpp"
 #include "sorter/RQuick/RQuick.hpp"
 #include "sorter/distributed/misc.hpp"
@@ -48,7 +49,7 @@ compute_partition(StringPtr string_ptr, Params const& params, Communicator const
     measuring_tool.stop("sort_splitters");
 
     measuring_tool.start("choose_splitters");
-    auto chosen_splitters = getSplitters(sorted_sample, params.num_partitions, comm);
+    auto chosen_splitters = get_splitters(sorted_sample, params.num_partitions, comm);
     StringContainer chosen_splitters_cont{std::move(chosen_splitters)};
     measuring_tool.stop("choose_splitters");
 
@@ -88,7 +89,7 @@ compute_partition(StringPtr string_ptr, Params const& params, Communicator const
 
     measuring_tool.start("choose_splitters");
     auto [chosen_splitters, splitter_idxs] =
-        getSplittersIndexed(sorted_sample, params.num_partitions, comm);
+        get_splitters_indexed(sorted_sample, params.num_partitions, comm);
     StringContainer chosen_splitters_cont{std::move(chosen_splitters), splitter_idxs};
     measuring_tool.stop("choose_splitters");
 

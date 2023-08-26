@@ -11,10 +11,12 @@
 
 #include <kamping/collectives/allgather.hpp>
 #include <kamping/collectives/allreduce.hpp>
+#include <kamping/collectives/bcast.hpp>
+#include <kamping/collectives/exscan.hpp>
+#include <kamping/mpi_ops.hpp>
 #include <kamping/named_parameters.hpp>
 #include <tlx/sort/strings/radix_sort.hpp>
 
-#include "mpi/allgather.hpp"
 #include "mpi/communicator.hpp"
 #include "mpi/environment.hpp"
 #include "sorter/RQuick/RQuick.hpp"
@@ -59,122 +61,6 @@ splitterSort(Data&& data, Generator& gen, Comparator& comp, dss_mehnert::Communi
     int tag = 11111;
     auto comm_mpi = comm.mpi_communicator();
     return RQuick::sort(gen, std::forward<Data>(data), MPI_BYTE, tag, comm_mpi, comp, isRobust);
-}
-
-template <typename StringLcpPtr>
-size_t getAvgLcp(const StringLcpPtr string_lcp_ptr, dss_mehnert::Communicator const& comm) {
-    using namespace kamping;
-
-    struct Result {
-        size_t lcp_sum, num_strs;
-
-        Result operator+(Result const& rhs) const {
-            return {lcp_sum + rhs.lcp_sum, num_strs + rhs.num_strs};
-        }
-    };
-
-    auto lcps = string_lcp_ptr.lcp();
-    auto size = string_lcp_ptr.size();
-    size_t local_lcp_sum = std::accumulate(lcps, lcps + size, size_t{0});
-    Result local_result{local_lcp_sum, size};
-
-    auto global_result = comm.allreduce(send_buf(local_result), op(ops::plus<>{}, ops::commutative))
-                             .extract_recv_buffer()[0];
-    return global_result.lcp_sum / global_result.num_strs;
-}
-
-template <typename StringContainer>
-std::vector<unsigned char> getSplitters(
-    StringContainer& sorted_local_sample,
-    size_t num_partitions,
-    dss_mehnert::Communicator const& comm
-) {
-    size_t local_sample_size = sorted_local_sample.size();
-    auto result = comm.allgather(kamping::send_buf(local_sample_size));
-    auto all_sample_sizes = result.extract_recv_buffer();
-
-    // todo could this be replace with a prefix sum?
-    auto const begin = std::begin(all_sample_sizes);
-    auto const end = std::end(all_sample_sizes);
-    size_t const local_prefix = std::accumulate(begin, begin + comm.rank(), size_t{0});
-    size_t const total_size = std::accumulate(begin + comm.rank(), end, local_prefix);
-
-    size_t const nr_splitters = std::min(num_partitions - 1, total_size);
-    size_t const splitter_dist = total_size / (nr_splitters + 1);
-
-    auto ss = sorted_local_sample.make_string_set();
-    size_t splitter_size = 0u;
-    for (size_t i = 1; i <= nr_splitters; ++i) {
-        const uint64_t curIndex = i * splitter_dist;
-        if (curIndex >= local_prefix && curIndex < local_prefix + local_sample_size) {
-            auto const str = ss[ss.begin() + curIndex - local_prefix];
-            auto const length = ss.get_length(str) + 1;
-            splitter_size += length;
-        }
-    }
-
-    std::vector<unsigned char> chosenSplitters(splitter_size);
-    uint64_t curPos = 0;
-    for (std::size_t i = 1; i <= nr_splitters; ++i) {
-        const uint64_t curIndex = i * splitter_dist;
-        if (curIndex >= local_prefix && curIndex < local_prefix + local_sample_size) {
-            auto const str = ss[ss.begin() + curIndex - local_prefix];
-            auto const length = ss.get_length(str) + 1;
-            auto chars = ss.get_chars(str, 0);
-            std::copy_n(chars, length, chosenSplitters.data() + curPos);
-            curPos += length;
-        }
-    }
-    return dss_schimek::mpi::allgatherv(chosenSplitters, comm);
-}
-
-template <typename StringContainer>
-std::pair<std::vector<unsigned char>, std::vector<uint64_t>> getSplittersIndexed(
-    StringContainer& sorted_local_sample,
-    size_t num_partitions,
-    dss_mehnert::Communicator const& comm
-) {
-    size_t local_sample_size = sorted_local_sample.size();
-    auto result = comm.allgather(kamping::send_buf(local_sample_size));
-    auto all_sample_sizes = result.extract_recv_buffer();
-
-    // todo could this be replace with a prefix sum?
-    auto const begin = std::begin(all_sample_sizes);
-    auto const end = std::end(all_sample_sizes);
-    size_t const local_prefix = std::accumulate(begin, begin + comm.rank(), size_t{0});
-    size_t const total_size = std::accumulate(begin + comm.rank(), end, local_prefix);
-
-    size_t const nr_splitters = std::min(num_partitions - 1, total_size);
-    size_t const splitter_dist = total_size / (nr_splitters + 1);
-
-    auto ss = sorted_local_sample.make_string_set();
-    size_t splitter_size = 0u;
-    for (std::size_t i = 1; i <= nr_splitters; ++i) {
-        const uint64_t curIndex = i * splitter_dist;
-        if (curIndex >= local_prefix && curIndex < local_prefix + local_sample_size) {
-            auto const str = ss[ss.begin() + curIndex - local_prefix];
-            auto const length = ss.get_length(str) + 1;
-            splitter_size += length;
-        }
-    }
-
-    std::vector<unsigned char> chosenSplitters(splitter_size);
-    std::vector<uint64_t> chosenSplitterIndices;
-    uint64_t curPos = 0;
-    for (std::size_t i = 1; i <= nr_splitters; ++i) {
-        const uint64_t curIndex = i * splitter_dist;
-        if (curIndex >= local_prefix && curIndex < local_prefix + local_sample_size) {
-            auto const str = ss[ss.begin() + curIndex - local_prefix];
-            auto const length = ss.get_length(str) + 1;
-            auto chars = ss.get_chars(str, 0);
-            std::copy_n(chars, length, chosenSplitters.data() + curPos);
-            curPos += length;
-            chosenSplitterIndices.push_back(str.index);
-        }
-    }
-    chosenSplitters = dss_schimek::mpi::allgatherv(chosenSplitters, comm);
-    chosenSplitterIndices = dss_schimek::mpi::allgatherv(chosenSplitterIndices, comm);
-    return std::make_pair(std::move(chosenSplitters), std::move(chosenSplitterIndices));
 }
 
 template <typename StringSet>
@@ -397,46 +283,143 @@ inline std::vector<size_t> compute_interval_binary_index(
     return intervals;
 }
 
-static inline void print_interval_sizes(
-    std::vector<size_t> const& sent_interval_sizes,
-    std::vector<size_t> const& recv_interval_sizes,
-    dss_schimek::mpi::environment env
-) {
-    constexpr bool print_interval_details = true;
-    if constexpr (print_interval_details) {
-        for (std::uint32_t rank = 0; rank < env.size(); ++rank) {
-            if (env.rank() == rank) {
-                std::size_t total_size = 0;
-                std::cout << "### Sending interval sizes on PE " << rank << std::endl;
-                for (auto const is: sent_interval_sizes) {
-                    total_size += is;
-                    std::cout << is << ", ";
-                }
-                std::cout << "Total size: " << total_size << std::endl;
-            }
-            env.barrier();
-        }
-        for (std::uint32_t rank = 0; rank < env.size(); ++rank) {
-            if (env.rank() == rank) {
-                std::size_t total_size = 0;
-                std::cout << "### Receiving interval sizes on PE " << rank << std::endl;
-                for (auto const is: recv_interval_sizes) {
-                    total_size += is;
-                    std::cout << is << ", ";
-                }
-                std::cout << "Total size: " << total_size << std::endl;
-            }
-            env.barrier();
-        }
-        if (env.rank() == 0) {
-            std::cout << std::endl;
-        }
-    }
-}
-
 } // namespace dss_schimek
 
 namespace dss_mehnert {
+
+namespace _internal {
+
+struct LocalSplitterInterval {
+    size_t local_sample_size;
+    size_t global_prefix;
+    size_t num_splitters;
+    size_t splitter_dist;
+
+    bool contains(size_t const global_index) const {
+        return minimum() <= global_index && global_index < maximum();
+    }
+
+    size_t minimum() const { return global_prefix; }
+    size_t maximum() const { return global_prefix + local_sample_size; }
+
+    size_t local_index(size_t const global_index) const { return global_index - global_prefix; }
+
+    template <typename StringSet>
+    size_t accumulate_lengths(StringSet const& ss) const {
+        using std::begin;
+
+        size_t splitter_size = 0;
+        for (size_t i = 1; i <= num_splitters; ++i) {
+            size_t const global_index = i * splitter_dist;
+            if (contains(global_index)) {
+                auto const str = ss[begin(ss) + local_index(global_index)];
+                splitter_size += ss.get_length(str) + 1;
+            }
+        }
+        return splitter_size;
+    }
+};
+
+inline LocalSplitterInterval compute_splitter_interval(
+    size_t const local_sample_size, size_t const num_partitions, Communicator const& comm
+) {
+    size_t const global_prefix = comm.exscan_single(
+        kamping::send_buf(local_sample_size),
+        kamping::op(kamping::ops::plus<>{})
+    );
+
+    size_t total_size = global_prefix + local_sample_size;
+    comm.bcast_single(kamping::send_recv_buf(total_size), kamping::root(comm.size() - 1));
+
+    size_t const num_splitters = std::min(num_partitions - 1, total_size);
+    size_t const splitter_dist = total_size / (num_splitters + 1);
+
+    return {local_sample_size, global_prefix, num_splitters, splitter_dist};
+}
+
+} // namespace _internal
+
+template <typename StringContainer>
+std::vector<unsigned char> get_splitters(
+    StringContainer& sorted_local_sample, size_t num_partitions, Communicator const& comm
+) {
+    using std::begin;
+
+    auto splitter_interval =
+        _internal::compute_splitter_interval(sorted_local_sample.size(), num_partitions, comm);
+
+    auto const ss = sorted_local_sample.make_string_set();
+    auto splitter_size = splitter_interval.accumulate_lengths(ss);
+    std::vector<unsigned char> splitter_chars(splitter_size);
+
+    auto dest = splitter_chars.begin();
+    for (size_t i = 1; i <= splitter_interval.num_splitters; ++i) {
+        size_t const global_idx = i * splitter_interval.splitter_dist;
+
+        if (splitter_interval.contains(global_idx)) {
+            auto const local_idx = splitter_interval.local_index(global_idx);
+            auto const str = ss[begin(ss) + local_idx];
+            auto const length = ss.get_length(str) + 1;
+            dest = std::copy_n(ss.get_chars(str, 0), length, dest);
+        }
+    }
+
+    auto result = comm.allgatherv(kamping::send_buf(splitter_chars));
+    return result.extract_recv_buffer();
+}
+
+template <typename StringContainer>
+std::pair<std::vector<unsigned char>, std::vector<uint64_t>> get_splitters_indexed(
+    StringContainer& sorted_local_sample, size_t num_partitions, Communicator const& comm
+) {
+    using std::begin;
+
+    auto splitter_interval =
+        _internal::compute_splitter_interval(sorted_local_sample.size(), num_partitions, comm);
+
+    auto const ss = sorted_local_sample.make_string_set();
+    auto splitter_size = splitter_interval.accumulate_lengths(ss);
+    std::vector<unsigned char> splitter_chars(splitter_size);
+    std::vector<uint64_t> splitter_idxs;
+
+    auto dest = splitter_chars.begin();
+    for (size_t i = 1; i <= splitter_interval.num_splitters; ++i) {
+        size_t const global_idx = i * splitter_interval.splitter_dist;
+
+        if (splitter_interval.contains(global_idx)) {
+            auto const local_idx = splitter_interval.local_index(global_idx);
+            auto const str = ss[begin(ss) + local_idx];
+            auto const length = ss.get_length(str) + 1;
+            dest = std::copy_n(ss.get_chars(str, 0), length, dest);
+            splitter_idxs.push_back(str.index);
+        }
+    }
+
+    auto result_chars = comm.allgatherv(kamping::send_buf(splitter_chars));
+    auto result_idxs = comm.allgatherv(kamping::send_buf(splitter_idxs));
+    return {result_chars.extract_recv_buffer(), result_idxs.extract_recv_buffer()};
+}
+
+template <typename LcpIt>
+size_t compute_global_lcp_average(LcpIt const first, LcpIt const last, Communicator const& comm) {
+    struct Result {
+        size_t lcp_sum, num_strs;
+
+        Result operator+(Result const& rhs) const {
+            return {lcp_sum + rhs.lcp_sum, num_strs + rhs.num_strs};
+        }
+    };
+
+    size_t local_lcp_sum = std::accumulate(first, last, size_t{0});
+    size_t num_strs = std::distance(first, last);
+    Result local_result{local_lcp_sum, num_strs};
+
+    auto global_result = comm.allreduce_single(
+        kamping::send_buf(local_result),
+        kamping::op(std::plus<>{}, kamping::ops::commutative)
+    );
+    return global_result.lcp_sum / global_result.num_strs;
+}
 
 template <typename StringLcpContainer>
 static inline std::vector<std::pair<size_t, size_t>> compute_ranges_and_set_lcp_at_start_of_range(

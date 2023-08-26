@@ -57,8 +57,7 @@ struct SampleParams : public Args... {
 };
 
 inline size_t get_local_offset(size_t local_size, Communicator const& comm) {
-    using namespace kamping;
-    return comm.exscan_single(send_buf(local_size), op(ops::plus<>{}));
+    return comm.exscan_single(kamping::send_buf(local_size), kamping::op(std::plus<>{}));
 }
 
 template <typename StringSet, typename Params>
@@ -122,7 +121,7 @@ public:
     }
 };
 
-class IndexedNumStringPolicy {
+class IndexedNumStringsPolicy {
 public:
     static constexpr bool isIndexed = true;
     static constexpr std::string_view getName() { return "IndexedNumStrings"; }
@@ -130,9 +129,9 @@ public:
     template <typename StringSet, typename Params>
     static SampleIndices<typename StringSet::Char>
     sample_splitters(StringSet const& ss, Params const& params, Communicator const& comm) {
-        const size_t local_offset = get_local_offset(ss.size(), comm);
-        const size_t local_num_strings = ss.size();
-        const size_t nr_splitters = params.get_number_splitters(local_num_strings);
+        size_t const local_offset = get_local_offset(ss.size(), comm);
+        size_t const local_num_strings = ss.size();
+        size_t const nr_splitters = params.get_number_splitters(local_num_strings);
         double const splitter_dist =
             static_cast<double>(local_num_strings) / static_cast<double>(nr_splitters + 1);
 
@@ -143,10 +142,10 @@ public:
         splitter_idxs.resize(nr_splitters, local_offset);
 
         for (size_t i = 1; i <= nr_splitters; ++i) {
-            const size_t splitter_index = static_cast<size_t>(i * splitter_dist);
+            size_t const splitter_index = static_cast<size_t>(i * splitter_dist);
             splitter_idxs[i - 1] += splitter_index;
             auto const splitter = ss[ss.begin() + splitter_index];
-            const size_t splitter_len = get_splitter_len(ss, splitter, splitter_index, params);
+            size_t const splitter_len = get_splitter_len(ss, splitter, splitter_index, params);
             std::copy_n(ss.get_chars(splitter, 0), splitter_len, std::back_inserter(raw_splitters));
             raw_splitters.push_back(0);
         }
@@ -162,10 +161,10 @@ public:
     template <typename StringSet, typename Params>
     static std::vector<typename StringSet::Char>
     sample_splitters(StringSet const& ss, Params const& params, Communicator const& comm) {
-        const size_t num_chars = get_num_chars(ss, params);
-        const size_t local_num_strings = ss.size();
-        const size_t nr_splitters = params.get_number_splitters(local_num_strings);
-        const size_t splitter_dist = num_chars / (nr_splitters + 1);
+        size_t const num_chars = get_num_chars(ss, params);
+        size_t const local_num_strings = ss.size();
+        size_t const nr_splitters = params.get_number_splitters(local_num_strings);
+        size_t const splitter_dist = num_chars / (nr_splitters + 1);
 
         std::vector<typename StringSet::Char> raw_splitters;
         // raw_splitters.reserve(nr_splitters * (maxLength + 1));

@@ -52,6 +52,8 @@ protected:
         auto const& comm_exchange = level.comm_exchange;
 
         auto string_ptr = container.make_string_lcp_ptr();
+        measuring_tool_.add(container.size(), "num_strings");
+
         auto num_groups = level.num_groups();
         auto group_size = level.group_size();
 
@@ -206,9 +208,11 @@ public:
 
         this->measuring_tool_.start("avg_lcp");
         const size_t lcp_summand = 5u;
-        auto avg_lcp = getAvgLcp(string_ptr, comms.comm_root()) + lcp_summand;
+        auto lcp_begin = string_ptr.lcp();
+        auto lcp_end = string_ptr.lcp() + string_ptr.size();
+        auto avg_lcp = compute_global_lcp_average(lcp_begin, lcp_end, comms.comm_root());
         // todo what is the justification for this value
-        sample::MaxLength max_length{2 * 100 * avg_lcp};
+        sample::MaxLength max_length{2 * 100 * avg_lcp + lcp_summand};
         std::tuple extra_sample_args{max_length};
         this->measuring_tool_.stop("avg_lcp");
 

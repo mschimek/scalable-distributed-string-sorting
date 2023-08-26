@@ -418,7 +418,7 @@ void arg2(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
             break;
         }
         case PolicyEnums::SampleString::indexedNumStrings: {
-            arg3<Args..., IndexedNumStringPolicy>(key, args);
+            arg3<Args..., IndexedNumStringsPolicy>(key, args);
             break;
         }
         case PolicyEnums::SampleString::indexedNumChars: {
