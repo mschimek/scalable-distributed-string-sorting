@@ -31,7 +31,7 @@
 namespace dss_mehnert {
 namespace bloomfilter {
 
-using hash_t = std::uint64_t;
+using hash_t = xxh::hash_t<64>;
 
 template <typename T>
 struct hash_less {
@@ -65,10 +65,7 @@ struct SipHasher {
 
 struct XXHasher {
     static inline hash_t hash(unsigned char const* str, size_t length, size_t filter_size) {
-        xxh::hash_state_t<64> hash_stream;
-        hash_stream.update(str, length);
-        xxh::hash_t<64> hashV = hash_stream.digest();
-        return hashV % filter_size;
+        return xxh::xxhash3<64>(str, length) % filter_size;
     }
 };
 
