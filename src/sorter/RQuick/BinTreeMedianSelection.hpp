@@ -30,7 +30,6 @@
 #include <tlx/math.hpp>
 
 #include "./RandomBitStore.hpp"
-#include "mpi/synchron.hpp"
 #include "strings/stringcontainer.hpp"
 #include "strings/stringset.hpp"
 #include "util/measuringTool.hpp"

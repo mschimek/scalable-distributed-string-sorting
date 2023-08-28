@@ -12,7 +12,6 @@ target_sources(dss_base
         is_sorted.hpp
         read_input.hpp
         shift.hpp
-        synchron.hpp
         type_mapper.hpp
         warmup.hpp
 )
