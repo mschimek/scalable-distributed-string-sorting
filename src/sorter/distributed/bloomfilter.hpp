@@ -205,9 +205,8 @@ inline std::tuple<std::vector<int>, std::vector<int>, std::vector<int>> compute_
     std::vector<int>&& global_offsets
 ) {
     if (hash_rank_pairs.empty()) {
-        std::vector<int> send_counts(interval_sizes.size());
-        std::vector<int> send_displs(interval_sizes.size());
-        return {{}, std::move(send_counts), std::move(send_displs)};
+        auto size = interval_sizes.size();
+        return {{}, std::vector<int>(size), std::vector<int>(size)};
     }
 
     auto& counters = global_offsets;
@@ -554,13 +553,12 @@ private:
         HashRange const hash_range
     ) {
         assert(comm_first != comm_last);
-        auto const& comm = *(comm_last - 1);
 
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
         measuring_tool.start("bloomfilter_send_hashes");
         auto hash_values = _internal::extract_hash_values(hash_str_pairs);
-        auto recv_data = _internal::send_hash_values(hash_values, hash_range, comm);
+        auto recv_data = _internal::send_hash_values(hash_values, hash_range, this->comm_global_);
         auto hash_rank_pairs = _internal::merge_intervals(
             recv_data.compute_hash_rank_pairs(),
             recv_data.local_offsets,
@@ -583,7 +581,7 @@ private:
             duplicates,
             send_counts,
             send_displs,
-            comm,
+            this->comm_global_,
             this->comm_global_
         );
         measuring_tool.stop("bloomfilter_send_indices");
