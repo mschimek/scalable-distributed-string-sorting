@@ -20,7 +20,6 @@
 #include "mpi/alltoall.hpp"
 #include "mpi/communicator.hpp"
 #include "sorter/distributed/merge_sort.hpp"
-#include "sorter/distributed/multi_level.hpp"
 #include "sorter/distributed/sample.hpp"
 #include "strings/stringcontainer.hpp"
 
@@ -85,8 +84,7 @@ public:
         this->measuring_tool_.stop("local_sorting", "sort_locally", comms.comm_root());
 
         this->measuring_tool_.start("bloomfilter", "bloomfilter_overall");
-        multi_level::GridCommunicators grid{comms};
-        auto prefixes = compute_distinguishing_prefixes(string_ptr, comms.comm_root(), grid);
+        auto prefixes = compute_distinguishing_prefixes(string_ptr, comms);
         this->measuring_tool_.stop("bloomfilter", "bloomfilter_overall", comms.comm_root());
 
         std::tuple<sample::DistPrefixes> sample_args{{prefixes}};
@@ -156,14 +154,11 @@ private:
         return permutation;
     }
 
-    std::vector<size_t> compute_distinguishing_prefixes(
-        StringPEIndexPtr str_ptr,
-        Communicator const& root,
-        multi_level::GridCommunicators<Communicator> const& grid
-    ) {
+    std::vector<size_t>
+    compute_distinguishing_prefixes(StringPEIndexPtr str_ptr, Subcommunicators const& comms) {
         this->measuring_tool_.start("bloomfilter_init");
         auto const& ss = str_ptr.active();
-        BloomFilter bloom_filter{root, grid};
+        BloomFilter bloom_filter{comms};
         std::vector<size_t> results(ss.size());
         this->measuring_tool_.stop("bloomfilter_init");
 
@@ -174,9 +169,8 @@ private:
         for (size_t i = start_depth * 2; i < std::numeric_limits<size_t>::max(); i *= 2) {
             this->measuring_tool_.add(candidates.size(), "bloomfilter_numberCandidates");
             this->measuring_tool_.start("bloomfilter_allreduce");
-            bool is_empty = candidates.empty();
-            auto all_empty = root.allreduce_single(
-                kamping::send_buf({is_empty}),
+            auto all_empty = comms.comm_root().allreduce_single(
+                kamping::send_buf({candidates.empty()}),
                 kamping::op(std::logical_and<>{})
             );
             this->measuring_tool_.stop("bloomfilter_allreduce");

@@ -294,10 +294,6 @@ class BloomFilter {
 public:
     static constexpr size_t filter_size = std::numeric_limits<uint64_t>::max();
 
-    BloomFilter(Communicator const& comm_global, GridCommunicator const& comm_grid)
-        : comm_global_(comm_global),
-          comm_grid_(comm_grid) {}
-
     template <typename StringSet, typename... Candidates>
     std::vector<size_t> filter(
         StringLcpPtr<StringSet> const strptr,
@@ -318,10 +314,7 @@ public:
         measuringTool.stop("bloomfilter_find_local_duplicates");
 
         measuringTool.start("bloomfilter_find_remote_duplicates");
-        auto derived = static_cast<Derived*>(this);
-        auto remote_dups = derived->find_remote_duplicates(
-            comm_grid_.comms.begin(),
-            comm_grid_.comms.end(),
+        auto remote_dups = static_cast<Derived*>(this)->find_remote_duplicates(
             hash_idx_pairs,
             HashRange{0, filter_size}
         );
@@ -340,10 +333,6 @@ public:
 
         return final_duplicates;
     }
-
-protected:
-    Communicator const& comm_global_;
-    GridCommunicator const& comm_grid_;
 
 private:
     struct GeneratedHashPairs {
@@ -542,23 +531,20 @@ class SingleLevel : public BloomFilter<HashPolicy, SingleLevel<HashPolicy>> {
     friend BloomFilter<HashPolicy, SingleLevel<HashPolicy>>;
 
 public:
-    using BloomFilter<HashPolicy, SingleLevel<HashPolicy>>::BloomFilter;
+    template <typename Subcommunicators>
+    SingleLevel(Subcommunicators const& comms) : comm_(comms.comm_root()) {}
 
 private:
-    template <typename CommIt>
-    std::optional<std::vector<int>> find_remote_duplicates(
-        CommIt const comm_first,
-        CommIt const comm_last,
-        std::vector<HashStringIndex> const& hash_str_pairs,
-        HashRange const hash_range
-    ) {
-        assert(comm_first != comm_last);
+    Communicator const& comm_;
 
+    std::optional<std::vector<int>> find_remote_duplicates(
+        std::vector<HashStringIndex> const& hash_str_pairs, HashRange const hash_range
+    ) {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
         measuring_tool.start("bloomfilter_send_hashes");
         auto hash_values = _internal::extract_hash_values(hash_str_pairs);
-        auto recv_data = _internal::send_hash_values(hash_values, hash_range, this->comm_global_);
+        auto recv_data = _internal::send_hash_values(hash_values, hash_range, comm_);
         auto hash_rank_pairs = _internal::merge_intervals(
             recv_data.compute_hash_rank_pairs(),
             recv_data.local_offsets,
@@ -577,13 +563,8 @@ private:
         measuring_tool.stop("bloomfilter_compute_remote_duplicates");
 
         measuring_tool.start("bloomfilter_send_indices");
-        auto remote_dups = _internal::send_duplicates(
-            duplicates,
-            send_counts,
-            send_displs,
-            this->comm_global_,
-            this->comm_global_
-        );
+        auto remote_dups =
+            _internal::send_duplicates(duplicates, send_counts, send_displs, comm_, comm_);
         measuring_tool.stop("bloomfilter_send_indices");
 
         return remote_dups;
@@ -595,14 +576,25 @@ class MultiLevel : public BloomFilter<HashPolicy, MultiLevel<HashPolicy>> {
     friend BloomFilter<HashPolicy, MultiLevel<HashPolicy>>;
 
 public:
-    using BloomFilter<HashPolicy, MultiLevel<HashPolicy>>::BloomFilter;
+    template <typename Subcommunicators>
+    MultiLevel(Subcommunicators const& comms) : comm_root_{comms.comm_root()},
+                                                comm_grid_{comms} {}
 
 private:
-    template <typename... Args>
-    std::optional<std::vector<int>> find_remote_duplicates(Args&&... args) {
+    Communicator const& comm_root_;
+    multi_level::GridCommunicators<Communicator> comm_grid_;
+
+    std::optional<std::vector<int>> find_remote_duplicates(
+        std::vector<HashStringIndex> const& hash_str_pairs, HashRange const hash_range
+    ) {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
         measuring_tool.start("bloomfilter_send_hashes");
-        auto duplicates = find_remote_duplicates_(std::forward<Args>(args)...);
+        auto duplicates = find_remote_duplicates_(
+            comm_grid_.comms.begin(),
+            comm_grid_.comms.end(),
+            hash_str_pairs,
+            hash_range
+        );
         measuring_tool.stop("bloomfilter_send_indices");
 
         return duplicates;
@@ -647,7 +639,7 @@ private:
                 send_counts,
                 send_displs,
                 comm,
-                this->comm_global_
+                comm_root_
             );
 
         } else {
