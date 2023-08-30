@@ -119,10 +119,13 @@ struct ColumnCommunicators {
     }
 };
 
-template <typename Communicator>
+template <typename Communicator_>
 class NoSplit {
 public:
+    using Communicator = Communicator_;
     using iterator = LevelIter<NoSplit<Communicator>, Communicator>;
+
+    static constexpr bool is_multi_level = false;
 
     static constexpr std::string_view get_name() { return "no_split"; }
 
@@ -146,10 +149,13 @@ private:
 };
 
 // todo rename
-template <typename Communicator>
+template <typename Communicator_>
 class NaiveSplit {
 public:
+    using Communicator = Communicator_;
     using iterator = LevelIter<NaiveSplit<Communicator>, Communicator>;
+
+    static constexpr bool is_multi_level = true;
 
     static constexpr std::string_view get_name() { return "naive_split"; }
 
@@ -172,11 +178,13 @@ private:
 };
 
 
-template <typename Communicator>
+template <typename Communicator_>
 class GridwiseSplit {
 public:
+    using Communicator = Communicator_;
     using iterator = LevelIter<GridwiseSplit<Communicator>, Communicator>;
 
+    static constexpr bool is_multi_level = true;
     static constexpr std::string_view get_name() { return "grid_split"; }
 
     GridwiseSplit(auto first_level, auto last_level, Communicator const& root)

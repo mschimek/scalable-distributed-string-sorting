@@ -89,30 +89,79 @@ public:
         auto prefixes = compute_distinguishing_prefixes(string_ptr, comms);
         this->measuring_tool_.stop("bloomfilter", "bloomfilter_overall", comms.comm_root());
 
-        std::tuple<sample::DistPrefixes> sample_args{{prefixes}};
-        std::tuple<std::vector<size_t> const&> all_to_all_args{prefixes};
+        auto sorted_container = sort_impl_(
+            std::move(container),
+            comms,
+            std::tuple<sample::DistPrefixes>{{prefixes}},
+            std::tuple<std::vector<size_t> const&>{prefixes}
+        );
 
-        auto level = begin(comms);
-        if (level == end(comms)) {
+        this->measuring_tool_.setRound(0);
+        return writeback_permutation(sorted_container);
+    }
+
+private:
+    static constexpr bool debug = false;
+    static constexpr uint64_t start_depth = 8;
+
+    template <
+        typename Subcommunicators_ = Subcommunicators,
+        std::enable_if_t<!Subcommunicators_::is_multi_level, bool> = true>
+    auto sort_impl_(
+        StringPEIndexContainer&& container,
+        Subcommunicators const& comms,
+        auto&& extra_sample_args,
+        auto&& extra_all_to_all_args
+    ) {
+        this->measuring_tool_.start("sort_globally", "final_sorting");
+        auto sorted_container = this->sort_exhaustive(
+            std::move(container),
+            comms.comm_final(),
+            extra_sample_args,
+            extra_all_to_all_args
+        );
+        this->measuring_tool_.stop("sort_globally", "final_sorting");
+
+        return sorted_container;
+    }
+
+    template <
+        typename Subcommunicators_ = Subcommunicators,
+        std::enable_if_t<Subcommunicators_::is_multi_level, bool> = true>
+    auto sort_impl_(
+        StringPEIndexContainer&& container,
+        Subcommunicators const& comms,
+        auto&& extra_sample_args,
+        auto&& extra_all_to_all_args
+    ) {
+        using std::begin;
+        using std::end;
+
+        if (begin(comms) == end(comms)) {
             // special case for single level sort
             this->measuring_tool_.start("sort_globally", "final_sorting");
             auto sorted_container = this->sort_exhaustive(
                 std::move(container),
                 comms.comm_final(),
-                sample_args,
-                all_to_all_args
+                extra_sample_args,
+                extra_all_to_all_args
             );
             this->measuring_tool_.stop("sort_globally", "final_sorting");
 
-            return writeback_permutation(sorted_container);
+            return sorted_container;
         }
 
         size_t round = 0;
+        auto level = begin(comms);
         {
             // first level of multi-level sort, consider distinguishing prefixes
             this->measuring_tool_.start("sort_globally", "partial_sorting");
-            container =
-                this->sort_partial(std::move(container), *level++, sample_args, all_to_all_args);
+            container = this->sort_partial(
+                std::move(container),
+                *level++,
+                extra_sample_args,
+                extra_all_to_all_args
+            );
             this->measuring_tool_.stop("sort_globally", "partial_sorting", comms.comm_root());
             this->measuring_tool_.setRound(++round);
         }
@@ -127,16 +176,16 @@ public:
 
         this->measuring_tool_.start("sort_globally", "final_sorting");
         // final level of multi-level sort
-        auto sorted_container =
-            this->sort_exhaustive(std::move(container), comms.comm_final(), {}, {});
+        auto sorted_container = this->sort_exhaustive(
+            std::move(container),
+            comms.comm_final(),
+            std::tuple<>{},
+            std::tuple<>{}
+        );
         this->measuring_tool_.stop("sort_globally", "final_sorting");
 
-        this->measuring_tool_.setRound(0);
-        return writeback_permutation(sorted_container);
+        return sorted_container;
     }
-
-private:
-    static constexpr uint64_t start_depth = 8;
 
     std::vector<StringIndexPEIndex> writeback_permutation(auto& sorted_container) {
         using std::begin;

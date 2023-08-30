@@ -23,7 +23,6 @@
 #include <tlx/sort/strings/radix_sort.hpp>
 #include <tlx/sort/strings/string_ptr.hpp>
 
-#include "mpi/communicator.hpp"
 #include "sorter/distributed/merging.hpp"
 #include "sorter/distributed/multi_level.hpp"
 #include "sorter/distributed/sample.hpp"
@@ -83,10 +82,17 @@ template <
     typename PartitionPolicy>
 class BaseDistributedMergeSort : private AllToAllStringPolicy {
 protected:
+    using Communicator = Subcommunicators::Communicator;
+
     using MeasuringTool = measurement::MeasuringTool;
     MeasuringTool& measuring_tool_ = MeasuringTool::measuringTool();
 
-    template <typename Container, typename... SampleArgs, typename... AllToAllArgs>
+    template <
+        typename Container,
+        typename... SampleArgs,
+        typename... AllToAllArgs,
+        typename Subcommunicators_ = Subcommunicators,
+        std::enable_if_t<Subcommunicators_::is_multi_level, bool> = true>
     auto sort_partial(
         Container&& container,
         multi_level::Level<Communicator> const& level,
@@ -247,7 +253,6 @@ class DistributedMergeSort : private BaseDistributedMergeSort<
 public:
     using StringLcpContainer = dss_schimek::StringLcpContainer<typename StringPtr::StringSet>;
 
-    // todo could simply pass Container by auto here
     StringLcpContainer sort(StringLcpContainer&& container, Subcommunicators const& comms) {
         using namespace kamping;
 
@@ -275,11 +280,13 @@ public:
         std::tuple extra_sample_args{max_length};
         this->measuring_tool_.stop("avg_lcp");
 
-        for (size_t round = 0; auto level: comms) {
-            this->measuring_tool_.start("sort_globally", "partial_sorting");
-            container = this->sort_partial(std::move(container), level, extra_sample_args, {});
-            this->measuring_tool_.stop("sort_globally", "partial_sorting", comms.comm_root());
-            this->measuring_tool_.setRound(++round);
+        if constexpr (Subcommunicators::is_multi_level) {
+            for (size_t round = 0; auto level: comms) {
+                this->measuring_tool_.start("sort_globally", "partial_sorting");
+                container = this->sort_partial(std::move(container), level, extra_sample_args, {});
+                this->measuring_tool_.stop("sort_globally", "partial_sorting", comms.comm_root());
+                this->measuring_tool_.setRound(++round);
+            }
         }
 
         this->measuring_tool_.start("sort_globally", "final_sorting");
