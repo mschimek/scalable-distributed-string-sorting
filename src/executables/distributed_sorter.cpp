@@ -308,7 +308,7 @@ void print_config(
     std::cout << prefix << " key=sampler name=" << SamplePolicy::getName() << "\n";
     std::cout << prefix << " key=alltoall_routine name=" << MPIAllToAllRoutine::getName() << "\n";
     std::cout << prefix << " key=subcomms name=" << Subcommunicators::get_name() << "\n";
-    // todo add redistribution policy
+    std::cout << prefix << " key=redistribution name=" << RedistributionPolicy::get_name() << "\n";
 }
 
 void die_with_feature(std::string_view feature) {
@@ -339,6 +339,7 @@ void arg7(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
     using namespace dss_mehnert::bloomfilter;
 
     if (key.grid_bloomfilter) {
+        tlx_die_verbose_unless(key.prefix_doubling, "did you forget to pass -d/--prefix-doubling");
         arg8<Args..., MultiLevel<XXHasher>>(key, args);
     } else {
         arg8<Args..., SingleLevel<XXHasher>>(key, args);
@@ -374,9 +375,8 @@ void arg4(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
     switch (key.subcomms) {
         case PolicyEnums::Subcommunicators::none: {
             if constexpr (CliOptions::enable_split) {
-                using Split = NaiveSplit<Communicator>;
-                using Redistribution = NaiveRedistribution<Communicator>;
-                // todo this should use a null type of sth similar
+                using Split = NoSplit<Communicator>;
+                using Redistribution = NoRedistribution<Communicator>;
                 arg5<Args..., Split, Redistribution>(key, args);
             } else {
                 die_with_feature("CLI_ENABLE_SPLIT");
@@ -385,7 +385,7 @@ void arg4(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
         }
         case PolicyEnums::Subcommunicators::naive: {
             if constexpr (CliOptions::enable_split) {
-                using Split = NaiveSplit<Communicator>;
+                using Split = RowwiseSplit<Communicator>;
                 using Redistribution = NaiveRedistribution<Communicator>;
                 arg5<Args..., Split, Redistribution>(key, args);
             } else {
@@ -402,6 +402,7 @@ void arg4(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
     }
 }
 
+// todo remove this
 template <typename... Args>
 void arg3(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
     using namespace dss_schimek::mpi;
@@ -553,7 +554,7 @@ int main(int argc, char* argv[]) {
         "type of string generation to use "
         "(0=skewed, [1]=DNGen, 2=file, 3=skewedDNGen, 4=suffixGen)"
     );
-    cp.add_string('y', "path", path, "path to file");
+    cp.add_string('y', "path", path, "path to input file");
     cp.add_double('r', "DN-ratio", DN_ratio, "D/N ratio of generated strings");
     cp.add_size_t('n', "num-strings", num_strings, "number of strings to be generated");
     cp.add_size_t('m', "len-strings", string_length, "length of generated strings");
@@ -583,7 +584,12 @@ int main(int argc, char* argv[]) {
         "use LCP compression during string exchange"
     );
     cp.add_flag('d', "prefix-doubling", prefix_doubling, "use prefix doubling merge sort");
-    cp.add_flag('g', "grid-bloomfilter", grid_bloomfilter, "use gridwise bloom filter");
+    cp.add_flag(
+        'g',
+        "grid-bloomfilter",
+        grid_bloomfilter,
+        "use gridwise bloom filter (requires prefix doubling)"
+    );
     cp.add_unsigned(
         'a',
         "alltoall-routine",

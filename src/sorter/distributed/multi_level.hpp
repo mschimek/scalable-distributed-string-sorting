@@ -148,18 +148,17 @@ private:
     Communicator comm_;
 };
 
-// todo rename
 template <typename Communicator_>
-class NaiveSplit {
+class RowwiseSplit {
 public:
     using Communicator = Communicator_;
-    using iterator = LevelIter<NaiveSplit<Communicator>, Communicator>;
+    using iterator = LevelIter<RowwiseSplit<Communicator>, Communicator>;
 
     static constexpr bool is_multi_level = true;
 
     static constexpr std::string_view get_name() { return "naive_split"; }
 
-    NaiveSplit(auto first_level, auto last_level, Communicator const& root)
+    RowwiseSplit(auto first_level, auto last_level, Communicator const& root)
         : rows_{first_level, last_level, root} {}
 
     iterator begin() const { return {*this, 0}; }
@@ -216,7 +215,7 @@ struct GridCommunicators {
     explicit GridCommunicators(NoSplit<Communicator> const& no_split)
         : comms{no_split.comm_final()} {}
 
-    explicit GridCommunicators(NaiveSplit<Communicator> const& naive_split)
+    explicit GridCommunicators(RowwiseSplit<Communicator> const& naive_split)
         : comms{naive_split.comms_row().comms} {
         comms.emplace_back(naive_split.comm_final());
     }

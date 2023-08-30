@@ -32,9 +32,25 @@ namespace dss_mehnert {
 namespace redistribution {
 
 template <typename Communicator>
+class NoRedistribution {
+public:
+    using Level = multi_level::Level<Communicator>;
+
+    static constexpr std::string_view get_name() { return "no_redistribution"; }
+
+    template <bool false_ = false>
+    static std::vector<size_t> compute_send_counts(std::vector<size_t> const&, Level const&) {
+        static_assert(false_, "redistribution policy does not support multi level sort");
+        return {};
+    }
+};
+
+template <typename Communicator>
 class GridwiseRedistribution {
 public:
     using Level = multi_level::Level<Communicator>;
+
+    static constexpr std::string_view get_name() { return "gridwise_redistribution"; }
 
     static std::vector<size_t>
     compute_send_counts(std::vector<size_t> const& interval_sizes, Level const& level) {
@@ -46,7 +62,10 @@ public:
 
 template <typename Communicator>
 class NaiveRedistribution {
+public:
     using Level = multi_level::Level<Communicator>;
+
+    static constexpr std::string_view get_name() { return "naive_redistribution"; }
 
     static std::vector<size_t>
     compute_send_counts(std::vector<size_t> const& interval_sizes, Level const& level) {
