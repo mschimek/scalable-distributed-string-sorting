@@ -179,7 +179,9 @@ template <typename T>
 inline std::vector<hash_t> extract_hash_values(std::vector<T> const& values) {
     std::vector<hash_t> hash_values(values.size());
 
-    auto get_hash = [](auto const& x) { return x.hash_value; };
+    auto get_hash = [](auto const& x) {
+        return x.hash_value;
+    };
     std::transform(values.begin(), values.end(), hash_values.begin(), get_hash);
 
     return hash_values;
