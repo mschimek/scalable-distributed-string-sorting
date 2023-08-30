@@ -86,6 +86,75 @@ public:
     }
 };
 
+namespace _internal {
+
+inline std::pair<std::vector<size_t>, std::vector<size_t>>
+exscan_and_bcast(std::vector<size_t> const& values, Communicator const& comm) {
+    std::vector<size_t> global_prefixes;
+    comm.exscan(
+        kamping::send_buf(values),
+        kamping::recv_buf(global_prefixes),
+        kamping::op(kamping::ops::plus<>{})
+    );
+
+    size_t const sentinel = comm.size() - 1;
+    std::vector<size_t> global_sizes;
+    if (comm.rank() == sentinel) {
+        global_sizes.resize(values.size());
+        std::transform(
+            global_prefixes.begin(),
+            global_prefixes.end(),
+            values.begin(),
+            global_sizes.begin(),
+            std::plus<>{}
+        );
+    }
+    comm.bcast(
+        kamping::send_recv_buf(global_sizes),
+        kamping::recv_counts(static_cast<int>(values.size())),
+        kamping::root(sentinel)
+    );
+
+    return {std::move(global_prefixes), std::move(global_sizes)};
+}
+
+} // namespace _internal
+
+template <typename Communicator>
+class SimpleRedistribution {
+public:
+    using Level = multi_level::Level<Communicator>;
+
+    static constexpr std::string_view get_name() { return "simple_redistribution"; }
+
+    // todo what about chars
+    static std::vector<size_t>
+    compute_send_counts(std::vector<size_t> const& interval_sizes, Level const& level) {
+        auto [global_prefixes, global_sizes] =
+            _internal::exscan_and_bcast(interval_sizes, level.comm_orig);
+
+        std::vector<size_t> send_counts(level.comm_orig.size());
+
+        for (size_t group = 0; group < interval_sizes.size(); ++group) {
+            auto const prefix = global_prefixes[group];
+            auto const elems_per_rank = tlx::div_ceil(global_sizes[group], level.group_size());
+            auto const rank_in_group = prefix / elems_per_rank;
+
+            auto dest = send_counts.begin() + level.group_size() * group + rank_in_group;
+
+            auto const prev_boundary = rank_in_group * elems_per_rank;
+            auto const end = prefix + interval_sizes[group];
+            for (auto begin = prev_boundary; begin < end; begin += elems_per_rank) {
+                auto const lower = std::max(begin, prefix);
+                auto const upper = std::min(begin + elems_per_rank, end);
+                *dest++ = upper - lower;
+            }
+        }
+
+        return send_counts;
+    }
+};
+
 } // namespace redistribution
 
 
@@ -146,6 +215,7 @@ protected:
 
         measuring_tool_.start("sort_globally", "exchange_and_merge");
         auto send_counts = RedistributionPolicy::compute_send_counts(interval_sizes, level);
+        assert_equal(send_counts.size(), comm_exchange.size());
         auto sorted_container = exchange_and_merge(
             std::move(container),
             send_counts,
