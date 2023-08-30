@@ -158,7 +158,7 @@ private:
     compute_distinguishing_prefixes(StringPEIndexPtr str_ptr, Subcommunicators const& comms) {
         this->measuring_tool_.start("bloomfilter_init");
         auto const& ss = str_ptr.active();
-        BloomFilter bloom_filter{comms};
+        BloomFilter bloom_filter{comms, ss.size()};
         std::vector<size_t> results(ss.size());
         this->measuring_tool_.stop("bloomfilter_init");
 

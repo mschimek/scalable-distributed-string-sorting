@@ -58,14 +58,23 @@ struct HashRank {
 };
 
 struct SipHasher {
+    static constexpr bool supports_hash_reuse = false;
+
     static inline hash_t hash(unsigned char const* str, size_t length, size_t filter_size) {
         return tlx::siphash(str, length) % filter_size;
     }
 };
 
 struct XXHasher {
+    static constexpr bool supports_hash_reuse = true;
+
     static inline hash_t hash(unsigned char const* str, size_t length, size_t filter_size) {
         return xxh::xxhash3<64>(str, length) % filter_size;
+    }
+
+    static inline hash_t
+    hash(unsigned char const* str, size_t length, size_t filter_size, hash_t old_hash) {
+        return (old_hash ^ xxh::xxhash3<64>(str, length)) % filter_size;
     }
 };
 
@@ -294,6 +303,9 @@ class BloomFilter {
 public:
     static constexpr size_t filter_size = std::numeric_limits<uint64_t>::max();
 
+    explicit BloomFilter(size_t size)
+        : hash_values_((HashPolicy::supports_hash_reuse) ? size : 0) {}
+
     template <typename StringSet, typename... Candidates>
     std::vector<size_t> filter(
         StringLcpPtr<StringSet> const strptr,
@@ -334,6 +346,9 @@ public:
         return final_duplicates;
     }
 
+protected:
+    std::vector<hash_t> hash_values_;
+
 private:
     struct GeneratedHashPairs {
         std::vector<HashStringIndex> hash_idx_pairs;
@@ -342,7 +357,7 @@ private:
     };
 
     template <typename StringSet, typename LcpIter>
-    static GeneratedHashPairs generate_hash_pairs(
+    GeneratedHashPairs generate_hash_pairs(
         StringSet const& ss,
         std::vector<size_t> const& candidates,
         size_t const depth,
@@ -374,6 +389,9 @@ private:
             } else {
                 hash_t hash = HashPolicy::hash(ss.get_chars(curr_str, 0), depth, filter_size);
                 hash_idx_pairs.emplace_back(hash, curr);
+                if constexpr (HashPolicy::supports_hash_reuse) {
+                    hash_values_[curr] = hash;
+                }
             }
             prev = curr;
         }
@@ -381,13 +399,15 @@ private:
     }
 
     template <typename StringSet, typename LcpIter>
-    static GeneratedHashPairs
+    GeneratedHashPairs
     generate_hash_pairs(StringSet const& ss, size_t const depth, LcpIter const lcps) {
         using std::begin;
 
         if (ss.empty()) {
             return {};
         }
+
+        size_t const half_depth = depth / 2;
 
         std::vector<HashStringIndex> hash_idx_pairs;
         std::vector<size_t> lcp_dups;
@@ -407,8 +427,19 @@ private:
                     hash_idx_pairs.back().is_lcp_root = true;
                 }
             } else {
-                auto hash = HashPolicy::hash(ss.get_chars(str, 0), depth, filter_size);
-                hash_idx_pairs.emplace_back(hash, candidate);
+                if constexpr (HashPolicy::supports_hash_reuse) {
+                    auto hash = HashPolicy::hash(
+                        ss.get_chars(str, half_depth),
+                        half_depth,
+                        filter_size,
+                        hash_values_[candidate]
+                    );
+                    hash_idx_pairs.emplace_back(hash, candidate);
+                    hash_values_[candidate] = hash;
+                } else {
+                    auto hash = HashPolicy::hash(ss.get_chars(str, 0), depth, filter_size);
+                    hash_idx_pairs.emplace_back(hash, candidate);
+                }
             }
         }
         return {std::move(hash_idx_pairs), std::move(lcp_dups), {std::move(eos_candidates)}};
@@ -528,11 +559,14 @@ private:
 
 template <typename HashPolicy>
 class SingleLevel : public BloomFilter<HashPolicy, SingleLevel<HashPolicy>> {
-    friend BloomFilter<HashPolicy, SingleLevel<HashPolicy>>;
+    using BloomFilterBase = BloomFilter<HashPolicy, SingleLevel<HashPolicy>>;
+    friend BloomFilterBase;
 
 public:
     template <typename Subcommunicators>
-    SingleLevel(Subcommunicators const& comms) : comm_(comms.comm_root()) {}
+    SingleLevel(Subcommunicators const& comms, size_t const size)
+        : BloomFilterBase{size},
+          comm_(comms.comm_root()) {}
 
 private:
     Communicator const& comm_;
@@ -573,12 +607,15 @@ private:
 
 template <typename HashPolicy>
 class MultiLevel : public BloomFilter<HashPolicy, MultiLevel<HashPolicy>> {
-    friend BloomFilter<HashPolicy, MultiLevel<HashPolicy>>;
+    using BloomFilterBase = BloomFilter<HashPolicy, MultiLevel<HashPolicy>>;
+    friend BloomFilterBase;
 
 public:
     template <typename Subcommunicators>
-    MultiLevel(Subcommunicators const& comms) : comm_root_{comms.comm_root()},
-                                                comm_grid_{comms} {}
+    MultiLevel(Subcommunicators const& comms, size_t const size)
+        : BloomFilterBase{size},
+          comm_root_{comms.comm_root()},
+          comm_grid_{comms} {}
 
 private:
     Communicator const& comm_root_;
@@ -673,7 +710,6 @@ private:
         std::vector<int> remote_idxs(duplicates.size());
         auto counters = std::move(global_offsets);
         for (int i = 0; auto const& duplicate: duplicates) {
-            // todo this loop should probably use an iterator
             for (; i < duplicate; ++i) {
                 counters[hash_rank_pairs[i].rank]++;
             }
