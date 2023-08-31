@@ -16,6 +16,7 @@
 #include <vector>
 
 #include <kamping/collectives/alltoall.hpp>
+#include <kamping/collectives/bcast.hpp>
 #include <kamping/collectives/reduce.hpp>
 #include <kamping/mpi_ops.hpp>
 #include <kamping/named_parameters.hpp>
@@ -26,6 +27,7 @@
 #include "sorter/distributed/merging.hpp"
 #include "sorter/distributed/multi_level.hpp"
 #include "sorter/distributed/sample.hpp"
+#include "tlx/math/div_ceil.hpp"
 #include "util/measuringTool.hpp"
 
 namespace dss_mehnert {
@@ -38,9 +40,10 @@ public:
 
     static constexpr std::string_view get_name() { return "no_redistribution"; }
 
-    template <bool false_ = false>
-    static std::vector<size_t> compute_send_counts(std::vector<size_t> const&, Level const&) {
-        static_assert(false_, "redistribution policy does not support multi level sort");
+    template <typename StringSet, bool false_ = false>
+    static std::vector<size_t>
+    compute_send_counts(StringSet const&, std::vector<size_t> const&, Level const&) {
+        static_assert(false_, "redistribution policy does not support multi-level sort");
         return {};
     }
 };
@@ -52,8 +55,10 @@ public:
 
     static constexpr std::string_view get_name() { return "gridwise_redistribution"; }
 
-    static std::vector<size_t>
-    compute_send_counts(std::vector<size_t> const& interval_sizes, Level const& level) {
+    template <typename StringSet>
+    static std::vector<size_t> compute_send_counts(
+        StringSet const&, std::vector<size_t> const& interval_sizes, Level const& level
+    ) {
         // nothing to do here, intervals are same shape as column communicator
         tlx_assert_equal(interval_sizes.size(), level.comm_exchange.size());
         return interval_sizes;
@@ -67,8 +72,10 @@ public:
 
     static constexpr std::string_view get_name() { return "naive_redistribution"; }
 
-    static std::vector<size_t>
-    compute_send_counts(std::vector<size_t> const& interval_sizes, Level const& level) {
+    template <typename StringSet>
+    static std::vector<size_t> compute_send_counts(
+        StringSet const&, std::vector<size_t> const& interval_sizes, Level const& level
+    ) {
         auto const& comm = level.comm_orig;
         auto const group_size = level.group_size();
         auto const num_groups = comm.size() / group_size;
@@ -121,15 +128,16 @@ exscan_and_bcast(std::vector<size_t> const& values, Communicator const& comm) {
 } // namespace _internal
 
 template <typename Communicator>
-class SimpleRedistribution {
+class SimpleStringRedistribution {
 public:
     using Level = multi_level::Level<Communicator>;
 
-    static constexpr std::string_view get_name() { return "simple_redistribution"; }
+    static constexpr std::string_view get_name() { return "simple_string_redistribution"; }
 
-    // todo what about chars
-    static std::vector<size_t>
-    compute_send_counts(std::vector<size_t> const& interval_sizes, Level const& level) {
+    template <typename StringSet>
+    static std::vector<size_t> compute_send_counts(
+        StringSet const&, std::vector<size_t> const& interval_sizes, Level const& level
+    ) {
         auto [global_prefixes, global_sizes] =
             _internal::exscan_and_bcast(interval_sizes, level.comm_orig);
 
@@ -137,21 +145,81 @@ public:
 
         for (size_t group = 0; group < interval_sizes.size(); ++group) {
             auto const prefix = global_prefixes[group];
-            auto const elems_per_rank = tlx::div_ceil(global_sizes[group], level.group_size());
-            auto const rank_in_group = prefix / elems_per_rank;
+            auto const strs_per_rank = tlx::div_ceil(global_sizes[group], level.group_size());
+            auto const rank_in_group = prefix / strs_per_rank;
 
             auto dest = send_counts.begin() + level.group_size() * group + rank_in_group;
 
-            auto const prev_boundary = rank_in_group * elems_per_rank;
+            auto const prev_boundary = rank_in_group * strs_per_rank;
             auto const end = prefix + interval_sizes[group];
-            for (auto begin = prev_boundary; begin < end; begin += elems_per_rank) {
+            for (auto begin = prev_boundary; begin < end; begin += strs_per_rank) {
                 auto const lower = std::max(begin, prefix);
-                auto const upper = std::min(begin + elems_per_rank, end);
+                auto const upper = std::min(begin + strs_per_rank, end);
                 *dest++ = upper - lower;
             }
         }
-
         return send_counts;
+    }
+};
+
+template <typename Communicator>
+class SimpleCharRedistribution {
+public:
+    using Level = multi_level::Level<Communicator>;
+
+    static constexpr std::string_view get_name() { return "simple_char_redistribution"; }
+
+    template <typename StringSet>
+    static std::vector<size_t> compute_send_counts(
+        StringSet const& ss, std::vector<size_t> const& interval_sizes, Level const& level
+    ) {
+        // todo maybe static assert has length member
+        using std::begin;
+
+        auto char_interval_sizes = compute_char_sizes(ss, interval_sizes);
+        auto [global_prefixes, global_sizes] =
+            _internal::exscan_and_bcast(char_interval_sizes, level.comm_orig);
+
+        std::vector<size_t> send_counts(level.comm_orig.size());
+
+        auto str = begin(ss);
+        for (size_t group = 0; group < interval_sizes.size(); ++group) {
+            auto const prefix = global_prefixes[group];
+            auto const strs_per_rank = tlx::div_ceil(global_sizes[group], level.group_size());
+            auto const rank_in_group = prefix / strs_per_rank;
+
+            auto dest = send_counts.begin() + level.group_size() * group + rank_in_group;
+
+            size_t sum_chars = prefix, num_strs = 0;
+            auto next_boundary = (rank_in_group + 1) * strs_per_rank;
+            for (auto const end = str + interval_sizes[group]; str != end; ++str, ++num_strs) {
+                if (sum_chars > next_boundary) {
+                    *dest++ = std::exchange(num_strs, 0);
+                    next_boundary += strs_per_rank;
+                }
+                sum_chars += ss.get_length(ss[str]);
+            }
+            *dest = num_strs;
+        }
+        return send_counts;
+    }
+
+private:
+    static std::vector<size_t>
+    compute_char_sizes(auto const& ss, std::vector<size_t> const& interval_sizes) {
+        using std::begin;
+
+        std::vector<size_t> char_interval_sizes(interval_sizes);
+        auto dest = char_interval_sizes.begin();
+
+        for (auto strs = begin(ss); auto const& interval: interval_sizes) {
+            auto get_length = [&ss](auto const& acc, auto const& str) {
+                return acc + ss.get_length(str) + 1;
+            };
+            *dest++ = std::accumulate(strs, strs + interval, size_t{0}, get_length);
+            strs += interval;
+        }
+        return char_interval_sizes;
     }
 };
 
@@ -214,7 +282,8 @@ protected:
         measuring_tool_.stop("sort_globally", "compute_partition");
 
         measuring_tool_.start("sort_globally", "exchange_and_merge");
-        auto send_counts = RedistributionPolicy::compute_send_counts(interval_sizes, level);
+        auto const& ss = strptr.active();
+        auto send_counts = RedistributionPolicy::compute_send_counts(ss, interval_sizes, level);
         assert_equal(send_counts.size(), comm_exchange.size());
         auto sorted_container = exchange_and_merge(
             std::move(container),
@@ -360,12 +429,12 @@ public:
         }
 
         this->measuring_tool_.start("avg_lcp");
-        size_t const lcp_summand = 5u;
         auto lcp_begin = string_ptr.lcp();
         auto lcp_end = string_ptr.lcp() + string_ptr.size();
         auto avg_lcp = compute_global_lcp_average(lcp_begin, lcp_end, comms.comm_root());
-        // todo what is the justification for this value
-        sample::MaxLength max_length{2 * 100 * avg_lcp + lcp_summand};
+
+        size_t const lcp_summand = 5u;
+        sample::MaxLength max_length{2 * avg_lcp + lcp_summand};
         std::tuple extra_sample_args{max_length};
         this->measuring_tool_.stop("avg_lcp");
 
