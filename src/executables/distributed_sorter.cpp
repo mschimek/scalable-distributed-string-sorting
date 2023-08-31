@@ -386,8 +386,23 @@ void arg4(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
         case PolicyEnums::Subcommunicators::naive: {
             if constexpr (CliOptions::enable_split) {
                 using Split = RowwiseSplit<Communicator>;
-                using Redistribution = NaiveRedistribution<Communicator>;
-                arg5<Args..., Split, Redistribution>(key, args);
+                switch (key.redistribution) {
+                    case PolicyEnums::Redistribution::naive: {
+                        using Redistribution = NaiveRedistribution<Communicator>;
+                        arg5<Args..., Split, Redistribution>(key, args);
+                        break;
+                    };
+                    case PolicyEnums::Redistribution::simple_strings: {
+                        using Redistribution = SimpleStringRedistribution<Communicator>;
+                        arg5<Args..., Split, Redistribution>(key, args);
+                        break;
+                    };
+                    case PolicyEnums::Redistribution::simple_chars: {
+                        using Redistribution = SimpleCharRedistribution<Communicator>;
+                        arg5<Args..., Split, Redistribution>(key, args);
+                        break;
+                    };
+                };
             } else {
                 die_with_feature("CLI_ENABLE_SPLIT");
             }
@@ -533,6 +548,7 @@ int main(int argc, char* argv[]) {
     unsigned int sample_policy = static_cast<int>(PolicyEnums::SampleString::numStrings);
     unsigned int alltoall_routine = static_cast<int>(PolicyEnums::MPIRoutineAllToAll::combined);
     unsigned int comm_split = static_cast<int>(PolicyEnums::Subcommunicators::grid);
+    unsigned int redistribution = static_cast<int>(PolicyEnums::Redistribution::naive);
     size_t num_strings = 100000;
     size_t num_iterations = 5;
     size_t string_length = 50;
@@ -604,6 +620,13 @@ int main(int argc, char* argv[]) {
         "whether and how to create subcommunicators during merge sort "
         "(0=none, 1=naive, [2]=grid)"
     );
+    cp.add_unsigned(
+        't',
+        "redistribution",
+        redistribution,
+        "redistribution scheme to use for multi-level sort"
+        "([0]=naive, 1=simple-strings, 2=simple-chars)"
+    );
     cp.add_flag(
         'c',
         "check",
@@ -633,6 +656,7 @@ int main(int argc, char* argv[]) {
         .subcomms = PolicyEnums::getSubcommunicators(comm_split),
         .rquick_v1 = rquick_v1,
         .rquick_lcp = rquick_lcp,
+        .redistribution = PolicyEnums::getRedistribution(redistribution),
         .prefix_compression = prefix_compression,
         .lcp_compression = lcp_compression,
         .prefix_doubling = prefix_doubling,

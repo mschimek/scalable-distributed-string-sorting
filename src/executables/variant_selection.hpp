@@ -119,6 +119,21 @@ inline Subcommunicators getSubcommunicators(size_t i) {
 };
 
 // todo merge with sorterargs
+enum class Redistribution { naive = 0, simple_strings = 1, simple_chars = 2 };
+
+inline Redistribution getRedistribution(size_t i) {
+    switch (i) {
+        case 0:
+            return Redistribution::naive;
+        case 1:
+            return Redistribution::simple_strings;
+        case 2:
+            return Redistribution::simple_chars;
+        default:
+            std::abort();
+    }
+};
+
 struct CombinationKey {
     StringGenerator string_generator;
     SampleString sample_policy;
@@ -126,6 +141,7 @@ struct CombinationKey {
     Subcommunicators subcomms;
     bool rquick_v1;
     bool rquick_lcp;
+    Redistribution redistribution;
     bool prefix_compression;
     bool lcp_compression;
     bool prefix_doubling;
