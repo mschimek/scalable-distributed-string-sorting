@@ -29,6 +29,7 @@
 #include "sorter/distributed/multi_level.hpp"
 #include "sorter/distributed/partition.hpp"
 #include "sorter/distributed/prefix_doubling.hpp"
+#include "sorter/distributed/redistribution.hpp"
 #include "util/measuringTool.hpp"
 #include "variant_selection.hpp"
 

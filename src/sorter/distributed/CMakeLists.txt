@@ -8,5 +8,6 @@ target_sources(dss_base
         multi_level.hpp
         partition.hpp
         prefix_doubling.hpp
+        redistribution.hpp
         sample.hpp
 )
