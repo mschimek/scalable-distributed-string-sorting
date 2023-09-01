@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <iterator>
 #include <numeric>
@@ -23,6 +25,7 @@
 #include "sorter/distributed/duplicateSorting.hpp"
 #include "strings/stringcontainer.hpp"
 #include "strings/stringtools.hpp"
+#include "util/measuringTool.hpp"
 
 namespace dss_schimek {
 
@@ -57,10 +60,63 @@ struct IndexStringComparator {
 template <typename Generator, typename Comparator, typename Data>
 typename Data::StringContainer
 splitterSort(Data&& data, Generator& gen, Comparator& comp, dss_mehnert::Communicator const& comm) {
+    class Tracker {
+    public:
+        class Timer {
+        public:
+            Timer(std::string name) : name_{std::move(name)} {}
+
+            void start(MPI_Comm& comm) {
+                comm_ = kamping::Communicator<>{comm, false};
+                start_ = std::chrono::high_resolution_clock::now();
+            }
+            void stop() {
+                auto end = std::chrono::high_resolution_clock::now();
+                auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start_);
+                size_t elapsed_nanos = elapsed.count();
+                auto result = comm_.reduce(
+                    kamping::send_buf(elapsed_nanos),
+                    kamping::op(kamping::ops::max<>{})
+                );
+                if (comm_.is_root()) {
+                    auto max = result.extract_recv_buffer()[0];
+                    auto prefix = measurement::MeasuringTool::measuringTool().getPrefix();
+                    std::cout << prefix << " key=" << name_ << " max_time=" << max << std::endl;
+                }
+            }
+
+        private:
+            kamping::Communicator<> comm_;
+            std::chrono::time_point<std::chrono::high_resolution_clock> start_;
+            std::string name_;
+        };
+
+        Timer local_sort_t = {"rquick_local_sort"};
+        Timer exchange_t = {"rquick_exchange"};
+        Timer parallel_shuffle_t = {"rquick_parallel_shuffle"};
+        Timer merge_t = {"rquick_merge"};
+        Timer median_select_t = {"rquick_median_select"};
+        Timer partition_t = {"rquick_partition"};
+        Timer comm_split_t = {"rquick_comm_split"};
+        Timer move_to_pow_of_two_t = {"rquick_move_to_pow_of_two"};
+
+    private:
+        size_t depth = 0;
+    };
+
     bool const isRobust = true;
     int tag = 11111;
     auto comm_mpi = comm.mpi_communicator();
-    return RQuick::sort(gen, std::forward<Data>(data), MPI_BYTE, tag, comm_mpi, comp, isRobust);
+    return RQuick::sort(
+        Tracker{},
+        gen,
+        std::forward<Data>(data),
+        MPI_BYTE,
+        tag,
+        comm_mpi,
+        comp,
+        isRobust
+    );
 }
 
 template <typename StringSet>

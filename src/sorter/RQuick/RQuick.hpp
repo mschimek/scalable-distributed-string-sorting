@@ -43,17 +43,6 @@
 #include "strings/stringset.hpp"
 #include "util/measuringTool.hpp"
 
-namespace Tools {
-class DummyTimer {
-public:
-    DummyTimer() {}
-
-    void start(MPI_Comm&) {}
-    void stop() {}
-};
-
-} // namespace Tools
-
 namespace RQuick {
 
 template <class StringContainer_, bool isIndexed>
@@ -325,7 +314,8 @@ Data<StringContainer, StringContainer::isIndexed> middleMostElements(
         data.rawStrings = cont.raw_strings();
         if constexpr (StringContainer::isIndexed) {
             data.indices.reserve(cont.size());
-            for (auto str: cont.make_string_set()) data.indices.push_back(str.index);
+            for (auto str: cont.make_string_set())
+                data.indices.push_back(str.index);
         }
         return data;
     }
@@ -337,14 +327,6 @@ Data<StringContainer, StringContainer::isIndexed> middleMostElements(
     const uint64_t begin = offset + shift;
     auto ss = cont.make_string_set();
 
-    if constexpr (debugQuicksort) {
-        if (begin + k > cont.size()) {
-            std::cout << "out of bounds error in middleMostElements, container size: "
-                      << cont.size() << " offset: " << offset << " k: " << k << " shift " << shift
-                      << std::endl;
-            std::abort();
-        }
-    }
     for (size_t i = begin; i < begin + k; ++i) {
         auto const str = ss[ss.begin() + i];
         auto const length = ss.get_length(str) + 1;
@@ -372,13 +354,6 @@ Data<StringContainer, StringContainer::isIndexed> selectSplitter(
     int tag,
     Communicator& comm
 ) {
-    // assert StringContainer is sorted
-    if constexpr (debugQuicksort) {
-        if (!stringContainer.isConsistent()) {
-            std::cout << "corrupt string cont" << std::endl;
-            std::abort();
-        }
-    }
     Data<StringContainer, StringContainer::isIndexed> local_medians =
         middleMostElements(stringContainer, 2, async_gen, bit_gen);
 
@@ -490,7 +465,6 @@ StringContainer sortRec(
 ) {
     using StringSet = typename StringContainer::StringSet;
     using String = typename StringSet::String;
-    using dss_schimek::measurement::MeasuringTool;
     tracker.median_select_t.start(comm);
 
     int32_t nprocs;
@@ -521,7 +495,6 @@ StringContainer sortRec(
         }
     }
 
-    tracker.median_select_t.stop();
     String pivotString;
     dss_schimek::Length len{pivot.rawStrings.size() - 1};
     if constexpr (StringContainer::isIndexed) {
@@ -529,11 +502,10 @@ StringContainer sortRec(
     } else {
         pivotString = {pivot.rawStrings.data(), len};
     }
-    // measuringTool.stop("Splitter_median_select");
+    tracker.median_select_t.stop();
 
     // Partition data into small elements and large elements.
 
-    // measuringTool.start("Splitter_partition");
     tracker.partition_t.start(comm);
 
     auto const* separator = locateSplitter(
@@ -544,19 +516,6 @@ StringContainer sortRec(
         bit_store,
         is_robust
     );
-    if constexpr (debugQuicksort) {
-        if (separator < stringContainer.getStrings().data()
-            || separator > stringContainer.getStrings().data() + stringContainer.size()) {
-            std::cout << "error in locate splitter" << std::endl;
-            std::abort();
-        }
-    }
-
-    if constexpr (debugQuicksort) {
-        const uint64_t partitionSize = separator - stringContainer.getStrings().data();
-        std::cout << "rank: " << myrank << " size: " << partitionSize << " "
-                  << stringContainer.size() - partitionSize << std::endl;
-    }
 
     String* send_begin = stringContainer.getStrings().data();
     String* send_end = const_cast<String*>(separator);
@@ -586,17 +545,10 @@ StringContainer sortRec(
     }
     const uint64_t ownCharsSize = stringContainer.char_size() - exchangeData.rawStrings.size();
 
-    //    uint64_t inbalance = std::abs(
-    //        static_cast<int64_t>(stringContainer.size()) - (send_end -
-    //        send_begin));
-    // measuringTool.add(inbalance, "inbalance", false);
-
     tracker.partition_t.stop();
-    // measuringTool.stop("Splitter_partition");
 
     // Move elements to partner and receive elements for own group.
     tracker.exchange_t.start(comm);
-    // measuringTool.start("Splitter_exchange");
 
     auto const partner = (myrank + (nprocs / 2)) % nprocs;
 
@@ -608,11 +560,9 @@ StringContainer sortRec(
     recvData.clear();
 
     tracker.exchange_t.stop();
-    // measuringTool.stop("Splitter_exchange");
+
     // Merge received elements with own elements.
     tracker.merge_t.start(comm);
-    // measuringTool.start("Splitter_merge");
-
 
     auto const num_elements = recvStrings.size() + (own_end - own_begin);
     std::vector<String> mergedStrings(num_elements);
@@ -647,16 +597,11 @@ StringContainer sortRec(
         stringContainer.update(std::move(mergedRawStrings));
     }
 
-    if constexpr (debugQuicksort) {
-        if (!stringContainer.isConsistent()) {
-            std::cout << "merged string cont not consistent " << std::endl;
-            std::abort();
-        }
-    }
-
     mergedStrings.clear();
     mergedStrings.shrink_to_fit();
     recvStrings.deleteAll();
+
+    tracker.merge_t.stop();
 
     if (nprocs >= 4) {
         // Split communicator and solve subproblems.
@@ -667,7 +612,7 @@ StringContainer sortRec(
 
         tracker.comm_split_t.stop();
 
-        auto res = sortRec<StringContainer::isIndexed>(
+        return sortRec<StringContainer::isIndexed>(
             gen,
             bit_store,
             std::move(stringContainer),
@@ -678,252 +623,24 @@ StringContainer sortRec(
             tag,
             subcomm
         );
-        return res;
     }
 
     return std::move(stringContainer);
 }
 
-template <class T, class Ignore, class Communicator>
-void shuffle(
-    std::mt19937_64& async_gen,
-    std::vector<T>& v,
-    std::vector<Ignore>& v_tmp,
-    MPI_Datatype mpi_type,
-    int tag,
-    Communicator& comm
-) {
-    // Just used for OpenMP
-    std::ignore = v_tmp;
-
-    int32_t nprocs;
-    int32_t myrank;
-    MPI_Comm_size(comm, &nprocs);
-    MPI_Comm_rank(comm, &myrank);
-
-    // Generate a random bit generator for each thread. Using pointers
-    // is faster than storing the generators in one vector due to
-    // cache-line sharing.
-#ifdef _OPENMP
-    int num_threads = 1;
-    std::vector<std::unique_ptr<std::mt19937_64>> omp_async_gens;
-    std::vector<size_t> seeds;
-#pragma omp parallel
-    {
-#pragma omp single
-        {
-            num_threads = omp_get_num_threads();
-            omp_async_gens.resize(num_threads);
-            for (int i = 0; i != num_threads; ++i) {
-                seeds.push_back(async_gen());
-            }
-        }
-
-        int const id = omp_get_thread_num();
-
-        omp_async_gens[id].reset(new std::mt19937_64{seeds[id]});
-    }
-
-    std::vector<size_t> sizes(2 * num_threads);
-    std::vector<size_t> prefix_sum(2 * num_threads + 1);
-
-#endif
-
-    const size_t comm_phases = tlx::integer_log2_floor(nprocs);
-
-    for (size_t phase = 0; phase != comm_phases; ++phase) {
-        const size_t mask = 1 << phase;
-        const size_t partner = myrank ^ mask;
-
-#ifdef _OPENMP
-
-        int send_cnt = 0;
-        int own_cnt = 0;
-        int recv_cnt = 0;
-
-#pragma omp parallel
-        {
-            int const id = omp_get_thread_num();
-
-            const size_t stripe = tlx::div_ceil(v.size(), num_threads);
-            std::unique_ptr<T[]> partitions[2] = {
-                std::unique_ptr<T[]>(new T[stripe]),
-                std::unique_ptr<T[]>(new T[stripe])};
-
-            auto const begin = v.data() + id * stripe;
-            auto const end = v.data() + std::min((id + 1) * stripe, v.size());
-
-            auto& mygen = *omp_async_gens[id].get();
-            T* partptrs[2] = {partitions[0].get(), partitions[1].get()};
-
-            auto const size = end - begin;
-            auto const remaining = size % (8 * sizeof(std::mt19937_64::result_type));
-            auto ptr = begin;
-            while (ptr < end - remaining) {
-                auto rand = mygen();
-                for (size_t j = 0; j < 8 * sizeof(std::mt19937_64::result_type); ++j) {
-                    auto const bit = rand & 1;
-                    rand = rand >> 1;
-                    *partptrs[bit] = *ptr;
-                    ++partptrs[bit];
-                    ++ptr;
-                }
-            }
-
-            auto rand = mygen();
-            while (ptr < end) {
-                // for (size_t i = 0; i != remaining; ++i) {
-                auto const bit = rand & 1;
-                rand = rand >> 1;
-                *partptrs[bit] = *ptr;
-                ++partptrs[bit];
-                ++ptr;
-            }
-
-            sizes[id] = partptrs[0] - partitions[0].get();
-            sizes[num_threads + id] = partptrs[1] - partitions[1].get();
-
-#pragma omp barrier
-#pragma omp master
-            {
-                tlx::exclusive_scan(sizes.begin(), sizes.end(), prefix_sum.begin(), size_t{0});
-
-                send_cnt = prefix_sum[2 * num_threads] - prefix_sum[num_threads];
-                own_cnt = prefix_sum[num_threads];
-                recv_cnt = 0;
-                RBC::Sendrecv(
-                    &send_cnt,
-                    1,
-                    MPI_INT,
-                    partner,
-                    tag,
-                    &recv_cnt,
-                    1,
-                    MPI_INT,
-                    partner,
-                    tag,
-                    comm,
-                    MPI_STATUS_IGNORE
-                );
-
-                v.resize(own_cnt + recv_cnt);
-                v_tmp.resize(send_cnt);
-            }
-#pragma omp barrier
-
-            std::copy(
-                partitions[0].get(),
-                partitions[0].get() + sizes[id],
-                v.data() + prefix_sum[id]
-            );
-            std::copy(
-                partitions[1].get(),
-                partitions[1].get() + sizes[num_threads + id],
-                v_tmp.data() + prefix_sum[id + num_threads] - prefix_sum[num_threads]
-            );
-        }
-
-        RBC::Sendrecv(
-            v_tmp.data(),
-            send_cnt,
-            mpi_type,
-            partner,
-            tag,
-            v.data() + own_cnt,
-            recv_cnt,
-            mpi_type,
-            partner,
-            tag,
-            comm,
-            MPI_STATUS_IGNORE
-        );
-
-#else
-        // v contains stringIndices
-        std::unique_ptr<T[]> partition(new T[v.size()]);
-        T* begins[2] = {v.data(), partition.get()};
-
-        auto const size = v.size();
-        auto const remaining = size % (8 * sizeof(std::mt19937_64::result_type));
-        auto ptr = v.begin();
-        auto const end = v.end();
-        while (ptr < end - remaining) {
-            auto rand = async_gen();
-            for (size_t j = 0; j < 8 * sizeof(std::mt19937_64::result_type); ++j) {
-                auto const bit = rand & 1;
-                rand = rand >> 1;
-                *begins[bit] = *ptr;
-                ++begins[bit];
-                ++ptr;
-            }
-        }
-
-        auto rand = async_gen();
-        while (ptr < end) {
-            auto const bit = rand & 1;
-            rand = rand >> 1;
-            *begins[bit] = *ptr;
-            ++begins[bit];
-            ++ptr;
-        }
-
-        MPI_Request requests[2];
-        // send sizes
-        MPI_Isend(
-            partition.get(),
-            (begins[1] - partition.get()) * sizeof(T),
-            mpi_type,
-            partner,
-            tag,
-            comm,
-            requests
-        );
-
-        int count = 0;
-        MPI_Status status;
-        MPI_Probe(partner, tag, comm, &status);
-        MPI_Get_count(&status, mpi_type, &count);
-        count /= sizeof(T);
-
-        v.resize(begins[0] - v.data() + count); // begins[0] end of string indices
-
-        MPI_Irecv(
-            v.data() + v.size() - count,
-            count * sizeof(T),
-            mpi_type,
-            partner,
-            tag,
-            comm,
-            requests + 1
-        );
-        MPI_Waitall(2, requests, MPI_STATUSES_IGNORE);
-
-#endif
-    }
-}
-
 template <typename StringContainer>
-void sortLocally(StringContainer& stringContainer) {
+void sortLocally(StringContainer& container) {
     if constexpr (StringContainer::isIndexed) {
-        std::vector<uint64_t> lcp(stringContainer.size(), 0);
-        auto strptr = stringContainer.make_string_ptr();
+        std::vector<uint64_t> lcp(container.size(), 0);
+        auto strptr = container.make_string_ptr();
         auto augmentedStringPtr =
             tlx::sort_strings_detail::StringLcpPtr(strptr.active(), lcp.data());
         tlx::sort_strings_detail::radixsort_CI3(augmentedStringPtr, 0, 0);
         auto ranges = getDuplicateRanges(augmentedStringPtr);
-        sortRanges(stringContainer, ranges);
+        sortRanges(container, ranges);
     } else {
-        tlx::sort_strings_detail::radixsort_CI3(stringContainer.make_string_ptr(), 0, 0);
+        tlx::sort_strings_detail::radixsort_CI3(container.make_string_ptr(), 0, 0);
     }
-}
-
-template <class Iterator, class Comp>
-void sortLocally(Iterator begin, Iterator end, Comp&& comp) {
-#ifdef _OPENMP
-    ips4o::parallel::sort(begin, end, std::forward<Comp>(comp));
-#else
-    ips4o::sort(begin, end, std::forward<Comp>(comp));
-#endif
 }
 
 template <class Tracker, class Data, class Comp, class Communicator>
@@ -938,11 +655,7 @@ typename Data::StringContainer sort(
     bool is_robust
 ) {
     using StringContainer = typename Data::StringContainer;
-    using dss_schimek::measurement::MeasuringTool;
 
-    // MeasuringTool& measuringTool = MeasuringTool::measuringTool();
-    // measuringTool.disableBarrier(true);
-    // measuringTool.start("Splitter_baseCase");
     int32_t nprocs;
     int32_t myrank;
     MPI_Comm_size(comm, &nprocs);
@@ -957,7 +670,6 @@ typename Data::StringContainer sort(
         return container;
     }
 
-    // measuringTool.start("Splitter_move_to_pow_of_two_t");
     tracker.move_to_pow_of_two_t.start(comm);
 
     auto const pow = tlx::round_down_to_power_of_two(nprocs);
@@ -989,7 +701,8 @@ typename Data::StringContainer sort(
         MPI_Comm sub_comm;
         MPI_Comm_split(comm, 1, myrank, &sub_comm);
         comm = sub_comm;
-        // measuringTool.stop("Splitter_move_to_pow_of_two_t");
+
+        tracker.move_to_pow_of_two_t.stop();
 
         return StringContainer();
     } else if (pow != nprocs) {
@@ -1011,14 +724,9 @@ typename Data::StringContainer sort(
 
     StringContainer container = data.moveToContainer();
     data.clear();
-    // measuringTool.stop("Splitter_move_to_pow_of_two_t");
     tracker.move_to_pow_of_two_t.stop();
 
-    // assert(tlx::is_power_of_two(nprocs));
-
     tracker.parallel_shuffle_t.start(comm);
-    // measuringTool.start("Splitter_shuffle");
-    // measuringTool.stop("Splitter_shuffle");
     tracker.parallel_shuffle_t.stop();
 
     tracker.local_sort_t.start(comm);
@@ -1041,16 +749,48 @@ typename Data::StringContainer sort(
 
 class DummyTracker {
 public:
-    Tools::DummyTimer local_sort_t;
-    Tools::DummyTimer exchange_t;
-    Tools::DummyTimer parallel_shuffle_t;
-    Tools::DummyTimer merge_t;
-    Tools::DummyTimer median_select_t;
-    Tools::DummyTimer partition_t;
-    Tools::DummyTimer comm_split_t;
-    Tools::DummyTimer move_to_pow_of_two_t;
+    class DummyTimer {
+    public:
+        DummyTimer() {}
+
+        void start(MPI_Comm&) {}
+        void stop() {}
+    };
+
+    DummyTimer local_sort_t;
+    DummyTimer exchange_t;
+    DummyTimer parallel_shuffle_t;
+    DummyTimer merge_t;
+    DummyTimer median_select_t;
+    DummyTimer partition_t;
+    DummyTimer comm_split_t;
+    DummyTimer move_to_pow_of_two_t;
 };
+
 } // namespace _internal
+
+template <class Tracker, class Comp, class Data>
+typename Data::StringContainer sort(
+    Tracker&& tracker,
+    std::mt19937_64& async_gen,
+    Data&& data,
+    MPI_Datatype mpi_type,
+    int tag,
+    MPI_Comm mpi_comm,
+    Comp&& comp,
+    bool is_robust
+) {
+    return RQuick::_internal::sort(
+        async_gen,
+        std::forward<Data>(data),
+        mpi_type,
+        tag,
+        mpi_comm,
+        tracker,
+        comp,
+        is_robust
+    );
+}
 
 template <class Comp, class Data>
 typename Data::StringContainer sort(

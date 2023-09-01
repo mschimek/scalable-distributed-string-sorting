@@ -114,6 +114,7 @@ public:
     void disable() { state.disabled = true; }
     void setVerbose(bool value) { state.verbose = value; }
     void setPrefix(std::string_view prefix_) { state.prefix = prefix_; }
+    std::string getPrefix() const { return state.prefix; }
     void setPhase(std::string_view phase) { state.phase = phase; }
     void setRound(size_t round) { state.round = round; }
 

@@ -43,9 +43,9 @@ compute_partition(StringPtr string_ptr, Params const& params, Communicator const
     Comparator comp;
     std::mt19937_64 gen{3469931 + comm.rank()};
     RQuickData sample_data{std::move(samples), {}};
-    measuring_tool.disable();
+    // measuring_tool.disable();
     StringContainer sorted_sample = splitterSort(std::move(sample_data), gen, comp, comm);
-    measuring_tool.enable();
+    // measuring_tool.enable();
     measuring_tool.stop("sort_splitters");
 
     measuring_tool.start("choose_splitters");
@@ -75,16 +75,15 @@ compute_partition(StringPtr string_ptr, Params const& params, Communicator const
     measuring_tool.start("sample_splitters");
     auto samples = Sampler::sample_splitters(ss, params, comm);
     measuring_tool.stop("sample_splitters");
-    // todo remove or move to somewhere else
     measuring_tool.add(samples.sample.size(), "allgather_splitters_bytes_sent");
 
     measuring_tool.start("sort_splitter");
     Comparator comp;
     std::mt19937_64 gen{3469931 + comm.rank()};
     RQuickData sample_data{std::move(samples.sample), std::move(samples.indices)};
-    measuring_tool.disable();
+    // measuring_tool.disable();
     StringContainer sorted_sample = splitterSort(std::move(sample_data), gen, comp, comm);
-    measuring_tool.enable();
+    // measuring_tool.enable();
     measuring_tool.stop("sort_splitter");
 
     measuring_tool.start("choose_splitters");
