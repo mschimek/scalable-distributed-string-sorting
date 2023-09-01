@@ -83,6 +83,10 @@ add_subdirectory(external/kamping)
 set(IPS4O_DISABLE_PARALLEL OFF)
 add_subdirectory(external/ips4o)
 
+# todo propbably don't want to set this globally
+set(CLUSTER_TYPE "SUPERMUCPHASE2")
+add_subdirectory(external/RBC)
+
 # Create a library containing all implementation, to be linked against by executables
 add_library(dss_base)
 set_target_properties(dss_base PROPERTIES LINKER_LANGUAGE CXX)
@@ -93,6 +97,7 @@ target_link_libraries(dss_base PRIVATE kamping)
 target_link_libraries(dss_base PUBLIC tlx)
 target_link_libraries(dss_base PRIVATE MPI::MPI_CXX)
 target_link_libraries(dss_base INTERFACE ips4o)
+target_link_libraries(dss_base PUBLIC rbc)
 
 add_subdirectory(src)
 

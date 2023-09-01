@@ -7,3 +7,6 @@
 [submodule "external/kamping"]
 	path = external/kamping
 	url = git@github.com:kamping-site/kamping.git
+[submodule "external/RBC"]
+	path = external/RBC
+	url = https://github.com/MichaelAxtmann/RBC.git
