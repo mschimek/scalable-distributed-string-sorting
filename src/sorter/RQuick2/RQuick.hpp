@@ -30,10 +30,6 @@
 
 #pragma once
 
-#ifdef _OPENMP
-#include <omp.h>
-#endif
-
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
@@ -412,51 +408,7 @@ void merge(T const* begin1, T const* end1, T const* begin2, T const* end2, T* tb
     assert(std::is_sorted(begin1, end1, std::forward<Comp>(comp)));
     assert(std::is_sorted(begin2, end2, std::forward<Comp>(comp)));
 
-#ifdef _OPENMP
-
-    auto const num_elements = (end1 - begin1) + (end2 - begin2);
-
-#pragma omp parallel
-    {
-        auto const num_threads = omp_get_num_threads();
-        auto const id = omp_get_thread_num();
-
-        auto const stripe = tlx::div_ceil(num_elements, num_threads);
-
-        auto const rank_begin = std::min(id * stripe, num_elements);
-        auto const rank_end = std::min((id + 1) * stripe, num_elements);
-
-        auto [s1_begin, s2_begin] =
-            twoSequenceSelection(begin1, end1, begin2, end2, rank_begin, std::forward<Comp>(comp));
-        assert((s1_begin - begin1) + (s2_begin - begin2) == rank_begin);
-
-        auto [s1_end, s2_end] = twoSequenceSelection(
-            s1_begin,
-            end1,
-            s2_begin,
-            end2,
-            rank_end - rank_begin,
-            std::forward<Comp>(comp)
-        );
-        assert(s1_begin <= s1_end);
-        assert(s2_begin <= s2_end);
-        assert((s1_end - begin1) + (s2_end - begin2) == rank_end);
-
-        std::merge(
-            s1_begin,
-            s1_end,
-            s2_begin,
-            s2_end,
-            tbegin + rank_begin,
-            std::forward<Comp>(comp)
-        );
-    }
-
-#else
-
     std::merge(begin1, end1, begin2, end2, tbegin, std::forward<Comp>(comp));
-
-#endif
 }
 
 template <class T, class Tracker, class Comp>
@@ -603,141 +555,12 @@ void shuffle(
     // Generate a random bit generator for each thread. Using pointers
     // is faster than storing the generators in one vector due to
     // cache-line sharing.
-#ifdef _OPENMP
-    int num_threads = 1;
-    std::vector<std::unique_ptr<std::mt19937_64> > omp_async_gens;
-    std::vector<size_t> seeds;
-#pragma omp parallel
-    {
-#pragma omp single
-        {
-            num_threads = omp_get_num_threads();
-            omp_async_gens.resize(num_threads);
-            for (int i = 0; i != num_threads; ++i) {
-                seeds.push_back(async_gen());
-            }
-        }
-
-        int const id = omp_get_thread_num();
-
-        omp_async_gens[id].reset(new std::mt19937_64{seeds[id]});
-    }
-
-    std::vector<size_t> sizes(2 * num_threads);
-    std::vector<size_t> prefix_sum(2 * num_threads + 1);
-
-#endif
 
     const size_t comm_phases = tlx::integer_log2_floor(nprocs);
 
     for (size_t phase = 0; phase != comm_phases; ++phase) {
         const size_t mask = 1 << phase;
         const size_t partner = myrank ^ mask;
-
-#ifdef _OPENMP
-
-        int send_cnt = 0;
-        int own_cnt = 0;
-        int recv_cnt = 0;
-
-#pragma omp parallel
-        {
-            int const id = omp_get_thread_num();
-
-            const size_t stripe = tlx::div_ceil(v.size(), num_threads);
-            std::unique_ptr<T[]> partitions[2] = {
-                std::unique_ptr<T[]>(new T[stripe]),
-                std::unique_ptr<T[]>(new T[stripe])};
-
-            auto const begin = v.data() + id * stripe;
-            auto const end = v.data() + std::min((id + 1) * stripe, v.size());
-
-            auto& mygen = *omp_async_gens[id].get();
-            T* partptrs[2] = {partitions[0].get(), partitions[1].get()};
-
-            auto const size = end - begin;
-            auto const remaining = size % (8 * sizeof(std::mt19937_64::result_type));
-            auto ptr = begin;
-            while (ptr < end - remaining) {
-                auto rand = mygen();
-                for (size_t j = 0; j < 8 * sizeof(std::mt19937_64::result_type); ++j) {
-                    auto const bit = rand & 1;
-                    rand = rand >> 1;
-                    *partptrs[bit] = *ptr;
-                    ++partptrs[bit];
-                    ++ptr;
-                }
-            }
-
-            auto rand = mygen();
-            while (ptr < end) {
-                // for (size_t i = 0; i != remaining; ++i) {
-                auto const bit = rand & 1;
-                rand = rand >> 1;
-                *partptrs[bit] = *ptr;
-                ++partptrs[bit];
-                ++ptr;
-            }
-
-            sizes[id] = partptrs[0] - partitions[0].get();
-            sizes[num_threads + id] = partptrs[1] - partitions[1].get();
-
-#pragma omp barrier
-#pragma omp master
-            {
-                tlx::exclusive_scan(sizes.begin(), sizes.end(), prefix_sum.begin(), size_t{0});
-
-                send_cnt = prefix_sum[2 * num_threads] - prefix_sum[num_threads];
-                own_cnt = prefix_sum[num_threads];
-                recv_cnt = 0;
-                RBC::Sendrecv(
-                    &send_cnt,
-                    1,
-                    Common::getMpiType(send_cnt),
-                    partner,
-                    tag,
-                    &recv_cnt,
-                    1,
-                    Common::getMpiType(send_cnt),
-                    partner,
-                    tag,
-                    comm,
-                    MPI_STATUS_IGNORE
-                );
-
-                v.resize(own_cnt + recv_cnt);
-                v_half.resize(send_cnt);
-            }
-#pragma omp barrier
-
-            std::copy(
-                partitions[0].get(),
-                partitions[0].get() + sizes[id],
-                v.data() + prefix_sum[id]
-            );
-            std::copy(
-                partitions[1].get(),
-                partitions[1].get() + sizes[num_threads + id],
-                v_half.data() + prefix_sum[id + num_threads] - prefix_sum[num_threads]
-            );
-        }
-
-        RBC::Sendrecv(
-            v_half.data(),
-            send_cnt,
-            mpi_type,
-            partner,
-            tag,
-            v.data() + own_cnt,
-            recv_cnt,
-            mpi_type,
-            partner,
-            tag,
-            comm,
-            MPI_STATUS_IGNORE
-        );
-
-#else
 
         std::unique_ptr<T[]> partition(new T[v.size()]);
         T* begins[2] = {v.data(), partition.get()};
@@ -787,18 +610,12 @@ void shuffle(
 
         RBC::Irecv(v.data() + v.size() - count, count, mpi_type, partner, tag, comm, requests + 1);
         RBC::Waitall(2, requests, MPI_STATUSES_IGNORE);
-
-#endif
     }
 }
 
 template <class It, class Comp>
 void sortLocally(It begin, It end, Comp comp) {
-#ifdef _OPENMP
-    ips4o::parallel::sort(begin, end, std::forward<Comp>(comp));
-#else
     ips4o::sort(begin, end, std::forward<Comp>(comp));
-#endif
 }
 
 template <class Tracker, class T, class Comp>
