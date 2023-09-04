@@ -225,17 +225,16 @@ public:
     }
 
     void orderRawStrings() {
-        auto orderedRawStrings = new std::vector<unsigned char>(char_size());
-        uint64_t curPos = 0;
-        for (size_t i = 0; i < size(); ++i) {
-            auto chars = strings_[i].getChars();
-            auto length = strings_[i].getLength();
-            auto curAdress = orderedRawStrings->data() + curPos;
-            std::copy_n(chars, length + 1, curAdress);
-            strings_[i].setChars(curAdress);
-            curPos += length + 1;
+        auto ordered_strings = new std::vector<unsigned char>(char_size());
+
+        auto dest = ordered_strings->begin();
+        for (auto& string: strings_) {
+            auto const chars = string.getChars();
+            string.setChars(&*dest);
+            dest = std::copy_n(chars, string.getLength() + 1, dest);
         }
-        raw_strings_.reset(orderedRawStrings);
+        ordered_strings->erase(dest, ordered_strings->end());
+        raw_strings_.reset(ordered_strings);
     }
 
     bool isConsistent() {
@@ -400,6 +399,7 @@ public:
     using Base = BaseStringContainer<StringSet_, IndexStringContainer<StringSet_>>;
     using Char = Base::Char;
 
+    static_assert(StringSet_::is_indexed);
     static constexpr bool isIndexed = true;
 
     IndexStringContainer() = default;

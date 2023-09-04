@@ -480,6 +480,8 @@ public:
     typedef typename Traits::CharIterator CharIterator;
     typedef typename Traits::Container Container;
 
+    static constexpr bool is_indexed{has_member<String, Index>};
+
     //! Construct from begin and end string pointers
     GenericStringSet(Iterator begin, Iterator end) : begin_(begin), end_(end) {}
 
@@ -566,6 +568,7 @@ public:
 
     void print(std::string_view prefix = "") const {
         size_t i = 0;
+        // todo begin() and end() should techinically use CRTP
         for (Iterator pi = begin(); pi != end(); ++pi) {
             LOG1 << prefix << "[" << i++ << "] = " << (*pi) << " = " << get_string(*pi, 0);
         }

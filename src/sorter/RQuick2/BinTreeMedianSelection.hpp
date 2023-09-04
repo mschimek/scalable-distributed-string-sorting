@@ -41,15 +41,16 @@
 #include <tlx/math.hpp>
 
 #include "RandomBitStore.hpp"
+#include "data.hpp"
 
 namespace BinTreeMedianSelection {
-template <class Iterator, class Comp>
-typename std::iterator_traits<Iterator>::value_type select(
-    Iterator begin,
-    Iterator end,
+
+// todo return type here is TBD
+template <class StringSet, class Comp>
+typename std::vector<unsigned char> select(
+    StringSet const& ss,
     size_t n,
     Comp comp,
-    MPI_Datatype mpi_type,
     std::mt19937_64& async_gen,
     RandomBitStore& bit_gen,
     int tag,
@@ -57,11 +58,12 @@ typename std::iterator_traits<Iterator>::value_type select(
 );
 
 namespace _internal {
-template <class T, class Comp>
-void selectMedians(
-    std::vector<T>& recv_v,
-    std::vector<T>& tmp_v,
-    std::vector<T>& vs,
+
+template <class StringSet, class Comp>
+StringSet selectMedians(
+    StringSet& local_ss,
+    StringSet& recv_ss,
+    std::vector<typename StringSet::String>& tmp_strs,
     size_t n,
     Comp comp,
     std::mt19937_64& async_gen,
@@ -70,68 +72,60 @@ void selectMedians(
     assert(recv_v.size() <= n);
     assert(vs.size() <= n);
 
-    tmp_v.resize(recv_v.size() + vs.size());
+    tmp_strs.resize(recv_ss.size() + local_ss.size());
+    // todo use string merge here
     std::merge(
-        recv_v.begin(),
-        recv_v.end(),
-        vs.begin(),
-        vs.end(),
-        tmp_v.begin(),
+        recv_ss.begin(),
+        recv_ss.end(),
+        local_ss.begin(),
+        local_ss.end(),
+        tmp_strs.begin(),
         std::forward<Comp>(comp)
     );
 
-    if (tmp_v.size() <= n) {
-        vs.swap(tmp_v);
-        assert(std::is_sorted(vs.begin(), vs.end(), std::forward<Comp>(comp)));
-        return;
+    if (tmp_strs.size() <= n) {
+        return {tmp_strs.begin(), tmp_strs.end()};
     } else {
-        if ((tmp_v.size() - n) % 2 == 0) {
-            auto const offset = (tmp_v.size() - n) / 2;
+        if ((tmp_strs.size() - n) % 2 == 0) {
+            auto const offset = (tmp_strs.size() - n) / 2;
+
             assert(offset + n < tmp_v.size());
-            auto const begin = tmp_v.begin() + offset;
-            auto const end = begin + n;
-            vs.clear();
-            vs.insert(vs.end(), begin, end);
-            return;
+            auto const begin = tmp_strs.begin() + offset;
+            return {begin, begin + n};
         } else {
-            // We cannot remove the same number of elements at
-            // the right and left end.
-            auto const offset = (tmp_v.size() - n) / 2;
-            auto const padding_cnt = bit_gen.getNextBit(async_gen);
-            assert(padding_cnt <= 1);
+            auto const offset = (tmp_strs.size() - n) / 2;
+            auto const shift = bit_gen.getNextBit(async_gen);
+
             assert(offset + padding_cnt + n <= tmp_v.size());
-            auto begin = tmp_v.begin() + offset + padding_cnt;
-            auto end = begin + n;
-            vs.clear();
-            vs.insert(vs.end(), begin, end);
-            return;
+            auto const begin = tmp_strs.begin() + offset + shift;
+            return {begin, begin + n};
         }
     }
 }
 
-template <class T>
-T selectMedian(std::vector<T> const& v, std::mt19937_64& async_gen, RandomBitStore& bit_gen) {
-    if (v.size() == 0) {
-        return T{};
-    }
+// todo maybe return an iterator instead
+template <class StringSet>
+typename StringSet::String
+selectMedian(StringSet const& ss, std::mt19937_64& async_gen, RandomBitStore& bit_gen) {
+    if (!ss.empty()) {
+        if (ss.size() % 2 == 0) {
+            auto shift = bit_gen.getNextBit(async_gen);
+            assert(shift <= 1);
 
-    assert(v.size() > 0);
-    if (v.size() % 2 == 0) {
-        if (bit_gen.getNextBit(async_gen)) {
-            return v[v.size() / 2];
+            return ss[ss.begin() + ((ss.size() / 2) - shift)];
         } else {
-            return v[(v.size() / 2) - 1];
+            return ss[ss.begin() + (ss.size() / 2)];
         }
     } else {
-        return v[v.size() / 2];
+        return StringSet::emptyString();
     }
 }
+
 } // namespace _internal
 
-template <class Iterator, class Comp>
-typename std::iterator_traits<Iterator>::value_type select(
-    Iterator begin,
-    Iterator end,
+template <class StringSet, class Comp>
+RQuick::Data<StringSet> select(
+    StringSet const& ss,
     size_t n,
     Comp comp,
     MPI_Datatype mpi_type,
@@ -140,23 +134,26 @@ typename std::iterator_traits<Iterator>::value_type select(
     int tag,
     const RBC::Comm& comm
 ) {
-    using T = typename std::iterator_traits<Iterator>::value_type;
-
     auto const myrank = comm.getRank();
 
-    assert(static_cast<size_t>(end - begin) <= n);
+    assert(ss.size() <= n);
+    assert(ss.check_order());
 
-    std::vector<T> v(begin, end);
-    std::vector<T> recv_v;
-    std::vector<T> tmp_v;
+    // todo what about reserve here?
+    RQuick::Data<StringSet> local_data;
+    RQuick::Data<StringSet> recv_data;
 
-    v.reserve(2 * n);
-    recv_v.reserve(2 * n);
-    tmp_v.reserve(2 * n);
+    auto const make_string_set = [](auto& vec) -> StringSet {
+        return {&*vec.begin(), &*vec.end()};
+    };
 
-    assert(std::is_sorted(begin, end, std::forward<Comp>(comp)));
+    std::vector<typename StringSet::String> local_strs{ss.begin(), ss.end()};
+    std::vector<typename StringSet::String> recv_strs;
+    std::vector<typename StringSet::String> temp_strs;
 
-    // Reduce.
+    recv_strs.reserve(n);
+    temp_strs.reserve(2 * n);
+
     int const tailing_zeros = tlx::ffs(comm.getRank()) - 1;
     int const iterations =
         comm.getRank() > 0 ? tailing_zeros : tlx::integer_log2_ceil(comm.getSize());
@@ -164,28 +161,36 @@ typename std::iterator_traits<Iterator>::value_type select(
     for (int it = 0; it != iterations; ++it) {
         auto const source = myrank + (1 << it);
 
-        MPI_Status status;
-        RBC::Probe(source, tag, comm, &status);
-        int count = 0;
-        MPI_Get_count(&status, mpi_type, &count);
-        assert(static_cast<size_t>(count) <= n);
-        recv_v.resize(count);
-        RBC::Recv(recv_v.data(), count, mpi_type, source, tag, comm, MPI_STATUS_IGNORE);
+        recv_data.recv(source, tag, comm);
+        recv_data.read_into(recv_strs);
 
-        _internal::selectMedians(recv_v, tmp_v, v, n, std::forward<Comp>(comp), async_gen, bit_gen);
+        auto const medians = _internal::selectMedians(
+            make_string_set(local_strs),
+            make_string_set(recv_strs),
+            temp_strs,
+            n,
+            std::forward<Comp>(comp),
+            async_gen,
+            bit_gen
+        );
+        local_data.write(medians);
+        local_strs.resize(medians.size());
+        std::copy(medians.begin(), medians.end(), local_strs.begin());
     }
-    if (myrank == 0) {
-        auto median = _internal::selectMedian(v, async_gen, bit_gen);
-        RBC::Bcast(&median, 1, mpi_type, 0, comm);
-        return median;
-    } else {
-        int target = myrank - (1 << tailing_zeros);
-        assert(v.size() <= n);
-        RBC::Send(v.data(), v.size(), mpi_type, target, tag, comm);
 
-        T median;
-        RBC::Bcast(&median, 1, mpi_type, 0, comm);
-        return median;
+    if (myrank == 0) {
+        auto local_ss = make_string_set(local_strs);
+        auto const median = _internal::selectMedian(local_ss, async_gen, bit_gen);
+        recv_data.write({&median, &median + 1});
+        recv_data.bcast_single(1, comm);
+        return recv_data;
+    } else {
+        int const target = myrank - (1 << tailing_zeros);
+        local_data.send(target, tag, comm);
+
+        recv_data.bcast_single(0, comm);
+        return recv_data;
     }
 }
+
 } // namespace BinTreeMedianSelection
