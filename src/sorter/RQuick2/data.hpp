@@ -54,9 +54,7 @@ struct RawStrings {
         RBC::Recv(raw_strs.data(), count, mpi_type, src, tag, comm, MPI_STATUS_IGNORE);
     }
 
-    void bcast_single(int root, RBC::Comm const& comm) {
-        assert(std::count(raw_strs.begin(), raw_strs.end(), '\0') == 1);
-
+    void bcast_single(typename StringSet::String& str, int const root, RBC::Comm const& comm) {
         auto size_type = kamping::mpi_datatype<size_t>();
         size_t size = raw_strs.size();
         RBC::Bcast(&size, 1, size_type, root, comm);
@@ -64,6 +62,11 @@ struct RawStrings {
         raw_strs.resize(size);
         auto char_type = kamping::mpi_datatype<typename StringSet::Char>();
         RBC::Bcast(raw_strs.data(), size, char_type, root, comm);
+
+        assert(std::count(raw_strs.begin(), raw_strs.end(), '\0') == 1);
+        assert(raw_strs.back() == '\0');
+        str.string = raw_strs.data();
+        str.length = dss_schimek::Length{size - 1};
     }
 };
 
@@ -98,12 +101,13 @@ struct Indices {
         RBC::Recv(indices.data(), count, mpi_type, src, tag, comm, MPI_STATUS_IGNORE);
     }
 
-    void bcast_single(int root, RBC::Comm const& comm) {
-        assert(indicies.size() == 1);
+    void bcast_single(typename StringSet::String& str, int const root, RBC::Comm const& comm) {
+        // todo only on root assert(indices.size() == 1);
 
         indices.resize(1);
         auto mpi_type = kamping::mpi_datatype<uint64_t>();
         RBC::Bcast(indices.data(), 1, mpi_type, root, comm);
+        str.index = dss_schimek::Index{indices.front()};
     }
 };
 
@@ -145,8 +149,10 @@ public:
         (Members<StringSet>::recv(src, tag, comm), ...);
     }
 
-    void bcast_single(int const root, RBC::Comm const& comm) {
-        (Members<StringSet>::bcast_single(root, comm), ...);
+    typename StringSet::String bcast_single(int const root, RBC::Comm const& comm) {
+        typename StringSet::String str;
+        (Members<StringSet>::bcast_single(str, root, comm), ...);
+        return str;
     }
 
 private:

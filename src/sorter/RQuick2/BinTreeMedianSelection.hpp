@@ -124,14 +124,13 @@ selectMedian(StringSet const& ss, std::mt19937_64& async_gen, RandomBitStore& bi
 } // namespace _internal
 
 template <class StringSet, class Comp>
-RQuick::Data<StringSet> select(
+std::pair<RQuick::Data<StringSet>, typename StringSet::String> select(
     StringSet const& ss,
-    size_t n,
-    Comp comp,
-    MPI_Datatype mpi_type,
+    size_t const n,
+    Comp const comp,
     std::mt19937_64& async_gen,
     RandomBitStore& bit_gen,
-    int tag,
+    int const tag,
     const RBC::Comm& comm
 ) {
     auto const myrank = comm.getRank();
@@ -182,14 +181,14 @@ RQuick::Data<StringSet> select(
         auto local_ss = make_string_set(local_strs);
         auto const median = _internal::selectMedian(local_ss, async_gen, bit_gen);
         recv_data.write({&median, &median + 1});
-        recv_data.bcast_single(1, comm);
-        return recv_data;
+        auto str = recv_data.bcast_single(1, comm);
+        return {std::move(recv_data), std::move(str)};
     } else {
         int const target = myrank - (1 << tailing_zeros);
         local_data.send(target, tag, comm);
 
-        recv_data.bcast_single(0, comm);
-        return recv_data;
+        auto str = recv_data.bcast_single(0, comm);
+        return {std::move(recv_data), std::move(str)};
     }
 }
 
