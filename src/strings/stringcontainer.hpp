@@ -167,7 +167,7 @@ public:
     using CharIterator = StringSet::CharIterator;
     using String = StringSet::String;
 
-    static constexpr bool isIndexed = false;
+    static constexpr bool isIndexed = StringSet::is_indexed;
 
     BaseStringContainer() : raw_strings_{std::make_unique<std::vector<Char>>()} {}
 
@@ -185,11 +185,15 @@ public:
     std::vector<Char>&& release_raw_strings() { return std::move(*raw_strings_); }
     std::vector<String>&& release_strings() { return std::move(strings_); }
 
+    void swap(Container& rhs) {
+        std::swap(raw_strings_, rhs.raw_strings_);
+        std::swap(strings_, rhs.strings_);
+    }
+
     std::vector<unsigned char> getRawString(int64_t i) {
         if (i < 0 || static_cast<uint64_t>(i) > size())
             return std::vector<unsigned char>(1, 0);
 
-        // todo should use StringSet::getLength here
         auto const length = strings_[i].length + 1;
         std::vector<unsigned char> rawString(length);
         std::copy(strings_[i].string, strings_[i].string + length, rawString.begin());
@@ -214,8 +218,6 @@ public:
         deleteStrings();
     }
 
-    bool operator==(Container const& other) { return this->raw_strings() == other.raw_strings(); }
-
     void set(std::vector<Char>&& raw_strings) { *raw_strings_ = std::move(raw_strings); }
     void set(std::vector<String>&& strings) { strings_ = std::move(strings); }
 
@@ -225,16 +227,22 @@ public:
     }
 
     void orderRawStrings() {
-        auto ordered_strings = new std::vector<unsigned char>(char_size());
+        std::vector<Char> new_buffer;
+        orderRawStrings(new_buffer);
+    }
 
-        auto dest = ordered_strings->begin();
-        for (auto& string: strings_) {
+    void orderRawStrings(std::vector<Char>& char_buffer) {
+        char_buffer.resize(make_string_set().get_sum_length() + size());
+
+        for (auto dest = char_buffer->begin(); auto& string: strings_) {
             auto const chars = string.getChars();
             string.setChars(&*dest);
-            dest = std::copy_n(chars, string.getLength() + 1, dest);
+            dest = std::copy_n(chars, string.getLength(), dest);
+            *dest++ = '\0';
         }
-        ordered_strings->erase(dest, ordered_strings->end());
-        raw_strings_.reset(ordered_strings);
+
+        using std::swap;
+        swap(*raw_strings_, char_buffer);
     }
 
     bool isConsistent() {
@@ -288,6 +296,12 @@ public:
     std::vector<size_t> const& savedLcps() const { return savedLcps_; }
     std::vector<size_t>&& release_lcps() { return std::move(lcps_); }
 
+    void swap(Container& rhs) {
+        std::swap(this->raw_strings_, rhs.raw_strings_);
+        std::swap(this->strings_, rhs.strings_);
+        std::swap(this->lcps_, rhs.lcps_);
+    }
+
     StringLcpPtr make_string_lcp_ptr() { return {this->make_string_set(), this->lcp_array()}; }
 
     // pull in `set` overlaods from `BaseStringcontainer`
@@ -322,8 +336,9 @@ public:
 
     void saveLcps() { savedLcps_ = lcps_; }
 
+    // todo should use strptr
     template <typename StringSet, typename LcpIt>
-    void extendPrefix(StringSet ss, LcpIt first_lcp, LcpIt last_lcp) {
+    void extendPrefix(StringSet const& ss, LcpIt first_lcp, LcpIt last_lcp) {
         using std::begin;
         using std::end;
 
@@ -392,6 +407,7 @@ public:
         : Base{std::move(raw_strings)} {};
 };
 
+// todo remove this class
 template <typename StringSet_>
 class IndexStringContainer
     : public BaseStringContainer<StringSet_, IndexStringContainer<StringSet_>> {
@@ -462,6 +478,7 @@ public:
             std::move(str_indices)} {}
 };
 
+// todo same here
 template <typename StringSet_>
 class IndexStringLcpContainer
     : public BaseStringLcpContainer<StringSet_, IndexStringLcpContainer<StringSet_>> {

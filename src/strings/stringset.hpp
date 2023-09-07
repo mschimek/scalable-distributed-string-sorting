@@ -35,12 +35,12 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  ******************************************************************************/
 
-#ifndef PSS_SRC_TOOLS_STRINGSET_HEADER
-#define PSS_SRC_TOOLS_STRINGSET_HEADER
+#pragma once
 
 #include <cassert>
 #include <cstdint>
 #include <memory>
+#include <numeric>
 #include <vector>
 
 #include <stdint.h>
@@ -580,6 +580,12 @@ public:
         return zero;
     }
 
+    size_t get_sum_length() const {
+        return std::accumulate(begin_, end_, [](auto const& n, auto const& str) {
+            return n + str.getLength();
+        });
+    }
+
     size_t get_length(String const& str) const {
         if constexpr (has_member<String, Length>) {
             return str.length;
@@ -641,7 +647,3 @@ using UCharLengthIndexPEIndexStringSet =
     GenericStringSet<unsigned char, StringLengthStringIndexPEIndex>;
 
 } // namespace dss_schimek
-
-#endif // !PSS_SRC_TOOLS_STRINGSET_HEADER
-
-/******************************************************************************/
