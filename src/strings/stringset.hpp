@@ -581,7 +581,7 @@ public:
     }
 
     size_t get_sum_length() const {
-        return std::accumulate(begin_, end_, [](auto const& n, auto const& str) {
+        return std::accumulate(begin_, end_, size_t{0}, [](auto const& n, auto const& str) {
             return n + str.getLength();
         });
     }

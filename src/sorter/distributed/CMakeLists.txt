@@ -1,7 +1,7 @@
 target_sources(dss_base
     PUBLIC
         bloomfilter.hpp
-        duplicateSorting.hpp
+        duplicate_sorting.hpp
         merge_sort.hpp
         merging.hpp
         misc.hpp

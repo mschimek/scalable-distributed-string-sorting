@@ -234,7 +234,7 @@ public:
     void orderRawStrings(std::vector<Char>& char_buffer) {
         char_buffer.resize(make_string_set().get_sum_length() + size());
 
-        for (auto dest = char_buffer->begin(); auto& string: strings_) {
+        for (auto dest = char_buffer.begin(); auto& string: strings_) {
             auto const chars = string.getChars();
             string.setChars(&*dest);
             dest = std::copy_n(chars, string.getLength(), dest);

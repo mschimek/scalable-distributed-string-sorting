@@ -39,7 +39,7 @@
 
 #include "./BinTreeMedianSelection.hpp"
 #include "./RandomBitStore.hpp"
-#include "sorter/distributed/duplicateSorting.hpp"
+#include "sorter/distributed/duplicate_sorting.hpp"
 #include "strings/stringset.hpp"
 #include "util/measuringTool.hpp"
 
@@ -632,12 +632,10 @@ template <typename StringContainer>
 void sortLocally(StringContainer& container) {
     if constexpr (StringContainer::isIndexed) {
         std::vector<uint64_t> lcp(container.size(), 0);
-        auto strptr = container.make_string_ptr();
-        auto augmentedStringPtr =
-            tlx::sort_strings_detail::StringLcpPtr(strptr.active(), lcp.data());
-        tlx::sort_strings_detail::radixsort_CI3(augmentedStringPtr, 0, 0);
-        auto ranges = getDuplicateRanges(augmentedStringPtr);
-        sortRanges(container, ranges);
+        auto strptr =
+            tlx::sort_strings_detail::StringLcpPtr(container.make_string_set(), lcp.data());
+        tlx::sort_strings_detail::radixsort_CI3(strptr, 0, 0);
+        dss_mehnert::sort_duplicates(strptr);
     } else {
         tlx::sort_strings_detail::radixsort_CI3(container.make_string_ptr(), 0, 0);
     }
@@ -786,7 +784,7 @@ typename Data::StringContainer sort(
         mpi_type,
         tag,
         mpi_comm,
-        tracker,
+        std::forward<Tracker>(tracker),
         comp,
         is_robust
     );

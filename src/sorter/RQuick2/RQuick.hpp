@@ -537,79 +537,15 @@ void sortRec(
     }
 }
 
-template <class T>
-void shuffle(
-    std::mt19937_64& async_gen,
-    std::vector<T>& v,
-    std::vector<T>& v_half,
-    MPI_Datatype mpi_type,
-    int tag,
-    const RBC::Comm& comm
-) {
-    // Just used for OpenMP
-    std::ignore = v_half;
-
-    const size_t nprocs = comm.getSize();
-    const size_t myrank = comm.getRank();
-
-    // Generate a random bit generator for each thread. Using pointers
-    // is faster than storing the generators in one vector due to
-    // cache-line sharing.
-
-    const size_t comm_phases = tlx::integer_log2_floor(nprocs);
-
-    for (size_t phase = 0; phase != comm_phases; ++phase) {
-        const size_t mask = 1 << phase;
-        const size_t partner = myrank ^ mask;
-
-        std::unique_ptr<T[]> partition(new T[v.size()]);
-        T* begins[2] = {v.data(), partition.get()};
-
-        auto const size = v.size();
-        auto const remaining = size % (8 * sizeof(std::mt19937_64::result_type));
-        auto ptr = v.begin();
-        auto const end = v.end();
-        while (ptr < end - remaining) {
-            auto rand = async_gen();
-            for (size_t j = 0; j < 8 * sizeof(std::mt19937_64::result_type); ++j) {
-                auto const bit = rand & 1;
-                rand = rand >> 1;
-                *begins[bit] = *ptr;
-                ++begins[bit];
-                ++ptr;
-            }
-        }
-
-        auto rand = async_gen();
-        while (ptr < end) {
-            auto const bit = rand & 1;
-            rand = rand >> 1;
-            *begins[bit] = *ptr;
-            ++begins[bit];
-            ++ptr;
-        }
-
-        RBC::Request requests[2];
-
-        RBC::Isend(
-            partition.get(),
-            (begins[1] - partition.get()),
-            mpi_type,
-            partner,
-            tag,
-            comm,
-            requests
-        );
-
-        int count = 0;
-        MPI_Status status;
-        RBC::Probe(partner, tag, comm, &status);
-        MPI_Get_count(&status, mpi_type, &count);
-
-        v.resize(begins[0] - v.data() + count);
-
-        RBC::Irecv(v.data() + v.size() - count, count, mpi_type, partner, tag, comm, requests + 1);
-        RBC::Waitall(2, requests, MPI_STATUSES_IGNORE);
+template <class StringPtr>
+void sortLocally(StringPtr const& strptr) {
+    if constexpr (StringPtr::StringSet::is_indexed) {
+        std::vector<uint64_t> lcps(strptr.size());
+        auto strlcpptr = tlx::sort_strings_detail::StringLcpPtr{strptr.active(), lcps.data()};
+        tlx::sort_strings_detail::radixsort_CI3(strlcpptr, 0, 0);
+        dss_mehnert::sort_duplicates(strptr);
+    } else {
+        tlx::sort_strings_detail::radixsort_CI3(strptr, 0, 0);
     }
 }
 
