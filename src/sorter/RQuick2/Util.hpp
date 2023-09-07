@@ -15,46 +15,36 @@
 #include "strings/stringset.hpp"
 #include "strings/stringtools.hpp"
 
-namespace RQuick {
+namespace RQuick2 {
 namespace _internal {
 
 template <typename StringPtr>
 struct RawStrings {
     std::vector<typename StringPtr::StringSet::Char> raw_strs;
-
-    template <typename Container>
-    RawStrings(Container& container) : raw_strs{container.release_raw_strings()} {}
 };
 
 template <typename StringPtr>
 struct Indices {
     std::vector<uint64_t> indices;
-
-    template <typename Container>
-    Indices(Container& container) : indices(container.size()) {
-        auto const begin = container.strings().begin(), end = container.strings().end();
-        std::transform(begin, end, [](auto const& str) { return str.index; });
-    }
 };
 
 template <typename StringPtr>
 struct LcpValues {
     std::vector<uint64_t> lcps;
-
-    template <typename Container>
-    LcpValues(Container& container) : lcps{container.release_lcps()} {}
 };
 
 template <typename StringPtr_, template <typename> typename... Members>
-class DataMembers : private Members<StringPtr_>... {
+class DataMembers : public Members<StringPtr_>... {
 public:
     using StringPtr = StringPtr_;
-    using StringSet = StringPtr::StringSet;
-    using String = StringPtr::StringSet::String;
-    using Char = StringPtr::StringSet::Char;
+    using StringSet = typename StringPtr::StringSet;
+    using String = typename StringPtr::StringSet::String;
+    using Char = typename StringPtr::StringSet::Char;
 
-    template <typename Container>
-    DataMembers(Container&& container) : Members<StringPtr>{container}... {}
+    DataMembers() = default;
+
+    template <typename... Args>
+    DataMembers(Args&&... args) : Members<StringPtr>{std::forward<Args>(args)}... {}
 
     size_t get_num_strings() const {
         if constexpr (has_index) {
@@ -64,43 +54,43 @@ public:
         }
     }
 
-    void write(StringPtr& strptr) {
+    void write(StringPtr const& strptr) {
         auto const& ss = strptr.active();
-        this->raw_strs.resize(ss.get_sum_length());
+        this->raw_strs.resize(ss.get_sum_length() + ss.size());
         if constexpr (has_index) {
-            this->indices.resize(strptr.size());
+            this->indices.resize(ss.size());
         }
 
         auto char_dest = this->raw_strs.begin();
-        for (size_t i = 0; auto const& str: ss) {
-            auto const old_chars = str.getChars();
-            str.setChars(&*char_dest);
-            char_dest = std::copy_n(old_chars, str.getLength(), char_dest);
+        for (size_t i = 0; auto& str: ss) {
+            char_dest = std::copy_n(str.getChars(), str.getLength(), char_dest);
             *char_dest++ = 0;
 
             if constexpr (has_index) {
-                this->indices[i] = str.getIndex();
+                this->indices[i++] = str.getIndex();
             }
         }
     }
 
-    void read_into(StringPtr& strptr) const {
-        auto& ss = strptr.active();
+    void read_into(StringPtr const& strptr) {
+        using dss_schimek::Index;
+        using dss_schimek::Length;
 
         auto str_begin = this->raw_strs.begin();
-        for (size_t i = 0; auto& str: std::span{ss.begin(), ss.end()}) {
-            auto const str_end = std::find(str_begin, this->raw_strs.end(), '\0');
-            auto const str_len = std::distance(str_begin, str_end) + 1;
+        auto const end = this->raw_strs.end();
+        for (size_t i = 0; auto& str: strptr.active()) {
+            auto const str_end = std::find(str_begin, end, '\0');
+            size_t const str_len = std::distance(str_begin, str_end);
+            assert(str_len == 50);
 
             // todo consider lcp values if present
             if constexpr (has_index) {
-                auto const str_idx = this->indices[i];
-                str = {&*str_begin, dss_schimek::Length{str_len}, dss_schimek::Index{str_idx}};
+                str = {&*str_begin, Length{str_len}, Index{this->indices[i]}};
             } else {
-                str = {&*str_begin, dss_schimek::Length{str_len}};
+                str = {&*str_begin, Length{str_len}};
             }
 
-            assert(str_end != this->raw_strs.end());
+            assert(str_end != end);
             str_begin = str_end + 1, ++i;
         }
     }
@@ -115,15 +105,20 @@ public:
         }
     }
 
-    void recv(int const src, int const tag, RBC::Comm const& comm) {
+    void recv(int const src, int const tag, RBC::Comm const& comm, bool append = false) {
         auto char_type = kamping::mpi_datatype<Char>();
         MPI_Status status;
         RBC::Probe(src, tag, comm, &status);
 
         int count_chars = 0;
         MPI_Get_count(&status, char_type, &count_chars);
-        this->raw_strs.resize(count_chars);
-        RBC::Recv(this->raw_strs.data(), count_chars, char_type, src, tag, comm, MPI_STATUS_IGNORE);
+
+        size_t offset = append ? this->raw_strs.size() : 0;
+        this->raw_strs.resize(offset + count_chars);
+        // clang-format off
+        RBC::Recv(this->raw_strs.data() + offset, count_chars, char_type,
+                  src, tag, comm, MPI_STATUS_IGNORE);
+        // clang-format on
 
         if constexpr (has_index) {
             auto idx_type = kamping::mpi_datatype<uint64_t>();
@@ -132,47 +127,49 @@ public:
             int count = 0;
             MPI_Get_count(&status, idx_type, &count_chars);
 
-            auto& indices = this->indices;
-            indices.resize(count);
-            RBC::Recv(indices.data(), count_chars, idx_type, src, tag, comm, MPI_STATUS_IGNORE);
+            size_t idx_offset = append ? this->indices.size() : 0;
+            this->indices.resize(count);
+            // clang-format off
+            RBC::Recv(this->indices.data() + idx_offset, count_chars, idx_type,
+                      src, tag, comm, MPI_STATUS_IGNORE);
+            // clang-format on
         }
     }
 
     void sendrecv(
-        Indices<StringPtr>& recv,
+        DataMembers<StringPtr, Members...>& recv,
         int const recv_cnt,
         int const partner,
         int const tag,
         RBC::Comm const& comm
     ) {
-        auto size_type = kamping::mpi_datatype<size_t>();
-        auto send_cnt = this->raw_strs.size(), char_cnt = 0;
         // clang-format off
-        RBC::Sendrecv(&send_cnt, 1, size_type, partner, tag,
-                      &char_cnt, 1, size_type, partner, tag,
+        auto const size_type = kamping::mpi_datatype<size_t>();
+        auto char_send_cnt = this->raw_strs.size(), char_recv_cnt = -1;
+        RBC::Sendrecv(&char_send_cnt, 1, size_type, partner, tag,
+                      &char_recv_cnt, 1, size_type, partner, tag,
                       comm, MPI_STATUS_IGNORE);
-        // clang-format on
 
-        auto char_type = kamping::mpi_datatype<Char>();
-        recv.raw_strs.resize(char_cnt);
-        // clang-format off
-        RBC::Sendrecv(this->raw_strs.data(), this->raw_strs.size(), char_type, partner, tag,
-                      recv.indices.data(),   recv_cnt,              char_type, partner, tag,
+        auto const char_type = kamping::mpi_datatype<Char>();
+        recv.raw_strs.resize(char_recv_cnt);
+        RBC::Sendrecv(this->raw_strs.data(), char_send_cnt, char_type, partner, tag,
+                      recv.raw_strs.data(),  char_recv_cnt, char_type, partner, tag,
                       comm, MPI_STATUS_IGNORE);
-        // clang-format on
 
         if constexpr (has_index) {
+            auto const mpi_type = kamping::mpi_datatype<uint64_t>();
             recv.indices.resize(recv_cnt);
-            auto mpi_type = kamping::mpi_datatype<uint64_t>();
-            // clang-format off
             RBC::Sendrecv(this->indices.data(), this->indices.size(), mpi_type, partner, tag,
                           recv.indices.data(),  recv_cnt,             mpi_type, partner, tag,
                           comm, MPI_STATUS_IGNORE);
-            // clang-format on
         }
+        // clang-format on
     }
 
     String bcast_single(int const root, RBC::Comm const& comm) {
+        using dss_schimek::Index;
+        using dss_schimek::Length;
+
         auto const size_type = kamping::mpi_datatype<size_t>();
         size_t size = this->raw_strs.size();
         RBC::Bcast(&size, 1, size_type, root, comm);
@@ -187,14 +184,13 @@ public:
             RBC::Bcast(this->indices.data(), 1, idx_type, root, comm);
         }
 
-        assert(std::count(raw_strs.begin(), raw_strs.end(), '\0') == 1);
-        assert(raw_strs.back() == '\0');
+        assert(std::count(this->raw_strs.begin(), this->raw_strs.end(), '\0') == 1);
+        assert(this->raw_strs.back() == '\0');
 
         if constexpr (has_index) {
-            dss_schimek::Index idx{this->indices.front()};
-            return {this->raw_strs.data(), dss_schimek::Length{size - 1}, idx};
+            return {this->raw_strs.data(), Length{size - 1}, Index{this->indices.front()}};
         } else {
-            return {this->raw_strs.data(), dss_schimek::Length{size - 1}};
+            return {this->raw_strs.data(), Length{size - 1}};
         }
     }
 
@@ -202,7 +198,7 @@ private:
     static_assert(
         std::is_same_v<
             std::tuple_element_t<0, std::tuple<Members<StringPtr>...>>,
-            RawStrings<StringSet>>,
+            RawStrings<StringPtr>>,
         "RawStrings must be the first Member"
     );
     static_assert(
@@ -216,17 +212,27 @@ private:
         (std::is_same_v<Members<StringPtr>, LcpValues<StringPtr>> || ...);
 };
 
+template <typename StringPtr>
+using Data_ = std::conditional_t<
+    StringPtr::StringSet::is_indexed,
+    DataMembers<StringPtr, RawStrings, Indices>,
+    DataMembers<StringPtr, RawStrings>>;
+
 } // namespace _internal
 
 // todo allow for LCP values
+// todo get rid of index string container
 template <typename StringPtr>
-using Container = dss_schimek::StringContainer<typename StringPtr::StringSet>;
+using Container = std::conditional_t<
+    StringPtr::StringSet::is_indexed,
+    dss_schimek::IndexStringContainer<typename StringPtr::StringSet>,
+    dss_schimek::StringContainer<typename StringPtr::StringSet>>;
 
 template <typename StringPtr>
 using StringT = typename StringPtr::StringSet::String;
 
 template <typename StringPtr>
-using CharT = typename StringPtr::StringSet::String;
+using CharT = typename StringPtr::StringSet::Char;
 
 template <typename StringPtr, typename Enable = void>
 struct Comparator;
@@ -250,19 +256,10 @@ template <class StringPtr>
 StringPtr make_str_ptr(Container<StringPtr>& container) {
     if constexpr (StringPtr::with_lcp) {
         static_assert(std::is_same_v<StringPtr, typename Container<StringPtr>::StringLcpPtr>);
-        return container.make_str_lcp_ptr();
+        return container.make_string_lcp_ptr();
     } else {
         static_assert(std::is_same_v<StringPtr, typename Container<StringPtr>::StringPtr>);
-        return container.make_str_ptr();
-    }
-}
-
-// todo replace with function on stringcontainer
-template <class StringPtr>
-void resize(Container<StringPtr>& container, size_t const count) {
-    container.strings().resize(count);
-    if constexpr (StringPtr::with_lcp) {
-        container.lcps().resize(count);
+        return container.make_string_ptr();
     }
 }
 
@@ -270,26 +267,25 @@ template <typename StringPtr>
 void copy_into(StringPtr const& strptr, Container<StringPtr>& container) {
     auto const& ss = strptr.active();
 
-    container.strings().resize(strptr.size());
-    std::copy(ss.begin(), ss.end(), container.strings());
+    container.resize_strings(strptr.size());
+    std::copy(ss.begin(), ss.end(), container.getStrings().begin());
 
     // todo consider lcp values
 }
 
 template <typename StringPtr>
-using Data = std::conditional_t<
-    StringPtr::StringSet::is_indexed,
-    _internal::DataMembers<StringPtr, _internal::RawStrings, _internal::Indices>,
-    _internal::DataMembers<StringPtr, _internal::RawStrings>>;
+struct Data : public _internal::Data_<StringPtr> {
+    using _internal::Data_<StringPtr>::DataMembers;
+};
 
 template <typename StringPtr>
 struct TemporaryBuffers {
-    Data<StringPtr>& send_data;
-    Data<StringPtr>& recv_data;
-    Container<StringPtr>& recv_strings;
-    Container<StringPtr>& merge_strings;
-    Container<StringPtr>& median_strings;
-    std::vector<CharT<StringPtr>>& char_buffer;
+    Data<StringPtr> send_data;
+    Data<StringPtr> recv_data;
+    Container<StringPtr> recv_strings;
+    Container<StringPtr> merge_strings;
+    Container<StringPtr> median_strings;
+    std::vector<CharT<StringPtr>> char_buffer;
 };
 
-} // namespace RQuick
+} // namespace RQuick2

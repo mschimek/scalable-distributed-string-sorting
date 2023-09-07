@@ -368,7 +368,7 @@ struct Length {
 struct Index {
     static constexpr std::string_view name{"index"};
 
-    uint64_t index; // todo is u64 the right type here?
+    uint64_t index;
 
     size_t value() const { return index; }
 
@@ -376,7 +376,7 @@ struct Index {
 };
 
 struct PEIndex {
-    static constexpr std::string_view name{"pe_index"};
+    static constexpr std::string_view name{"rank"};
 
     size_t PEIndex;
 

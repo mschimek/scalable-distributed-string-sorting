@@ -203,6 +203,8 @@ public:
     StringSet make_string_set() { return {strings(), strings() + size()}; }
     StringPtr make_string_ptr() { return {make_string_set()}; }
 
+    void resize_strings(size_t const count) { strings_.resize(count, String{}); }
+
     void deleteRawStrings() {
         raw_strings_->clear();
         raw_strings_->shrink_to_fit();
@@ -238,11 +240,10 @@ public:
             auto const chars = string.getChars();
             string.setChars(&*dest);
             dest = std::copy_n(chars, string.getLength(), dest);
-            *dest++ = '\0';
+            *dest++ = 0;
         }
 
-        using std::swap;
-        swap(*raw_strings_, char_buffer);
+        std::swap(*raw_strings_, char_buffer);
     }
 
     bool isConsistent() {
@@ -303,6 +304,11 @@ public:
     }
 
     StringLcpPtr make_string_lcp_ptr() { return {this->make_string_set(), this->lcp_array()}; }
+
+    void resize_strings(size_t const count) {
+        this->strings_.resize(count);
+        this->lcps_.resize(count);
+    }
 
     // pull in `set` overlaods from `BaseStringcontainer`
     using Base::set;

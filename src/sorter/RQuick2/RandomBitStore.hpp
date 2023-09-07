@@ -3,7 +3,6 @@
  * (KaDiS).
  *
  * Copyright (c) 2019, Michael Axtmann <michael.axtmann@kit.edu>
- * Copyright (c) 2023, Pascal Mehnert <pascal.mehnert@student.kit.edu>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -33,26 +32,27 @@
 #include <cstddef>
 #include <random>
 
+namespace RQuick2 {
+
 class RandomBitStore {
 public:
-    RandomBitStore();
-    uint_fast64_t getNextBit(std::mt19937_64& async_gen);
+    RandomBitStore() : pos_(8 * sizeof(uint_fast64_t)){};
+
+    uint_fast64_t getNextBit(std::mt19937_64& async_gen) {
+        if (pos_ == 8 * sizeof(uint_fast64_t)) {
+            bits_ = async_gen();
+            pos_ = 0;
+        }
+
+        auto const res = bits_ & 1;
+        bits_ = bits_ >> 1;
+        ++pos_;
+        return res;
+    }
 
 private:
     size_t pos_;
     uint_fast64_t bits_;
 };
 
-inline RandomBitStore::RandomBitStore() : pos_(8 * sizeof(uint_fast64_t)) {}
-
-inline uint_fast64_t RandomBitStore::getNextBit(std::mt19937_64& async_gen) {
-    if (pos_ == 8 * sizeof(uint_fast64_t)) {
-        bits_ = async_gen();
-        pos_ = 0;
-    }
-
-    auto const res = bits_ & 1;
-    bits_ = bits_ >> 1;
-    ++pos_;
-    return res;
-}
+} // namespace RQuick2

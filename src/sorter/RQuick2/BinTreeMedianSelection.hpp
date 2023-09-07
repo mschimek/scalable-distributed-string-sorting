@@ -40,65 +40,54 @@
 #include <RBC.hpp>
 #include <tlx/math.hpp>
 
-#include "RandomBitStore.hpp"
-#include "data.hpp"
+#include "./RandomBitStore.hpp"
+#include "./Util.hpp"
 
+namespace RQuick2 {
 namespace BinTreeMedianSelection {
-
-// todo return type here is TBD
-template <class StringSet, class Comp>
-typename std::vector<unsigned char> select(
-    StringSet const& ss,
-    size_t n,
-    Comp comp,
-    std::mt19937_64& async_gen,
-    RandomBitStore& bit_gen,
-    int tag,
-    RBC::Comm& comm
-);
-
 namespace _internal {
 
-template <class StringSet, class Comp>
-StringSet selectMedians(
-    StringSet& local_ss,
-    StringSet& recv_ss,
-    std::vector<typename StringSet::String>& tmp_strs,
-    size_t n,
-    Comp comp,
+template <class StringPtr>
+StringPtr selectMedians(
+    StringPtr const& local_strptr,
+    StringPtr const& recv_strptr,
+    Container<StringPtr>& merge_strings,
+    size_t const n,
     std::mt19937_64& async_gen,
     RandomBitStore& bit_gen
 ) {
-    assert(recv_v.size() <= n);
-    assert(vs.size() <= n);
+    assert(local_strptr.size() <= n);
+    assert(recv_strptr.size() <= n);
 
-    tmp_strs.resize(recv_ss.size() + local_ss.size());
-    // todo use string merge here
+    auto& local_ss = local_strptr.active();
+    auto& recv_ss = recv_strptr.active();
+
+    merge_strings.resize_strings(local_strptr.size() + recv_strptr.size());
+    // todo use string merge here (if LCPs are present)
     std::merge(
-        recv_ss.begin(),
-        recv_ss.end(),
         local_ss.begin(),
         local_ss.end(),
-        tmp_strs.begin(),
-        std::forward<Comp>(comp)
+        recv_ss.begin(),
+        recv_ss.end(),
+        merge_strings.getStrings().begin(),
+        Comparator<StringPtr>{}
     );
 
-    if (tmp_strs.size() <= n) {
-        return {tmp_strs.begin(), tmp_strs.end()};
+    auto const strptr = make_str_ptr<StringPtr>(merge_strings);
+    if (merge_strings.size() <= n) {
+        return strptr;
     } else {
-        if ((tmp_strs.size() - n) % 2 == 0) {
-            auto const offset = (tmp_strs.size() - n) / 2;
+        if ((merge_strings.size() - n) % 2 == 0) {
+            auto const offset = (merge_strings.size() - n) / 2;
 
-            assert(offset + n < tmp_v.size());
-            auto const begin = tmp_strs.begin() + offset;
-            return {begin, begin + n};
+            assert(offset + n < strptr.size());
+            return strptr.sub(offset, n);
         } else {
-            auto const offset = (tmp_strs.size() - n) / 2;
+            auto const offset = (merge_strings.size() - n) / 2;
             auto const shift = bit_gen.getNextBit(async_gen);
 
-            assert(offset + padding_cnt + n <= tmp_v.size());
-            auto const begin = tmp_strs.begin() + offset + shift;
-            return {begin, begin + n};
+            assert(offset + shift + n <= strptr.size());
+            return strptr.sub(offset + shift, n);
         }
     }
 }
@@ -110,24 +99,22 @@ selectMedian(StringSet const& ss, std::mt19937_64& async_gen, RandomBitStore& bi
     if (!ss.empty()) {
         if (ss.size() % 2 == 0) {
             auto shift = bit_gen.getNextBit(async_gen);
-            assert(shift <= 1);
-
             return ss[ss.begin() + ((ss.size() / 2) - shift)];
         } else {
             return ss[ss.begin() + (ss.size() / 2)];
         }
     } else {
-        return StringSet::emptyString();
+        return StringSet::empty_string();
     }
 }
 
 } // namespace _internal
 
-template <class StringSet, class Comp>
-std::pair<RQuick::Data<StringSet>, typename StringSet::String> select(
-    StringSet const& ss,
+template <class StringPtr>
+StringT<StringPtr> select(
+    StringPtr strptr,
+    TemporaryBuffers<StringPtr>& buffers,
     size_t const n,
-    Comp const comp,
     std::mt19937_64& async_gen,
     RandomBitStore& bit_gen,
     int const tag,
@@ -135,23 +122,8 @@ std::pair<RQuick::Data<StringSet>, typename StringSet::String> select(
 ) {
     auto const myrank = comm.getRank();
 
-    assert(ss.size() <= n);
-    assert(ss.check_order());
-
-    // todo what about reserve here?
-    RQuick::Data<StringSet> local_data;
-    RQuick::Data<StringSet> recv_data;
-
-    auto const make_string_set = [](auto& vec) -> StringSet {
-        return {&*vec.begin(), &*vec.end()};
-    };
-
-    std::vector<typename StringSet::String> local_strs{ss.begin(), ss.end()};
-    std::vector<typename StringSet::String> recv_strs;
-    std::vector<typename StringSet::String> temp_strs;
-
-    recv_strs.reserve(n);
-    temp_strs.reserve(2 * n);
+    assert(strptr.size() <= n);
+    assert(strptr.active().check_order());
 
     int const tailing_zeros = tlx::ffs(comm.getRank()) - 1;
     int const iterations =
@@ -160,36 +132,40 @@ std::pair<RQuick::Data<StringSet>, typename StringSet::String> select(
     for (int it = 0; it != iterations; ++it) {
         auto const source = myrank + (1 << it);
 
-        recv_data.recv(source, tag, comm);
-        recv_data.read_into(recv_strs);
+        buffers.recv_data.recv(source, tag, comm);
+        buffers.recv_strings.resize_strings(buffers.recv_data.get_num_strings());
+        buffers.recv_data.read_into(make_str_ptr<StringPtr>(buffers.recv_strings));
 
         auto const medians = _internal::selectMedians(
-            make_string_set(local_strs),
-            make_string_set(recv_strs),
-            temp_strs,
+            strptr,
+            make_str_ptr<StringPtr>(buffers.recv_strings),
+            buffers.merge_strings,
             n,
-            std::forward<Comp>(comp),
             async_gen,
             bit_gen
         );
-        local_data.write(medians);
-        local_strs.resize(medians.size());
-        std::copy(medians.begin(), medians.end(), local_strs.begin());
+
+        auto const& ss = medians.active();
+        buffers.median_strings.resize_strings(ss.size());
+        std::copy(ss.begin(), ss.end(), buffers.median_strings.getStrings().begin());
+
+        buffers.median_strings.orderRawStrings(buffers.char_buffer);
+        strptr = make_str_ptr<StringPtr>(buffers.median_strings);
     }
 
     if (myrank == 0) {
-        auto local_ss = make_string_set(local_strs);
-        auto const median = _internal::selectMedian(local_ss, async_gen, bit_gen);
-        recv_data.write({&median, &median + 1});
-        auto str = recv_data.bcast_single(1, comm);
-        return {std::move(recv_data), std::move(str)};
+        auto median = _internal::selectMedian(strptr.active(), async_gen, bit_gen);
+
+        buffers.recv_data.write(StringPtr{{&median, &median + 1}});
+        return buffers.recv_data.bcast_single(0, comm);
     } else {
         int const target = myrank - (1 << tailing_zeros);
-        local_data.send(target, tag, comm);
+        buffers.send_data.write(strptr);
+        buffers.send_data.send(target, tag, comm);
 
-        auto str = recv_data.bcast_single(0, comm);
-        return {std::move(recv_data), std::move(str)};
+        return buffers.recv_data.bcast_single(0, comm);
     }
 }
 
 } // namespace BinTreeMedianSelection
+} // namespace RQuick2
