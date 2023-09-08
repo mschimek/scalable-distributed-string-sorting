@@ -141,6 +141,7 @@ public:
         raw_splitters.reserve(nr_splitters * (100 + 1u));
         splitter_idxs.resize(nr_splitters, local_offset);
 
+        // todo this could be improved
         for (size_t i = 1; i <= nr_splitters; ++i) {
             size_t const splitter_index = static_cast<size_t>(i * splitter_dist);
             splitter_idxs[i - 1] += splitter_index;
@@ -149,6 +150,7 @@ public:
             std::copy_n(ss.get_chars(splitter, 0), splitter_len, std::back_inserter(raw_splitters));
             raw_splitters.push_back(0);
         }
+
         return sample_indices;
     }
 };

@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <numeric>
 #include <random>
@@ -13,7 +14,9 @@
 
 #include "mpi/allgather.hpp"
 #include "mpi/communicator.hpp"
+#include "options.hpp"
 #include "sorter/RQuick/RQuick.hpp"
+#include "sorter/RQuick2/Util.hpp"
 #include "sorter/distributed/misc.hpp"
 #include "sorter/distributed/sample.hpp"
 #include "strings/stringcontainer.hpp"
@@ -40,11 +43,19 @@ compute_partition(StringPtr string_ptr, Params const& params, Communicator const
     measuring_tool.stop("sample_splitters");
 
     measuring_tool.start("sort_splitters");
-    Comparator comp;
-    std::mt19937_64 gen{3469931 + comm.rank()};
-    RQuickData sample_data{std::move(samples), {}};
-    // measuring_tool.disable();
-    StringContainer sorted_sample = splitterSort(std::move(sample_data), gen, comp, comm);
+    StringContainer sorted_sample;
+    if constexpr (Options::use_rquick_v2) {
+        std::mt19937_64 gen{3469931 + comm.rank()};
+        using SortPtr = tlx::sort_strings_detail::StringPtr<UCharLengthStringSet>;
+        RQuick2::Data<SortPtr> data{std::move(samples)};
+        sorted_sample = splitter_sort_v2<SortPtr>(std::move(data), gen, comm);
+    } else {
+        Comparator comp;
+        std::mt19937_64 gen{3469931 + comm.rank()};
+        RQuickData sample_data{std::move(samples), {}};
+        // measuring_tool.disable();
+        sorted_sample = splitter_sort(std::move(sample_data), gen, comp, comm);
+    }
     // measuring_tool.enable();
     measuring_tool.stop("sort_splitters");
 
@@ -78,12 +89,18 @@ compute_partition(StringPtr string_ptr, Params const& params, Communicator const
     measuring_tool.add(samples.sample.size(), "allgather_splitters_bytes_sent");
 
     measuring_tool.start("sort_splitter");
-    Comparator comp;
-    std::mt19937_64 gen{3469931 + comm.rank()};
-    RQuickData sample_data{std::move(samples.sample), std::move(samples.indices)};
-    // measuring_tool.disable();
-    StringContainer sorted_sample = splitterSort(std::move(sample_data), gen, comp, comm);
-    // measuring_tool.enable();
+    StringContainer sorted_sample;
+    if constexpr (Options::use_rquick_v2) {
+        std::mt19937_64 gen{3469931 + comm.rank()};
+        using SortPtr = tlx::sort_strings_detail::StringPtr<UCharLengthIndexStringSet>;
+        RQuick2::Data<SortPtr> data{std::move(samples.sample), std::move(samples.indices)};
+        sorted_sample = splitter_sort_v2<SortPtr>(std::move(data), gen, comm);
+    } else {
+        Comparator comp;
+        std::mt19937_64 gen{3469931 + comm.rank()};
+        RQuickData sample_data{std::move(samples.sample), {samples.indices}};
+        sorted_sample = splitter_sort(std::move(sample_data), gen, comp, comm);
+    }
     measuring_tool.stop("sort_splitter");
 
     measuring_tool.start("choose_splitters");

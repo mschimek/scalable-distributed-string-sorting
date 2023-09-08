@@ -22,10 +22,11 @@
 #include "mpi/communicator.hpp"
 #include "mpi/environment.hpp"
 #include "sorter/RQuick/RQuick.hpp"
-#include "sorter/distributed/duplicateSorting.hpp"
+#include "sorter/RQuick2/RQuick.hpp"
+#include "sorter/RQuick2/Util.hpp"
+#include "sorter/distributed/duplicate_sorting.hpp"
 #include "strings/stringcontainer.hpp"
 #include "strings/stringtools.hpp"
-#include "util/measuringTool.hpp"
 
 namespace dss_schimek {
 
@@ -57,68 +58,6 @@ struct IndexStringComparator {
     }
 };
 
-template <typename Generator, typename Comparator, typename Data>
-typename Data::StringContainer
-splitterSort(Data&& data, Generator& gen, Comparator& comp, dss_mehnert::Communicator const& comm) {
-    class Tracker {
-    public:
-        class Timer {
-        public:
-            Timer(std::string name) : name_{std::move(name)} {}
-
-            void start(MPI_Comm& comm) {
-                comm_ = kamping::Communicator<>{comm, false};
-                start_ = std::chrono::high_resolution_clock::now();
-            }
-            void stop() {
-                auto end = std::chrono::high_resolution_clock::now();
-                auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start_);
-                size_t elapsed_nanos = elapsed.count();
-                auto result = comm_.reduce(
-                    kamping::send_buf(elapsed_nanos),
-                    kamping::op(kamping::ops::max<>{})
-                );
-                if (comm_.is_root()) {
-                    auto max = result.extract_recv_buffer()[0];
-                    auto prefix = measurement::MeasuringTool::measuringTool().getPrefix();
-                    std::cout << prefix << " key=" << name_ << " max_time=" << max << std::endl;
-                }
-            }
-
-        private:
-            kamping::Communicator<> comm_;
-            std::chrono::time_point<std::chrono::high_resolution_clock> start_;
-            std::string name_;
-        };
-
-        Timer local_sort_t = {"rquick_local_sort"};
-        Timer exchange_t = {"rquick_exchange"};
-        Timer parallel_shuffle_t = {"rquick_parallel_shuffle"};
-        Timer merge_t = {"rquick_merge"};
-        Timer median_select_t = {"rquick_median_select"};
-        Timer partition_t = {"rquick_partition"};
-        Timer comm_split_t = {"rquick_comm_split"};
-        Timer move_to_pow_of_two_t = {"rquick_move_to_pow_of_two"};
-
-    private:
-        size_t depth = 0;
-    };
-
-    bool const isRobust = true;
-    int tag = 11111;
-    auto comm_mpi = comm.mpi_communicator();
-    return RQuick::sort(
-        Tracker{},
-        gen,
-        std::forward<Data>(data),
-        MPI_BYTE,
-        tag,
-        comm_mpi,
-        comp,
-        isRobust
-    );
-}
-
 template <typename StringSet>
 IndexStringLcpContainer<StringSet>
 choose_splitters(IndexStringLcpContainer<StringSet>& indexContainer, mpi::environment env) {
@@ -126,12 +65,10 @@ choose_splitters(IndexStringLcpContainer<StringSet>& indexContainer, mpi::enviro
     using String = typename StringSet::String;
 
     auto all_splitters_strptr = indexContainer.make_string_lcp_ptr();
-    StringSet const& all_splitters_set = all_splitters_strptr.active();
-
     tlx::sort_strings_detail::radixsort_CI3(all_splitters_strptr, 0, 0);
-    auto ranges = getDuplicateRanges(all_splitters_strptr);
-    sortRanges(indexContainer, ranges);
+    dss_mehnert::sort_duplicates(indexContainer.make_string_lcp_ptr());
 
+    StringSet const& all_splitters_set = all_splitters_strptr.active();
     const size_t nr_splitters = std::min<std::size_t>(env.size() - 1, all_splitters_set.size());
     const size_t splitter_dist = all_splitters_set.size() / (nr_splitters + 1);
 
@@ -493,6 +430,24 @@ static inline std::vector<std::pair<size_t, size_t>> compute_ranges_and_set_lcp_
         }
     }
     return ranges;
+}
+
+template <typename Comparator, typename Data>
+typename Data::StringContainer
+splitter_sort(Data&& data, std::mt19937_64& gen, Comparator& comp, Communicator const& comm) {
+    bool const is_robust = true;
+    int const tag = 50352;
+    auto comm_mpi = comm.mpi_communicator();
+    return RQuick::sort(gen, std::forward<Data>(data), MPI_BYTE, tag, comm_mpi, comp, is_robust);
+}
+
+template <typename StringPtr>
+RQuick2::Container<StringPtr>
+splitter_sort_v2(RQuick2::Data<StringPtr>&& data, std::mt19937_64& gen, Communicator const& comm) {
+    bool const is_robust = true;
+    int const tag = 23560;
+    auto comm_mpi = comm.mpi_communicator();
+    return RQuick2::sort(std::move(data), tag, gen, comm_mpi, is_robust);
 }
 
 } // namespace dss_mehnert

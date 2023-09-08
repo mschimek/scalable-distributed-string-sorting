@@ -12,3 +12,9 @@ struct CliOptions {
     static constexpr bool enable_prefix_doubling = static_cast<bool>(CLI_ENABLE_PREFIX_DOUBLING);
     static constexpr bool enable_alltoall = static_cast<bool>(CLI_ENABLE_ALLTOALL);
 };
+
+#cmakedefine01 USE_RQUICK_V2
+
+struct Options {
+    static constexpr bool use_rquick_v2 = static_cast<bool>(USE_RQUICK_V2);
+};

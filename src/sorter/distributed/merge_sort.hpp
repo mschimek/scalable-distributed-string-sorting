@@ -39,15 +39,13 @@ protected:
     using MeasuringTool = measurement::MeasuringTool;
     MeasuringTool& measuring_tool_ = MeasuringTool::measuringTool();
 
-    template <typename... SampleArgs, typename... AllToAllArgs>
+    template <typename Container, typename... SampleArgs, typename... AllToAllArgs>
     auto sort_partial(
-        auto&& container,
+        Container&& container,
         multi_level::Level<Communicator> const& level,
         std::tuple<SampleArgs...> extra_sample_args,
         std::tuple<AllToAllArgs...> extra_all_to_all_args
     ) {
-        using partition::compute_partition;
-
         auto const& comm_orig = level.comm_orig;
         auto const& comm_exchange = level.comm_exchange;
 
@@ -66,7 +64,8 @@ protected:
             return sample::SampleParams{num_groups, 2, args...};
         };
         auto params = std::apply(get_params, extra_sample_args);
-        auto interval_sizes = compute_partition<SamplePolicy>(string_ptr, params, comm_orig);
+        auto interval_sizes =
+            partition::compute_partition<SamplePolicy>(string_ptr, params, comm_orig);
         measuring_tool_.stop("sort_globally", "compute_partition");
 
         measuring_tool_.start("sort_globally", "exchange_and_merge");
@@ -82,15 +81,13 @@ protected:
         return sorted_container;
     }
 
-    template <typename... SampleArgs, typename... AllToAllArgs>
+    template <typename Container, typename... SampleArgs, typename... AllToAllArgs>
     auto sort_exhaustive(
-        auto&& container,
+        Container&& container,
         Communicator const& comm,
         std::tuple<SampleArgs...> extra_sample_args,
         std::tuple<AllToAllArgs...> extra_all_to_all_args
     ) {
-        using partition::compute_partition;
-
         auto string_ptr = container.make_string_lcp_ptr();
         measuring_tool_.add(container.size(), "num_strings");
 
@@ -100,7 +97,7 @@ protected:
             return sample::SampleParams{comm.size(), 2, args...};
         };
         auto params = std::apply(get_params, extra_sample_args);
-        auto interval_sizes = compute_partition<SamplePolicy>(string_ptr, params, comm);
+        auto interval_sizes = partition::compute_partition<SamplePolicy>(string_ptr, params, comm);
         measuring_tool_.stop("sort_globally", "compute_partition");
 
         measuring_tool_.start("sort_globally", "exchange_and_merge");

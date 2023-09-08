@@ -19,11 +19,11 @@
 #include <tlx/die/core.hpp>
 #include <tlx/sort/strings/string_ptr.hpp>
 
-#include "cli_options.hpp"
 #include "mpi/alltoall.hpp"
 #include "mpi/communicator.hpp"
 #include "mpi/is_sorted.hpp"
 #include "mpi/warmup.hpp"
+#include "options.hpp"
 #include "sorter/distributed/bloomfilter.hpp"
 #include "sorter/distributed/merge_sort.hpp"
 #include "sorter/distributed/multi_level.hpp"
@@ -120,7 +120,6 @@ void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicat
 
     using dss_mehnert::sorter::DistributedMergeSort;
     DistributedMergeSort<StringLcpPtr, Subcommunicators, AllToAllPolicy, SamplePolicy> merge_sort;
-
     auto sorted_container = merge_sort.sort(std::move(input_container), comms);
 
     measuring_tool.stop("none", "sorting_overall", comm);

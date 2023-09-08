@@ -19,6 +19,7 @@ option(CLI_ENABLE_PREFIX_DOUBLING "enable prefix doubling merge sort" On)
 option(CLI_ENABLE_SPLIT "enable support for different communicator split strategies" Off)
 option(CLI_ENABLE_ALLTOALL "enable support for different AllToAll routines" Off)
 option(CLI_ENABLE_ALL "enable all optional command line features" Off)
+option(USE_RQUICK_V2 "use the new implementation of RQuick" Off)
 
 if(CLI_ENABLE_ALL)
   set(CLI_ENABLE_PREFIX_DOUBLING On)
@@ -29,6 +30,7 @@ endif()
 message(STATUS "Prefix Doubling Enabled: ${CLI_ENABLE_PREFIX_DOUBLING}")
 message(STATUS "Split Strategies Enabled: ${CLI_ENABLE_SPLIT}")
 message(STATUS "All-To-All Routines Enabled: ${CLI_ENABLE_ALLTOALL}")
+message(STATUS "RQuick V2 Enabled: ${USE_RQUICK_V2}")
 
 list(APPEND
   DSS_MEHNERT_WARNING_FLAGS
@@ -87,10 +89,15 @@ add_subdirectory(external/ips4o)
 set(CLUSTER_TYPE "SUPERMUCPHASE2")
 add_subdirectory(external/RBC)
 
+configure_file("options.hpp.in" "include/options.hpp")
+
 # Create a library containing all implementation, to be linked against by executables
 add_library(dss_base)
 set_target_properties(dss_base PROPERTIES LINKER_LANGUAGE CXX)
 target_compile_options(dss_base PRIVATE ${DSS_MEHNERT_WARNING_FLAGS})
+
+target_include_directories(dss_base PRIVATE
+  "${CMAKE_CURRENT_BINARY_DIR}/include")
 
 target_include_directories(dss_base PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(dss_base PRIVATE kamping)
@@ -105,7 +112,6 @@ add_executable(distributed_sorter
   src/executables/distributed_sorter.cpp
   src/executables/variant_selection.hpp)
 
-configure_file("cli_options.hpp.in" "include/cli_options.hpp")
 target_include_directories(distributed_sorter PRIVATE
   "${CMAKE_CURRENT_BINARY_DIR}/include")
 

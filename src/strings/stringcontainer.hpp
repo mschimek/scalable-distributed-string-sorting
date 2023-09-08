@@ -425,6 +425,7 @@ protected:
         : Base{std::move(raw_strings), std::forward<Args>(args)...},
           lcps_(std::move(lcps)) {}
 
+private:
     StringLcpPtr make_auto_ptr_() { return make_string_lcp_ptr(); }
 };
 
