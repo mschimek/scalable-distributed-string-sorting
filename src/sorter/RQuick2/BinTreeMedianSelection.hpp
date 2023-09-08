@@ -92,7 +92,6 @@ StringPtr selectMedians(
     }
 }
 
-// todo maybe return an iterator instead
 template <class StringSet>
 typename StringSet::String
 selectMedian(StringSet const& ss, std::mt19937_64& async_gen, RandomBitStore& bit_gen) {
@@ -109,6 +108,7 @@ selectMedian(StringSet const& ss, std::mt19937_64& async_gen, RandomBitStore& bi
 }
 
 } // namespace _internal
+//
 
 template <class StringPtr>
 StringT<StringPtr> select(

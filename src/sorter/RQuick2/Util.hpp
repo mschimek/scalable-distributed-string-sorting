@@ -1,10 +1,12 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <iterator>
 #include <numeric>
 #include <span>
+#include <tuple>
 #include <type_traits>
 #include <vector>
 
@@ -81,7 +83,6 @@ public:
         for (size_t i = 0; auto& str: strptr.active()) {
             auto const str_end = std::find(str_begin, end, '\0');
             size_t const str_len = std::distance(str_begin, str_end);
-            assert(str_len == 50);
 
             // todo consider lcp values if present
             if constexpr (has_index) {
@@ -96,42 +97,56 @@ public:
     }
 
     void send(int const dest, int const tag, RBC::Comm const& comm) const {
-        auto mpi_type = kamping::mpi_datatype<Char>();
-        RBC::Send(this->raw_strs.data(), this->raw_strs.size(), mpi_type, dest, tag, comm);
+        int const char_tag = tag, idx_tag = tag + 1;
+        std::array<MPI_Request, 2> requests = {MPI_REQUEST_NULL, MPI_REQUEST_NULL};
+
+        // clang-format off
+        {
+            auto const char_type = kamping::mpi_datatype<Char>();
+            RBC::Isend(this->raw_strs.data(), this->raw_strs.size(), char_type, dest, char_tag, 
+                       comm, requests.data());
+        }
 
         if constexpr (has_index) {
-            auto mpi_type = kamping::mpi_datatype<uint64_t>();
-            RBC::Send(this->indices.data(), this->indices.size(), mpi_type, dest, tag, comm);
+            auto const idx_type = kamping::mpi_datatype<uint64_t>();
+            RBC::Isend(this->indices.data(), this->indices.size(), idx_type, dest, idx_tag,
+                       comm, requests.data() + 1);
         }
+        // clang-format on
+        MPI_Waitall(requests.size(), requests.data(), MPI_STATUSES_IGNORE);
     }
 
     void recv(int const src, int const tag, RBC::Comm const& comm, bool append = false) {
-        // clang-format off
-        auto char_type = kamping::mpi_datatype<Char>();
+        int const char_tag = tag, idx_tag = tag + 1;
+        std::array<MPI_Request, 2> requests = {MPI_REQUEST_NULL, MPI_REQUEST_NULL};
         MPI_Status status;
-        RBC::Probe(src, tag, comm, &status);
 
-        int count_chars = 0;
-        MPI_Get_count(&status, char_type, &count_chars);
+        // clang-format off
+        {
+            auto const char_type = kamping::mpi_datatype<Char>();
+            int char_count = 0;
+            RBC::Probe(src, char_tag, comm, &status);
+            MPI_Get_count(&status, char_type, &char_count);
 
-        size_t offset = append ? this->raw_strs.size() : 0;
-        this->raw_strs.resize(offset + count_chars);
-        RBC::Recv(this->raw_strs.data() + offset, count_chars, char_type,
-                  src, tag, comm, MPI_STATUS_IGNORE);
+            size_t const char_offset = append ? this->raw_strs.size() : 0;
+            this->raw_strs.resize(char_offset + char_count);
+            RBC::Irecv(this->raw_strs.data() + char_offset, char_count, char_type,
+                       src, char_tag, comm, requests.data());
+        }
 
         if constexpr (has_index) {
-            auto idx_type = kamping::mpi_datatype<uint64_t>();
-            RBC::Probe(src, tag, comm, &status);
+            auto const idx_type = kamping::mpi_datatype<uint64_t>();
+            int idx_count = 0;
+            RBC::Probe(src, idx_tag, comm, &status);
+            MPI_Get_count(&status, idx_type, &idx_count);
 
-            int count = 0;
-            MPI_Get_count(&status, idx_type, &count);
-
-            size_t idx_offset = append ? this->indices.size() : 0;
-            this->indices.resize(idx_offset + count);
-            RBC::Recv(this->indices.data() + idx_offset, count, idx_type,
-                      src, tag, comm, MPI_STATUS_IGNORE);
+            size_t const idx_offset = append ? this->indices.size() : 0;
+            this->indices.resize(idx_offset + idx_count);
+            RBC::Irecv(this->indices.data() + idx_offset, idx_count, idx_type,
+                       src, idx_tag, comm, requests.data() + 1);
         }
         // clang-format on
+        MPI_Waitall(requests.size(), requests.data(), MPI_STATUSES_IGNORE);
     }
 
     void sendrecv(
@@ -141,54 +156,74 @@ public:
         int const tag,
         RBC::Comm const& comm
     ) {
+        int const char_tag = tag, idx_tag = tag + 1;
+        std::array<MPI_Request, 4> requests;
+        std::fill(requests.begin(), requests.end(), MPI_REQUEST_NULL);
+
         // clang-format off
-        auto const size_type = kamping::mpi_datatype<size_t>();
-        size_t char_send_cnt = this->raw_strs.size(), char_recv_cnt = 0;
-        RBC::Sendrecv(&char_send_cnt, 1, size_type, partner, tag,
-                      &char_recv_cnt, 1, size_type, partner, tag,
-                      comm, MPI_STATUS_IGNORE);
-
-        auto const char_type = kamping::mpi_datatype<Char>();
-        recv.raw_strs.resize(char_recv_cnt);
-        RBC::Sendrecv(this->raw_strs.data(), char_send_cnt, char_type, partner, tag,
-                      recv.raw_strs.data(),  char_recv_cnt, char_type, partner, tag,
-                      comm, MPI_STATUS_IGNORE);
-
         if constexpr (has_index) {
-            auto const mpi_type = kamping::mpi_datatype<uint64_t>();
+            auto const idx_type = kamping::mpi_datatype<uint64_t>();
             recv.indices.resize(recv_cnt);
-            RBC::Sendrecv(this->indices.data(), this->indices.size(), mpi_type, partner, tag,
-                          recv.indices.data(),  recv_cnt,             mpi_type, partner, tag,
-                          comm, MPI_STATUS_IGNORE);
+            RBC::Irecv(recv.indices.data(), recv_cnt, idx_type, partner, idx_tag,
+                       comm, requests.data());
+            RBC::Isend(this->indices.data(), this->indices.size(), idx_type, partner, idx_tag,
+                       comm, requests.data() + 1);
+        }
+
+        {
+            auto const char_type = kamping::mpi_datatype<Char>();
+            int send_cnt_char = this->raw_strs.size(), recv_cnt_char = 0;
+
+            RBC::Isend(this->raw_strs.data(), send_cnt_char, char_type, partner, char_tag,
+                       comm, requests.data() + 2);
+
+            MPI_Status status;
+            RBC::Probe(partner, char_tag, comm, &status);
+            MPI_Get_count(&status, char_type, &recv_cnt_char);
+
+            recv.raw_strs.resize(recv_cnt_char);
+            RBC::Irecv(recv.raw_strs.data(), recv_cnt_char, char_type, partner, char_tag,
+                       comm, requests.data() + 3);
         }
         // clang-format on
+        MPI_Waitall(requests.size(), requests.data(), MPI_STATUSES_IGNORE);
     }
 
     String bcast_single(int const root, RBC::Comm const& comm) {
         using dss_schimek::Index;
         using dss_schimek::Length;
 
-        auto const size_type = kamping::mpi_datatype<size_t>();
-        size_t size = this->raw_strs.size();
-        RBC::Bcast(&size, 1, size_type, root, comm);
-
-        this->raw_strs.resize(size);
         auto const char_type = kamping::mpi_datatype<Char>();
-        RBC::Bcast(this->raw_strs.data(), size, char_type, root, comm);
+        auto const size_type = kamping::mpi_datatype<size_t>();
+        auto const idx_type = kamping::mpi_datatype<uint64_t>();
 
-        if constexpr (has_index) {
+        size_t char_size = this->raw_strs.size();
+
+        if constexpr (has_index && std::is_same_v<size_t, uint64_t>) {
+            // combine broadcast of raw string size and index
             this->indices.resize(1);
-            auto const idx_type = kamping::mpi_datatype<uint64_t>();
-            RBC::Bcast(this->indices.data(), 1, idx_type, root, comm);
+            std::array<uint64_t, 2> send_recv_buf = {char_size, this->indices[0]};
+            RBC::Bcast(send_recv_buf.data(), 2, idx_type, root, comm);
+
+            std::tie(char_size, this->indices.front()) = std::tuple_cat(send_recv_buf);
+        } else {
+            RBC::Bcast(&char_size, 1, size_type, root, comm);
+
+            if constexpr (has_index) {
+                this->indices.resize(1);
+                RBC::Bcast(this->indices.data(), 1, idx_type, root, comm);
+            }
         }
+
+        this->raw_strs.resize(char_size);
+        RBC::Bcast(this->raw_strs.data(), char_size, char_type, root, comm);
 
         assert(std::count(this->raw_strs.begin(), this->raw_strs.end(), '\0') == 1);
         assert(this->raw_strs.back() == '\0');
-
         if constexpr (has_index) {
-            return {this->raw_strs.data(), Length{size - 1}, Index{this->indices.front()}};
+            return {this->raw_strs.data(), Length{char_size - 1}, Index{this->indices.front()}};
         } else {
-            return {this->raw_strs.data(), Length{size - 1}};
+            return {this->raw_strs.data(), Length{char_size - 1}};
         }
     }
 
@@ -253,6 +288,8 @@ struct Comparator<StringPtr, std::enable_if_t<StringPtr::StringSet::is_indexed>>
 template <typename StringPtr>
 struct Data : public _internal::Data_<StringPtr> {
     using _internal::Data_<StringPtr>::Data_;
+
+    static_assert(std::is_same_v<typename Container<StringPtr>::AutoStringPtr, StringPtr>);
 };
 
 template <typename StringPtr>
