@@ -414,24 +414,6 @@ size_t compute_global_lcp_average(LcpIt const first, LcpIt const last, Communica
     return global_result.lcp_sum / global_result.num_strs;
 }
 
-template <typename StringLcpContainer>
-static inline std::vector<std::pair<size_t, size_t>> compute_ranges_and_set_lcp_at_start_of_range(
-    StringLcpContainer& recv_string_cont, std::vector<size_t>& interval_sizes
-) {
-    std::vector<std::pair<size_t, size_t>> ranges(interval_sizes.size());
-    auto range_writer = std::begin(ranges);
-    for (auto offset = 0; auto const& interval_size: interval_sizes) {
-        if (interval_size == 0) {
-            *(range_writer++) = {0, 0};
-        } else {
-            recv_string_cont.lcp_array()[offset] = 0;
-            *(range_writer++) = {offset, interval_size};
-            offset += interval_size;
-        }
-    }
-    return ranges;
-}
-
 template <typename Comparator, typename Data>
 typename Data::StringContainer
 splitter_sort(Data&& data, std::mt19937_64& gen, Comparator& comp, Communicator const& comm) {

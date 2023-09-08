@@ -15,7 +15,8 @@
 namespace dss_mehnert {
 
 inline size_t pow2roundup(size_t x) {
-    if (x == 0u) return 1u;
+    if (x == 0u)
+        return 1u;
     --x;
     x |= x >> 1;
     x |= x >> 2;
@@ -26,89 +27,83 @@ inline size_t pow2roundup(size_t x) {
     return x + 1;
 }
 
-template <typename AllToAllStringPolicy, size_t K, typename StringSet>
-static inline dss_schimek::StringLcpContainer<StringSet> merge(
-    dss_schimek::StringLcpContainer<StringSet>&& recv_string_cont,
-    std::vector<std::pair<size_t, size_t>>& ranges,
-    const size_t num_recv_elems
+template <typename AllToAllStringPolicy, size_t K, typename StringLcpPtr>
+static inline dss_schimek::StringLcpContainer<typename StringLcpPtr::StringSet> merge(
+    StringLcpPtr const& input_string_ptr,
+    std::vector<size_t>& interval_offsets,
+    std::vector<size_t>& interval_sizes
 ) {
-    if (recv_string_cont.empty()) return dss_schimek::StringLcpContainer<StringSet>();
-
-    // pad with empty ranges up to next power of two
-    size_t num_missing = pow2roundup(ranges.size()) - ranges.size();
-    std::fill_n(std::back_inserter(ranges), num_missing, std::make_pair(0, 0));
-
-    std::vector<typename StringSet::String> sorted_string(recv_string_cont.size());
-    std::vector<size_t> sorted_lcp(recv_string_cont.size());
-    StringSet ss = recv_string_cont.make_string_set();
-
-    dss_schimek::StringLcpPtrMergeAdapter<StringSet> mergeAdapter(ss, recv_string_cont.lcp_array());
-    dss_schimek::LcpStringLoserTree_<K, StringSet> loser_tree(mergeAdapter, ranges.data());
-    StringSet sortedSet(sorted_string.data(), sorted_string.data() + sorted_string.size());
-    dss_schimek::StringLcpPtrMergeAdapter out_(sortedSet, sorted_lcp.data());
-
-    std::vector<size_t> oldLcps;
-    if (AllToAllStringPolicy::PrefixCompression) {
-        loser_tree.writeElementsToStream(out_, num_recv_elems, oldLcps);
-    } else {
-        loser_tree.writeElementsToStream(out_, num_recv_elems);
+    if (input_string_ptr.size() == 0) {
+        return {};
     }
 
-    dss_schimek::StringLcpContainer<StringSet> sorted_string_cont;
-    //(std::move(recv_string_cont));
-    sorted_string_cont.set(std::move(recv_string_cont.raw_strings()));
-    sorted_string_cont.set(std::move(sorted_string));
-    sorted_string_cont.set(std::move(sorted_lcp));
-    sorted_string_cont.setSavedLcps(std::move(oldLcps));
+    interval_offsets.resize(pow2roundup(interval_sizes.size()), 0);
+    interval_sizes.resize(pow2roundup(interval_sizes.size()), 0);
 
-    return sorted_string_cont;
+    // todo is this using the right resize
+    dss_schimek::StringLcpContainer<typename StringLcpPtr::StringSet> sorted_strings;
+    sorted_strings.resize_strings(input_string_ptr.size());
+
+    using StringSet = typename StringLcpPtr::StringSet;
+    using MergeAdapter = dss_schimek::StringLcpPtrMergeAdapter<StringSet>;
+    using LoserTree = dss_schimek::LcpStringLoserTree_<K, StringSet>;
+
+    MergeAdapter in_ptr{input_string_ptr.active(), input_string_ptr.lcp()};
+    MergeAdapter out_ptr{sorted_strings.make_string_set(), sorted_strings.lcp_array()};
+    LoserTree loser_tree{in_ptr, interval_offsets, interval_sizes};
+
+    std::vector<size_t> old_lcps;
+    if (AllToAllStringPolicy::PrefixCompression) {
+        loser_tree.writeElementsToStream(out_ptr, input_string_ptr.size(), old_lcps);
+    } else {
+        loser_tree.writeElementsToStream(out_ptr, input_string_ptr.size());
+    }
+
+    sorted_strings.setSavedLcps(std::move(old_lcps));
+    return sorted_strings;
 }
 
-template <typename AllToAllStringPolicy, typename StringLcpContainer>
-static inline StringLcpContainer choose_merge(
-    StringLcpContainer&& recv_string_cont,
-    std::vector<std::pair<size_t, size_t>>& ranges,
-    size_t num_recv_elems
+template <typename AllToAllStringPolicy, typename StringLcpPtr>
+static inline dss_schimek::StringLcpContainer<typename StringLcpPtr::StringSet> choose_merge(
+    StringLcpPtr const& recv_string_ptr,
+    std::vector<size_t>& interval_offsets,
+    std::vector<size_t>& interval_sizes
 ) {
-    auto merge_k = [=, &ranges]<size_t K>(StringLcpContainer&& container) {
-        return merge<AllToAllStringPolicy, K>(
-            std::forward<StringLcpContainer>(container),
-            ranges,
-            num_recv_elems
-        );
+    assert(interval_sizes.size() == interval_offsets.size());
+    auto merge_k = [&]<size_t K>() {
+        return merge<AllToAllStringPolicy, K>(recv_string_ptr, interval_offsets, interval_sizes);
     };
-    const size_t next_pow_2 = pow2roundup(ranges.size());
-    switch (next_pow_2) {
+    switch (pow2roundup(interval_sizes.size())) {
         case 1:
-            return merge_k.template operator()<1>(std::move(recv_string_cont));
+            return merge_k.template operator()<1>();
         case 2:
-            return merge_k.template operator()<2>(std::move(recv_string_cont));
+            return merge_k.template operator()<2>();
         case 4:
-            return merge_k.template operator()<4>(std::move(recv_string_cont));
+            return merge_k.template operator()<4>();
         case 8:
-            return merge_k.template operator()<8>(std::move(recv_string_cont));
+            return merge_k.template operator()<8>();
         case 16:
-            return merge_k.template operator()<16>(std::move(recv_string_cont));
+            return merge_k.template operator()<16>();
         case 32:
-            return merge_k.template operator()<32>(std::move(recv_string_cont));
+            return merge_k.template operator()<32>();
         case 64:
-            return merge_k.template operator()<64>(std::move(recv_string_cont));
+            return merge_k.template operator()<64>();
         case 128:
-            return merge_k.template operator()<128>(std::move(recv_string_cont));
+            return merge_k.template operator()<128>();
         case 256:
-            return merge_k.template operator()<256>(std::move(recv_string_cont));
+            return merge_k.template operator()<256>();
         case 512:
-            return merge_k.template operator()<512>(std::move(recv_string_cont));
+            return merge_k.template operator()<512>();
         case 1024:
-            return merge_k.template operator()<1024>(std::move(recv_string_cont));
+            return merge_k.template operator()<1024>();
         case 2048:
-            return merge_k.template operator()<2048>(std::move(recv_string_cont));
+            return merge_k.template operator()<2048>();
         case 4096:
-            return merge_k.template operator()<4096>(std::move(recv_string_cont));
+            return merge_k.template operator()<4096>();
         case 8192:
-            return merge_k.template operator()<8192>(std::move(recv_string_cont));
+            return merge_k.template operator()<8192>();
         case 16384:
-            return merge_k.template operator()<16384>(std::move(recv_string_cont));
+            return merge_k.template operator()<16384>();
         default:
             // todo consider increasing this to 2^15
             std::cout << "Error in merge: K is not 2^i for i in {0,...,14} " << std::endl;

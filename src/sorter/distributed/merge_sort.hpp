@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <iostream>
 #include <iterator>
+#include <numeric>
 #include <random>
 #include <string>
 #include <string_view>
@@ -124,32 +125,38 @@ protected:
         auto alltoallv = [&, this](auto... args) {
             return this->AllToAllStringPolicy::alltoallv(container, send_counts, args..., comm);
         };
-        auto recv_string_container = std::apply(alltoallv, extra_all_to_all_args);
+        auto recv_string_cont = std::apply(alltoallv, extra_all_to_all_args);
         container.deleteAll();
         measuring_tool_.stop("all_to_all_strings");
 
-        auto size_strings = recv_string_container.size();
-        auto size_chars = recv_string_container.char_size() - size_strings;
+        auto size_strings = recv_string_cont.size();
+        auto size_chars = recv_string_cont.char_size() - size_strings;
         measuring_tool_.add(size_strings, "local_num_strings");
         measuring_tool_.add(size_chars, "local_num_chars");
 
         measuring_tool_.setPhase("merging");
         measuring_tool_.start("merge_strings");
+
         measuring_tool_.start("compute_ranges");
         std::erase(recv_counts, 0);
+        std::vector<size_t> offsets(recv_counts.size());
+        std::exclusive_scan(recv_counts.begin(), recv_counts.end(), offsets.begin(), size_t{0});
 
-        auto ranges =
-            compute_ranges_and_set_lcp_at_start_of_range(recv_string_container, recv_counts);
+        if (recv_string_cont.size() > 0) {
+            auto& lcps = recv_string_cont.lcps();
+            auto set_lcp = [&lcps](auto const offset) { lcps[offset] = 0; };
+            std::for_each(offsets.begin(), offsets.end(), set_lcp);
+        }
         measuring_tool_.stop("compute_ranges");
 
         measuring_tool_.start("merge_ranges");
-        auto num_recv_elems = std::accumulate(recv_counts.begin(), recv_counts.end(), size_t{0});
-
         auto sorted_container = choose_merge<AllToAllStringPolicy>(
-            std::move(recv_string_container),
-            ranges,
-            num_recv_elems
+            recv_string_cont.make_string_lcp_ptr(),
+            offsets,
+            recv_counts
         );
+        sorted_container.set(recv_string_cont.release_raw_strings());
+        recv_string_cont.deleteAll();
         measuring_tool_.stop("merge_ranges");
 
         measuring_tool_.start("prefix_decompression");

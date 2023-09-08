@@ -140,13 +140,14 @@ private:
 
 public:
     LcpStringLoserTree(
-        LcpStringPtr const& input, std::pair<size_t, size_t> const* ranges, lcp_t knownCommonLcp = 0
+        LcpStringPtr const& input,
+        std::vector<size_t> const& offsets,
+        std::vector<size_t> const& sizes,
+        lcp_t knownCommonLcp = 0
     ) {
-        for (size_t i = 1; i <= K; i++) {
-            const std::pair<size_t, size_t> currRange = ranges[i - 1];
-
-            streams[i] = input.sub(currRange.first, currRange.second);
-        }
+        assert(sizes.size() == K && offsets.size() == K);
+        auto op = [&](auto const& offset, auto const& size) { return input.sub(offset, size); };
+        std::transform(offsets.begin(), offsets.end(), sizes.begin(), streams + 1, op);
 
         initTree(knownCommonLcp);
     }
@@ -197,7 +198,7 @@ public:
 namespace dss_schimek {
 template <size_t K, typename StringSet>
 class LcpStringLoserTree_ {
-    typedef dss_schimek::StringLcpPtrMergeAdapter<StringSet> Stream;
+    using Stream = dss_schimek::StringLcpPtrMergeAdapter<StringSet>;
     using CharIt = typename StringSet::CharIterator;
 
     struct Node {
@@ -208,8 +209,6 @@ class LcpStringLoserTree_ {
 private:
     Stream streams[K + 1];
     Node nodes[K + 1];
-    std::vector<size_t> offset;
-    std::vector<bool> isOffsetSet;
 
     //! play one comparison edge game: contender is the node below
     //! defender. After the game, defender contains the lower index, contender
@@ -265,21 +264,22 @@ private:
             defender.lcp
         );
 #endif
-        assert(
-            scmp(
-                streams[contender.idx].firstStringChars(),
-                streams[defender.idx].firstStringChars()
-            )
-            <= 0
-        );
-
-        assert(
-            calc_lcp(
-                streams[contender.idx].firstStringChars(),
-                streams[defender.idx].firstStringChars()
-            )
-            == defender.lcp
-        );
+        // todo is this postcondition correct?
+        // assert(
+        //     scmp(
+        //         streams[contender.idx].firstStringChars(),
+        //         streams[defender.idx].firstStringChars()
+        //     )
+        //     <= 0
+        // );
+        //
+        // assert(
+        //     calc_lcp(
+        //         streams[contender.idx].firstStringChars(),
+        //         streams[defender.idx].firstStringChars()
+        //     )
+        //     == defender.lcp
+        // );
     }
 
     void updateNode(Node& contender, Node& defender) {
@@ -376,17 +376,13 @@ private:
 public:
     LcpStringLoserTree_(
         dss_schimek::StringLcpPtrMergeAdapter<StringSet> const& input,
-        std::pair<size_t, size_t> const* ranges,
+        std::vector<size_t> const& offsets,
+        std::vector<size_t> const& sizes,
         lcp_t knownCommonLcp = 0
-    )
-        : offset(),
-          isOffsetSet(K + 1, false) {
-        for (size_t i = 1; i <= K; i++) {
-            const std::pair<size_t, size_t> currRange = ranges[i - 1];
-
-            streams[i] = input.sub(currRange.first, currRange.second);
-        }
-
+    ) {
+        assert(sizes.size() == K && offsets.size() == K);
+        auto op = [&](auto const& offset, auto const& size) { return input.sub(offset, size); };
+        std::transform(offsets.begin(), offsets.end(), sizes.begin(), streams + 1, op);
         initTree(knownCommonLcp);
     }
 

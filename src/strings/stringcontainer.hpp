@@ -370,12 +370,12 @@ public:
         using std::end;
 
         assert_equal(std::distance(first_lcp, last_lcp), std::ssize(ss));
-        assert_equal(*first_lcp, size_t{0});
+        assert(first_lcp == last_lcp || *first_lcp == 0);
         if (ss.empty()) {
             return;
         }
 
-        size_t L = std::accumulate(first_lcp, last_lcp, size_t{0});
+        size_t const L = std::accumulate(first_lcp, last_lcp, size_t{0});
         std::vector<typename StringSet::Char> raw_strings(this->char_size() + L);
         auto prev_chars = raw_strings.begin();
         auto curr_chars = raw_strings.begin();
