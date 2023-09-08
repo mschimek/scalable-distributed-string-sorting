@@ -27,8 +27,19 @@ inline size_t pow2roundup(size_t x) {
     return x + 1;
 }
 
-template <typename AllToAllStringPolicy, size_t K, typename StringLcpPtr>
-static inline dss_schimek::StringLcpContainer<typename StringLcpPtr::StringSet> merge(
+template <bool is_compressed, typename StringSet>
+struct MergeResult {
+    dss_schimek::StringLcpContainer<StringSet> container;
+};
+
+template <typename StringSet>
+struct MergeResult<true, StringSet> {
+    dss_schimek::StringLcpContainer<StringSet> container;
+    std::vector<size_t> saved_lcps;
+};
+
+template <bool is_compressed, size_t K, typename StringLcpPtr>
+static inline MergeResult<is_compressed, typename StringLcpPtr::StringSet> merge(
     StringLcpPtr const& input_string_ptr,
     std::vector<size_t>& interval_offsets,
     std::vector<size_t>& interval_sizes
@@ -52,26 +63,25 @@ static inline dss_schimek::StringLcpContainer<typename StringLcpPtr::StringSet> 
     MergeAdapter out_ptr{sorted_strings.make_string_set(), sorted_strings.lcp_array()};
     LoserTree loser_tree{in_ptr, interval_offsets, interval_sizes};
 
-    std::vector<size_t> old_lcps;
-    if (AllToAllStringPolicy::PrefixCompression) {
+    if constexpr (is_compressed) {
+        std::vector<size_t> old_lcps;
         loser_tree.writeElementsToStream(out_ptr, input_string_ptr.size(), old_lcps);
+        return {std::move(sorted_strings), std::move(old_lcps)};
     } else {
         loser_tree.writeElementsToStream(out_ptr, input_string_ptr.size());
+        return {std::move(sorted_strings)};
     }
-
-    sorted_strings.setSavedLcps(std::move(old_lcps));
-    return sorted_strings;
 }
 
-template <typename AllToAllStringPolicy, typename StringLcpPtr>
-static inline dss_schimek::StringLcpContainer<typename StringLcpPtr::StringSet> choose_merge(
+template <bool is_compressed, typename StringLcpPtr>
+static inline MergeResult<is_compressed, typename StringLcpPtr::StringSet> choose_merge(
     StringLcpPtr const& recv_string_ptr,
     std::vector<size_t>& interval_offsets,
     std::vector<size_t>& interval_sizes
 ) {
     assert(interval_sizes.size() == interval_offsets.size());
     auto merge_k = [&]<size_t K>() {
-        return merge<AllToAllStringPolicy, K>(recv_string_ptr, interval_offsets, interval_sizes);
+        return merge<is_compressed, K>(recv_string_ptr, interval_offsets, interval_sizes);
     };
     switch (pow2roundup(interval_sizes.size())) {
         case 1:

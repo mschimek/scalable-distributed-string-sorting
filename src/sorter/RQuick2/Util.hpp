@@ -270,7 +270,6 @@ using Data_ = std::conditional_t<
 
 
 // todo allow for LCP values
-// todo get rid of index string container
 template <typename StringPtr>
 using Container = std::conditional_t<
     StringPtr::StringSet::is_indexed,

@@ -173,7 +173,6 @@ PairItSizeT<StringPtr> locateSplitterLeft(
         ptrdiff_t const mright = end - end_geq;
         ptrdiff_t const mmiddle = ss.size() - mleft - mright;
 
-        // todo this should be a size_t
         std::array<ptrdiff_t, 3> send = {mleft, mright, mmiddle};
         std::array<ptrdiff_t, 3> recv;
         // clang-format off

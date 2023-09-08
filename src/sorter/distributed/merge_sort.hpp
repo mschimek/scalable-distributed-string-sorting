@@ -150,28 +150,27 @@ protected:
         measuring_tool_.stop("compute_ranges");
 
         measuring_tool_.start("merge_ranges");
-        auto sorted_container = choose_merge<AllToAllStringPolicy>(
+        auto result = choose_merge<AllToAllStringPolicy::PrefixCompression>(
             recv_string_cont.make_string_lcp_ptr(),
             offsets,
             recv_counts
         );
-        sorted_container.set(recv_string_cont.release_raw_strings());
+        result.container.set(recv_string_cont.release_raw_strings());
         recv_string_cont.deleteAll();
         measuring_tool_.stop("merge_ranges");
 
         measuring_tool_.start("prefix_decompression");
         if constexpr (AllToAllStringPolicy::PrefixCompression) {
-            auto saved_lcps = std::move(sorted_container.savedLcps());
-            sorted_container.extendPrefix(
-                sorted_container.make_string_set(),
-                saved_lcps.cbegin(),
-                saved_lcps.cend()
+            result.container.extend_prefix(
+                result.container.make_string_set(),
+                result.saved_lcps.cbegin(),
+                result.saved_lcps.cend()
             );
         }
         measuring_tool_.stop("prefix_decompression");
         measuring_tool_.stop("merge_strings");
 
-        return sorted_container;
+        return std::move(result.container);
     }
 };
 

@@ -310,8 +310,6 @@ public:
     size_t* lcp_array() { return lcps_.data(); }
     std::vector<size_t>& lcps() { return lcps_; }
     std::vector<size_t> const& lcps() const { return lcps_; }
-    std::vector<size_t>& savedLcps() { return savedLcps_; }
-    std::vector<size_t> const& savedLcps() const { return savedLcps_; }
     std::vector<size_t>&& release_lcps() { return std::move(lcps_); }
 
     friend void swap(
@@ -321,7 +319,6 @@ public:
         std::swap(lhs.raw_strings_, rhs.raw_strings_);
         std::swap(lhs.strings_, rhs.strings_);
         std::swap(lhs.lcps_, rhs.lcps_);
-        std::swap(lhs.savedLcps_, rhs.savedLcps_);
     }
 
     StringLcpPtr make_string_lcp_ptr() { return {this->make_string_set(), this->lcp_array()}; }
@@ -335,7 +332,6 @@ public:
     using Base::set;
 
     void set(std::vector<size_t>&& lcps) { lcps_ = std::move(lcps); }
-    void setSavedLcps(std::vector<size_t>&& savedLcps) { savedLcps_ = std::move(savedLcps); }
 
     void update(std::vector<Char>&& raw_strings) {
         set(std::move(raw_strings));
@@ -349,23 +345,14 @@ public:
         lcps_.shrink_to_fit();
     }
 
-    void deleteSavedLcps() {
-        savedLcps_.clear();
-        savedLcps_.shrink_to_fit();
-    }
-
     void deleteAll() {
         this->deleteRawStrings();
         this->deleteStrings();
         deleteLcps();
-        deleteSavedLcps();
     }
 
-    void saveLcps() { savedLcps_ = lcps_; }
-
-    // todo should use strptr
     template <typename StringSet, typename LcpIt>
-    void extendPrefix(StringSet const& ss, LcpIt first_lcp, LcpIt last_lcp) {
+    void extend_prefix(StringSet const& ss, const LcpIt first_lcp, LcpIt const last_lcp) {
         using std::begin;
         using std::end;
 
@@ -406,11 +393,6 @@ public:
 
 protected:
     std::vector<size_t> lcps_;
-
-    // todo this should be removed entirely
-    std::vector<size_t> savedLcps_; // only used for prefix compression, ->
-                                    // lcp-values received from other PEs before
-                                    // merging TODO think about better structure
 
     template <typename... Args>
     explicit BaseStringLcpContainer(
