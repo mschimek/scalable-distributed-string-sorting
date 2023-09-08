@@ -28,11 +28,13 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *****************************************************************************/
 
+
 #pragma once
 
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <numeric>
 #include <random>
@@ -43,9 +45,12 @@
 #include <RBC.hpp>
 #include <ips4o.hpp>
 #include <kamping/mpi_datatype.hpp>
+#include <tlx/sort/strings/radix_sort.hpp>
 
 #include "./BinTreeMedianSelection.hpp"
 #include "./RandomBitStore.hpp"
+#include "sorter/RQuick2/Util.hpp"
+#include "sorter/distributed/duplicate_sorting.hpp"
 
 namespace Tools {
 
@@ -53,19 +58,20 @@ class DummyTimer {
 public:
     DummyTimer() {}
 
-    void start(MPI_Comm&) {}
-    void start(const RBC::Comm&) {}
+    void start(RBC::Comm const&) {}
     void stop() {}
 };
 
 } // namespace Tools
 
-namespace RQuick {
-namespace _internal {
-template <class T>
-using PairVectorItSizeT = std::pair<typename std::vector<T>::iterator, size_t>;
 
-inline void split(const RBC::Comm& comm, RBC::Comm* subcomm) {
+namespace RQuick2 {
+namespace _internal {
+
+template <typename StringPtr>
+using PairItSizeT = std::pair<typename StringPtr::StringSet::Iterator, size_t>;
+
+inline void split(RBC::Comm const& comm, RBC::Comm* subcomm) {
     auto const nprocs = comm.getSize();
     auto const myrank = comm.getRank();
 
@@ -86,65 +92,48 @@ inline void split(const RBC::Comm& comm, RBC::Comm* subcomm) {
 /*
  * @brief Returns the k middle most elements.
  *
- * Returns the k middle most elements of v if v contains at least k
- * elements. Otherwise, v is returned. This function uses
+ * Returns the k middle most elements of ss if ss contains at least k
+ * elements. Otherwise, ss is returned. This function uses
  * randomization to decide which elements are the 'middle most'
- * elements if v contains an odd number of elements and k is an even
- * number or if v contains an even number of elements and k is an odd
- * number.
+ * elements.
  */
-template <class T>
-std::vector<T> middleMostElements(
-    std::vector<T> const& v, size_t k, std::mt19937_64& async_gen, RandomBitStore& bit_gen
+template <class StringPtr>
+StringPtr middleMostElements(
+    StringPtr const& strptr, size_t const k, std::mt19937_64& async_gen, RandomBitStore& bit_gen
 ) {
-    if (v.size() <= k) {
-        return std::vector<T>(v.begin(), v.end());
+    if (strptr.size() <= k) {
+        return strptr;
     }
 
-    auto const offset = (v.size() - k) / 2;
+    auto const offset = (strptr.size() - k) / 2;
 
-    if (((v.size() % 2) == 0 && ((k % 2) == 0)) || (v.size() % 2 == 1 && ((k % 2) == 1))) {
-        return std::vector<T>(v.data() + offset, v.data() + offset + k);
+    if (strptr.size() % 2 == k % 2) {
+        return strptr.sub(offset, k);
     } else {
         // Round down or round up randomly.
-
         auto const shift = bit_gen.getNextBit(async_gen);
-        return std::vector<T>(v.data() + offset + shift, v.data() + offset + k + shift);
+        return strptr.sub(offset + shift, k);
     }
 }
 
 /*
  * @brief Distributed splitter selection with a binary reduction tree.
  *
- * @param v Local input. The input must be sorted.
+ * @param ss Local input. The input must be sorted.
  */
-template <class T, class Comp>
-T selectSplitter(
+template <class StringPtr>
+StringT<StringPtr> selectSplitter(
     std::mt19937_64& async_gen,
     RandomBitStore& bit_gen,
-    std::vector<T> const& v,
-    MPI_Datatype mpi_type,
-    Comp comp,
-    int tag,
-    const RBC::Comm& comm
+    StringPtr const& strptr,
+    TemporaryBuffers<StringPtr>& buffers,
+    int const tag,
+    RBC::Comm const& comm
 ) {
-    assert(std::is_sorted(v.begin(), v.end(), comp));
+    assert(strptr.active().check_order());
 
-    auto const local_medians = middleMostElements(v, 2, async_gen, bit_gen);
-
-    auto const s = BinTreeMedianSelection::select(
-        local_medians.data(),
-        local_medians.data() + local_medians.size(),
-        2,
-        std::forward<Comp>(comp),
-        mpi_type,
-        async_gen,
-        bit_gen,
-        tag,
-        comm
-    );
-
-    return s;
+    auto const local_medians = middleMostElements(strptr, 2, async_gen, bit_gen);
+    return BinTreeMedianSelection::select(local_medians, buffers, 2, async_gen, bit_gen, tag, comm);
 }
 
 /*
@@ -159,80 +148,55 @@ T selectSplitter(
  *
  * @param v Local input. The input must be sorted.
  */
-template <class T, class Comp>
-PairVectorItSizeT<T> const locateSplitterLeft(
-    std::vector<T>& v,
-    Comp comp,
-    T const& splitter,
-    bool is_robust,
-    int partner,
-    int tag,
-    const RBC::Comm& comm
+template <class StringPtr>
+PairItSizeT<StringPtr> locateSplitterLeft(
+    StringPtr const& strptr,
+    StringT<StringPtr> const& splitter,
+    bool const is_robust,
+    int const partner,
+    int const tag,
+    RBC::Comm const& comm
 ) {
-    using It = typename std::vector<T>::iterator;
+    Comparator<StringPtr> const comp;
+    auto const& ss = strptr.active();
+    auto const begin = ss.begin(), end = ss.end();
+    if (is_robust) {
+        // todo could consider lcps here
+        auto const begin_geq = std::lower_bound(begin, end, splitter, comp);
+        auto const end_geq = std::upper_bound(begin_geq, end, splitter, comp);
 
-    if (!is_robust) {
-        It begin_equal_els =
-            std::lower_bound(v.begin(), v.end(), splitter, std::forward<Comp>(comp));
+        // m: my; t: theirs
+        // Number of elemements < or == or > than the splitter
+        int64_t const mleft = begin_geq - begin;
+        int64_t const mright = end - end_geq;
+        int64_t const mmiddle = ss.size() - mleft - mright;
 
-        int64_t send_cnt = v.end() - begin_equal_els;
+        std::array<int64_t, 3> send = {mleft, mright, mmiddle};
+        std::array<int64_t, 3> recv;
+        // clang-format off
+        RBC::Sendrecv(send.data(), 3, kamping::mpi_datatype<int64_t>(), partner, tag,
+                      recv.data(), 3, kamping::mpi_datatype<int64_t>(), partner, tag,
+                      comm, MPI_STATUS_IGNORE);
+        // clang-format on
+        auto [tleft, tright, tmiddle] = recv;
+
+        int64_t const perf_split = (ss.size() + tleft + tright + tmiddle) / 2;
+        int64_t const mkeep = std::min(mmiddle, std::max(perf_split - mleft - tleft, int64_t{0}));
+        int64_t const tkeep = std::min(tmiddle, std::max(perf_split - tright - mright, int64_t{0}));
+
+        return {begin + mleft + mkeep, tleft + tmiddle - tkeep};
+    } else {
+        auto const begin_geq = std::lower_bound(begin, end, splitter, comp);
+
+        int64_t send_cnt = end - begin_geq;
         int64_t recv_cnt = -1;
-        RBC::Sendrecv(
-            &send_cnt,
-            1,
-            kamping::mpi_datatype<int64_t>(),
-            partner,
-            tag,
-            &recv_cnt,
-            1,
-            kamping::mpi_datatype<int64_t>(),
-            partner,
-            tag,
-            comm,
-            MPI_STATUS_IGNORE
-        );
-
-        return {begin_equal_els, recv_cnt};
+        // clang-format off
+        RBC::Sendrecv(&send_cnt, 1, kamping::mpi_datatype<int64_t>(), partner, tag,
+                      &recv_cnt, 1, kamping::mpi_datatype<int64_t>(), partner, tag,
+                      comm, MPI_STATUS_IGNORE);
+        // clang-format on
+        return {begin_geq, recv_cnt};
     }
-
-    auto const begin_equal_els =
-        std::lower_bound(v.begin(), v.end(), splitter, std::forward<Comp>(comp));
-    auto const end_equal_els =
-        std::upper_bound(begin_equal_els, v.end(), splitter, std::forward<Comp>(comp));
-
-    // m: my; t: theirs
-    // Number of elemements < or == or > than the splitter
-    const int64_t mleft = begin_equal_els - v.begin();
-    const int64_t mright = v.end() - end_equal_els;
-    const int64_t mmiddle = v.size() - mleft - mright;
-
-    auto [tleft, tright, tmiddle] = [&]() {
-        int64_t send[3] = {mleft, mright, mmiddle};
-        int64_t recv[3];
-        RBC::Sendrecv(
-            send,
-            3,
-            kamping::mpi_datatype<int64_t>(),
-            partner,
-            tag,
-            recv,
-            3,
-            kamping::mpi_datatype<int64_t>(),
-            partner,
-            tag,
-            comm,
-            MPI_STATUS_IGNORE
-        );
-        return std::tuple(recv[0], recv[1], recv[2]);
-    }();
-
-    const int64_t perf_split = (v.size() + tleft + tright + tmiddle) / 2;
-    const int64_t mkeep =
-        std::min<int64_t>(mmiddle, std::max<int64_t>(perf_split - mleft - tleft, 0));
-    const int64_t tkeep =
-        std::min<int64_t>(tmiddle, std::max<int64_t>(perf_split - tright - mright, 0));
-
-    return {v.begin() + mleft + mkeep, tleft + tmiddle - tkeep};
 }
 
 /*
@@ -247,268 +211,140 @@ PairVectorItSizeT<T> const locateSplitterLeft(
  *
  * @param v Local input. The input must be sorted.
  */
-template <class T, class Comp>
-PairVectorItSizeT<T> const locateSplitterRight(
-    std::vector<T>& v,
-    Comp comp,
-    T const& splitter,
-    bool is_robust,
-    int partner,
-    int tag,
-    const RBC::Comm& comm
+template <class StringPtr>
+PairItSizeT<StringPtr> locateSplitterRight(
+    StringPtr const& strptr,
+    StringT<StringPtr> const& splitter,
+    bool const is_robust,
+    int const partner,
+    int const tag,
+    RBC::Comm const& comm
 ) {
-    using It = typename std::vector<T>::iterator;
+    Comparator<StringPtr> const comp;
+    auto const& ss = strptr.active();
+    auto const begin = ss.begin(), end = ss.end();
 
-    if (!is_robust) {
-        It begin_equal_els =
-            std::lower_bound(v.begin(), v.end(), splitter, std::forward<Comp>(comp));
+    auto const mpi_type = kamping::mpi_datatype<int64_t>();
+    if (is_robust) {
+        auto const begin_geq = std::lower_bound(begin, end, splitter, comp);
+        auto const end_geq = std::upper_bound(begin_geq, end, splitter, comp);
 
-        int64_t send_cnt = begin_equal_els - v.begin();
+        // m: my; t: theirs
+        int64_t const mleft = begin_geq - begin;
+        int64_t const mright = end - end_geq;
+        int64_t const mmiddle = ss.size() - mleft - mright;
+
+        std::array<int64_t, 3> send = {mleft, mright, mmiddle};
+        std::array<int64_t, 3> recv;
+        // clang-format off
+        RBC::Sendrecv(send.data(), 3, mpi_type, partner, tag,
+                      recv.data(), 3, mpi_type, partner, tag,
+                      comm, MPI_STATUS_IGNORE);
+        // clang-format on
+        auto [tleft, tright, tmiddle] = recv;
+
+        int64_t const perf_split = (ss.size() + tleft + tright + tmiddle) / 2;
+        int64_t const mkeep = std::min(mmiddle, std::max(perf_split - mright - tright, int64_t{0}));
+        int64_t const tkeep = std::min(tmiddle, std::max(perf_split - tleft - mleft, int64_t{0}));
+
+        return {end - mright - mkeep, tright + tmiddle - tkeep};
+    } else {
+        auto begin_geq = std::lower_bound(begin, end, splitter, comp);
+
+        int64_t send_cnt = begin_geq - begin;
         int64_t recv_cnt = -1;
-        RBC::Sendrecv(
-            &send_cnt,
-            1,
-            kamping::mpi_datatype<int64_t>(),
-            partner,
-            tag,
-            &recv_cnt,
-            1,
-            kamping::mpi_datatype<int64_t>(),
-            partner,
-            tag,
-            comm,
-            MPI_STATUS_IGNORE
-        );
-
-        return {begin_equal_els, recv_cnt};
+        // clang-format off
+        RBC::Sendrecv(&send_cnt, 1, mpi_type, partner, tag,
+                      &recv_cnt, 1, mpi_type, partner, tag,
+                      comm, MPI_STATUS_IGNORE);
+        // clang-format on
+        return {begin_geq, recv_cnt};
     }
-
-    auto const begin_equal_els =
-        std::lower_bound(v.begin(), v.end(), splitter, std::forward<Comp>(comp));
-    auto const end_equal_els =
-        std::upper_bound(begin_equal_els, v.end(), splitter, std::forward<Comp>(comp));
-
-    // m: my; t: theirs
-    const int64_t mleft = begin_equal_els - v.begin();
-    const int64_t mright = v.end() - end_equal_els;
-    const int64_t mmiddle = v.size() - mleft - mright;
-
-    auto [tleft, tright, tmiddle] = [&]() {
-        int64_t send[3] = {mleft, mright, mmiddle};
-        int64_t recv[3];
-        RBC::Sendrecv(
-            send,
-            3,
-            kamping::mpi_datatype<int64_t>(),
-            partner,
-            tag,
-            recv,
-            3,
-            kamping::mpi_datatype<int64_t>(),
-            partner,
-            tag,
-            comm,
-            MPI_STATUS_IGNORE
-        );
-        return std::tuple(recv[0], recv[1], recv[2]);
-    }();
-
-    const int64_t perf_split = (v.size() + tleft + tright + tmiddle) / 2;
-    const int64_t mkeep =
-        std::min<int64_t>(mmiddle, std::max<int64_t>(perf_split - mright - tright, 0));
-    const int64_t tkeep =
-        std::min<int64_t>(tmiddle, std::max<int64_t>(perf_split - tleft - mleft, 0));
-
-    return {v.end() - mright - mkeep, tright + tmiddle - tkeep};
 }
 
-/*
- * @brief Partitions two sequences according to a specific rank.
- *
- * Split two sequences into a left and a right part each. The left
- * parts contain 'rank' elements in total and the left parts only
- * contain elements which are smaller than elements of the right
- * parts. Tie-breaking is used meaning that elements of the first
- * sequence are smaller than the same elements of the second sequence
- * and equal elements of the same sequence use their index as
- * tie-breaker.
- *
- * @param begin1 Begin of the first sorted sequence.
- * @param end1 End of the first sorted sequence.
- * @param begin2 Begin of the second sorted sequence.
- * @param end2 End of the second sorted sequence.
- * @param rank Total size of the left part. Rank must be a positive
- *  number smaller of equal to the total size of both input sequences.
- * @param comp The comparator.
- */
-template <class T, class Comp>
-std::pair<T const*, T const*> twoSequenceSelection(
-    T const* begin1, T const* end1, T const* begin2, T const* end2, int64_t rank, Comp comp
-) {
-    assert(std::is_sorted(begin1, end1, std::forward<Comp>(comp)));
-    assert(std::is_sorted(begin2, end2, std::forward<Comp>(comp)));
+template <class StringPtr>
+void merge(StringPtr const& strptr1, StringPtr const& strptr2, Container<StringPtr>& dest) {
+    auto const ss1 = strptr1.active(), ss2 = strptr2.active();
+    assert(ss1.check_order() && ss2.check_order());
 
-    assert(static_cast<size_t>((end1 - begin1) + (end2 - begin2)) >= rank);
+    dest.resize_strings(strptr1.size() + strptr2.size());
 
-    // Shrink sequences by taking splitters from the first
-    // sequence until first sequence does not contain any
-    // elements.
-    while (end1 != begin1) {
-        assert(end1 > begin1);
-
-        auto const offset1 = (end1 - begin1) / 2;
-        auto const splitter1 = begin1 + offset1;
-        assert(begin1 <= splitter1);
-        assert(splitter1 < end1);
-
-        // We use tie-breaking. Meaning than an element 'a' in
-        // the first sequence is smaller than the same element
-        // 'a' in the second sequence. Thus, the function
-        // 'lower_bound' breaks ties implicitly.
-        auto const splitter2 = std::lower_bound(begin2, end2, *splitter1, std::forward<Comp>(comp));
-        auto const offset2 = splitter2 - begin2;
-
-        auto const new_rank = offset1 + offset2;
-
-        if (rank < new_rank) {
-            // Continue on left part.
-
-            // Size of first sequence decreases by at least
-            // one as 'splitter1' is now excluded.
-
-            end1 = splitter1;
-            end2 = splitter2;
-        } else if (rank > new_rank) {
-            // Continue on right part.
-
-            // Size of the first sequence decreases by at least one
-            // (even if the frist element is selected as 'splitter1')
-            // as 'splitter1' is now excluded. We can exclude
-            // 'splitter1' from the first sequence, as all elements in
-            // [splitter2, end2) as they are larger than 'splitter1'
-            // (ties are already broken). However, as 'rank >
-            // new_rank', we can remove the smallest element.
-
-            rank -= new_rank + 1;
-            begin1 = splitter1 + 1;
-            begin2 = splitter2;
-        } else {
-            return {splitter1, splitter2};
-        }
-    }
-
-    // Position in first sequence has been found. We still
-    // need 'rank' elements. Those 'rank' elements must be the
-    // first elements of the second sequence.
-    return {begin1, begin2 + rank};
+    // todo use string merge
+    Comparator<StringPtr> const comp;
+    auto const dest_set = dest.make_string_set();
+    std::merge(ss1.begin(), ss1.end(), ss2.begin(), ss2.end(), dest_set.begin(), comp);
 }
 
-template <class T, class Comp>
-void merge(T const* begin1, T const* end1, T const* begin2, T const* end2, T* tbegin, Comp comp) {
-    assert(std::is_sorted(begin1, end1, std::forward<Comp>(comp)));
-    assert(std::is_sorted(begin2, end2, std::forward<Comp>(comp)));
-
-    std::merge(begin1, end1, begin2, end2, tbegin, std::forward<Comp>(comp));
-}
-
-template <class T, class Tracker, class Comp>
+template <class StringPtr, class Tracker>
 void sortRec(
     std::mt19937_64& gen,
     RandomBitStore& bit_store,
-    std::vector<T>& v,
-    std::vector<T>& v_merge,
-    std::vector<T>& v_recv,
-    Comp comp,
-    MPI_Datatype mpi_type,
-    bool is_robust,
+    Container<StringPtr>& local_strings,
+    TemporaryBuffers<StringPtr>& buffers,
+    bool const is_robust,
     Tracker&& tracker,
-    int tag,
+    int const tag,
     const RBC::Comm& comm
 ) {
-    using It = typename std::vector<T>::iterator;
-
     tracker.median_select_t.start(comm);
 
     auto const nprocs = comm.getSize();
     auto const myrank = comm.getRank();
 
     assert(nprocs >= 2);
-    assert(std::is_sorted(v.begin(), v.end(), std::forward<Comp>(comp)));
-    assert(tlx::integer_log2_floor(nprocs));
+    assert(local_strings.make_string_set().check_order());
+    assert(tlx::is_power_of_two(nprocs));
 
     auto const is_left_group = myrank < nprocs / 2;
 
     // Select pivot globally with binary tree median selection.
-    auto const pivot =
-        selectSplitter(gen, bit_store, v, mpi_type, std::forward<Comp>(comp), tag, comm);
-
+    auto const strptr = make_str_ptr<StringPtr>(local_strings);
+    auto const pivot = selectSplitter(gen, bit_store, strptr, buffers, tag, comm);
     tracker.median_select_t.stop();
 
     // Partition data into small elements and large elements.
 
     tracker.partition_t.start(comm);
-    auto const partner = (myrank + (nprocs / 2)) % nprocs;
-    It separator, send_begin, send_end, own_begin, own_end;
-    int64_t recv_cnt = -1;
-    if (is_left_group) {
-        std::tie(separator, recv_cnt) =
-            locateSplitterLeft(v, std::forward<Comp>(comp), pivot, is_robust, partner, tag, comm);
+    int const partner = (myrank + (nprocs / 2)) % nprocs;
+    auto const [own_ptr, send_ptr, separator, recv_cnt] = [&] {
+        if (is_left_group) {
+            auto const [separator, recv_cnt] =
+                locateSplitterLeft(strptr, pivot, is_robust, partner, tag, comm);
 
-        send_begin = v.begin();
-        send_end = separator;
-        own_begin = separator;
-        own_end = v.end();
-        std::swap(send_begin, own_begin);
-        std::swap(send_end, own_end);
-    } else {
-        std::tie(separator, recv_cnt) =
-            locateSplitterRight(v, std::forward<Comp>(comp), pivot, is_robust, partner, tag, comm);
+            auto own_ptr = strptr.sub(0, separator - strptr.active().begin());
+            auto send_ptr = strptr.sub(own_ptr.size(), strptr.size() - own_ptr.size());
+            return std::tuple{own_ptr, send_ptr, separator, recv_cnt};
+        } else {
+            auto const [separator, recv_cnt] =
+                locateSplitterRight(strptr, pivot, is_robust, partner, tag, comm);
 
-        send_begin = v.begin();
-        send_end = separator;
-        own_begin = separator;
-        own_end = v.end();
-    }
-
+            auto send_ptr = strptr.sub(0, separator - strptr.active().begin());
+            auto own_ptr = strptr.sub(send_ptr.size(), strptr.size() - send_ptr.size());
+            return std::tuple{own_ptr, send_ptr, separator, recv_cnt};
+        }
+    }();
     tracker.partition_t.stop();
 
     // Move elements to partner and receive elements for own group.
     tracker.exchange_t.start(comm);
+    buffers.send_data.write(send_ptr);
+    buffers.send_data.sendrecv(buffers.recv_data, recv_cnt, partner, tag, comm);
 
-    v_recv.resize(recv_cnt);
-    auto const send_size = send_end - send_begin;
-    RBC::Sendrecv(
-        v.data() + (send_begin - v.begin()),
-        send_size,
-        mpi_type,
-        partner,
-        tag,
-        v_recv.data(),
-        v_recv.size(),
-        mpi_type,
-        partner,
-        tag,
-        comm,
-        MPI_STATUS_IGNORE
-    );
-
+    buffers.recv_strings.resize_strings(buffers.recv_data.get_num_strings());
+    buffers.recv_data.read_into(make_str_ptr<StringPtr>(buffers.recv_strings));
     tracker.exchange_t.stop();
 
     // Merge received elements with own elements.
     tracker.merge_t.start(comm);
 
-    auto const num_elements = v_recv.size() + (own_end - own_begin);
-    v_merge.resize(num_elements);
-    merge(
-        own_begin,
-        own_end,
-        v_recv.begin(),
-        v_recv.end(),
-        v_merge.begin(),
-        std::forward<Comp>(comp)
-    );
-    v.swap(v_merge);
-    assert(std::is_sorted(v.begin(), v.end(), std::forward<Comp>(comp)));
+    buffers.merge_strings.resize_strings(buffers.recv_strings.size() + own_ptr.size());
+
+    merge(own_ptr, make_str_ptr<StringPtr>(buffers.recv_strings), buffers.merge_strings);
+    buffers.merge_strings.orderRawStrings(buffers.char_buffer);
+
+    using std::swap;
+    swap(local_strings, buffers.merge_strings);
+    assert(local_strings.make_string_set().check_order());
 
     tracker.merge_t.stop();
 
@@ -524,11 +360,8 @@ void sortRec(
         sortRec(
             gen,
             bit_store,
-            v,
-            v_merge,
-            v_recv,
-            std::forward<Comp>(comp),
-            mpi_type,
+            local_strings,
+            buffers,
             is_robust,
             std::forward<Tracker>(tracker),
             tag,
@@ -543,36 +376,32 @@ void sortLocally(StringPtr const& strptr) {
         std::vector<uint64_t> lcps(strptr.size());
         auto strlcpptr = tlx::sort_strings_detail::StringLcpPtr{strptr.active(), lcps.data()};
         tlx::sort_strings_detail::radixsort_CI3(strlcpptr, 0, 0);
-        dss_mehnert::sort_duplicates(strptr);
+        dss_mehnert::sort_duplicates(strlcpptr);
     } else {
         tlx::sort_strings_detail::radixsort_CI3(strptr, 0, 0);
     }
 }
 
-template <class It, class Comp>
-void sortLocally(It begin, It end, Comp comp) {
-    ips4o::sort(begin, end, std::forward<Comp>(comp));
-}
-
-template <class Tracker, class T, class Comp>
-void sort(
+template <class Tracker, class StringPtr>
+Container<StringPtr> sort(
     std::mt19937_64& async_gen,
-    std::vector<T>& v,
-    MPI_Datatype mpi_type,
-    int tag,
+    Data<StringPtr>&& local_data,
+    int const tag,
     Tracker&& tracker,
-    Comp comp,
-    bool is_robust,
+    bool const is_robust,
     RBC::Comm comm
 ) {
     if (comm.getSize() == 1) {
         tracker.local_sort_t.start(comm);
-        sortLocally(v.begin(), v.end(), std::forward<Comp>(comp));
+        Container<StringPtr> local_strings;
+        local_strings.resize_strings(local_data.get_num_strings());
+        local_data.read_into(make_str_ptr<StringPtr>(local_strings));
+        std::swap(local_strings.raw_strings(), local_data.raw_strs);
+        sortLocally(make_str_ptr<StringPtr>(local_strings));
         tracker.local_sort_t.stop();
 
-        return;
+        return local_strings;
     }
-
 
     tracker.move_to_pow_of_two_t.start(comm);
 
@@ -584,20 +413,8 @@ void sort(
         // Not a power of two but we are part of the smaller hypercube
         // and receive elements.
 
-        MPI_Status status;
         auto const source = pow + comm.getRank();
-
-        RBC::Probe(source, tag, comm, &status);
-        int recv_cnt = 0;
-        MPI_Get_count(&status, mpi_type, &recv_cnt);
-
-        // Avoid reallocations later.
-        v.reserve(2 * (v.size() + recv_cnt));
-
-        v.resize(v.size() + recv_cnt);
-        MPI_Request request;
-        RBC::Irecv(v.data() + v.size() - recv_cnt, recv_cnt, mpi_type, source, tag, comm, &request);
-        MPI_Wait(&request, MPI_STATUS_IGNORE);
+        local_data.recv(source, tag, comm, true);
 
         RBC::Comm sub_comm;
         RBC::Comm_create_group(comm, &sub_comm, 0, pow - 1);
@@ -607,8 +424,9 @@ void sort(
         // hypercube.
 
         auto const target = comm.getRank() - pow;
-        RBC::Send(v.data(), v.size(), mpi_type, target, tag, comm);
-        v.clear();
+        // Data<StringPtr> send_data{std::move(local_strs)};
+        local_data.send(target, tag, comm);
+        // todo is container guaranteed to be empty here?
 
         // This process is not part of 'sub_comm'. We call
         // this function to support MPI implementations
@@ -619,7 +437,7 @@ void sort(
 
         tracker.move_to_pow_of_two_t.stop();
 
-        return;
+        return {};
     } else if (pow != comm.getSize()) {
         // Not a power of two but we are part of the smaller hypercube
         // and do not receive elements.
@@ -627,143 +445,86 @@ void sort(
         RBC::Comm sub_comm;
         RBC::Comm_create_group(comm, &sub_comm, 0, pow - 1);
         comm = sub_comm;
-
-        // Avoid reallocations later.
-        v.reserve(3 * v.size());
     } else {
         // The number of processes is a power of two.
-
-        // Avoid reallocations later.
-        v.reserve(2 * v.size());
     }
 
     tracker.move_to_pow_of_two_t.stop();
 
     assert(tlx::is_power_of_two(comm.getSize()));
 
-    tracker.parallel_shuffle_t.start(comm);
+    Container<StringPtr> local_strings;
+    local_strings.resize_strings(local_data.get_num_strings());
+    local_data.read_into(make_str_ptr<StringPtr>(local_strings));
+    std::swap(local_strings.raw_strings(), local_data.raw_strs);
 
-    // Vector is used to store about the same number of elements as v.
-    std::vector<T> v1;
-    v1.reserve(v.capacity());
+    // todo consider using reserve
+    TemporaryBuffers<StringPtr> buffers;
+    buffers.recv_data = std::move(local_data);
 
-    // Vector is used to store about half the number of elements as
-    // v. This vector is used to receive data.
-    std::vector<T> v_half;
-    v_half.reserve(v.capacity() / 2);
-
-    if (is_robust) {
-        shuffle(async_gen, v, v_half, mpi_type, tag, comm);
-    }
-
-    tracker.parallel_shuffle_t.stop();
 
     tracker.local_sort_t.start(comm);
-    sortLocally(v.begin(), v.end(), std::forward<Comp>(comp));
+    sortLocally(make_str_ptr<StringPtr>(local_strings));
     tracker.local_sort_t.stop();
 
     RandomBitStore bit_store;
     _internal::sortRec(
         async_gen,
         bit_store,
-        v,
-        v1,
-        v_half,
-        std::forward<Comp>(comp),
-        mpi_type,
+        local_strings,
+        buffers,
         is_robust,
         std::forward<Tracker>(tracker),
         tag,
         comm
     );
+    return local_strings;
 }
 
 class DummyTracker {
 public:
     Tools::DummyTimer local_sort_t;
     Tools::DummyTimer exchange_t;
-    Tools::DummyTimer parallel_shuffle_t;
     Tools::DummyTimer merge_t;
     Tools::DummyTimer median_select_t;
     Tools::DummyTimer partition_t;
     Tools::DummyTimer comm_split_t;
     Tools::DummyTimer move_to_pow_of_two_t;
 };
+
 } // namespace _internal
 
-template <class Tracker, class T, class Comp>
-void sort(
+template <class Tracker, class StringPtr>
+Container<StringPtr> sort(
     Tracker&& tracker,
-    MPI_Datatype mpi_type,
-    std::vector<T>& v,
-    int tag,
+    Data<StringPtr>&& data,
+    int const tag,
     std::mt19937_64& async_gen,
-    MPI_Comm mpi_comm,
-    Comp comp,
-    bool is_robust
+    MPI_Comm const mpi_comm,
+    bool const is_robust
 ) {
     RBC::Comm comm;
     RBC::Create_Comm_from_MPI(mpi_comm, &comm);
-    _internal::sort(
+    return _internal::sort(
         async_gen,
-        v,
-        mpi_type,
+        std::move(data),
         tag,
         std::forward<Tracker>(tracker),
-        std::forward<Comp>(comp),
         is_robust,
-        comm
+        std::move(comm)
     );
 }
 
-template <class T, class Comp>
-void sort(
-    MPI_Datatype mpi_type,
-    std::vector<T>& v,
-    int tag,
+template <class StringPtr>
+Container<StringPtr> sort(
+    Data<StringPtr>&& data,
+    int const tag,
     std::mt19937_64& async_gen,
-    MPI_Comm mpi_comm,
-    Comp comp,
-    bool is_robust
+    MPI_Comm const mpi_comm,
+    bool const is_robust
 ) {
     _internal::DummyTracker tracker;
-    sort(tracker, mpi_type, v, tag, async_gen, mpi_comm, comp, is_robust);
+    return sort(tracker, std::move(data), tag, async_gen, mpi_comm, is_robust);
 }
 
-template <class Tracker, class T, class Comp>
-void sort(
-    Tracker&& tracker,
-    MPI_Datatype mpi_type,
-    std::vector<T>& v,
-    int tag,
-    std::mt19937_64& async_gen,
-    const RBC::Comm& comm,
-    Comp comp,
-    bool is_robust
-) {
-    _internal::sort(
-        async_gen,
-        v,
-        mpi_type,
-        tag,
-        std::forward<Tracker>(tracker),
-        std::forward<Comp>(comp),
-        is_robust,
-        comm
-    );
-}
-
-template <class T, class Comp>
-void sort(
-    MPI_Datatype mpi_type,
-    std::vector<T>& v,
-    int tag,
-    std::mt19937_64& async_gen,
-    const RBC::Comm& comm,
-    Comp comp,
-    bool is_robust
-) {
-    _internal::DummyTracker tracker;
-    sort(tracker, mpi_type, v, tag, async_gen, comm, comp, is_robust);
-}
-} // namespace RQuick
+} // namespace RQuick2
