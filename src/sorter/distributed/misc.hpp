@@ -411,7 +411,7 @@ size_t compute_global_lcp_average(LcpIt const first, LcpIt const last, Communica
         kamping::send_buf(local_result),
         kamping::op(std::plus<>{}, kamping::ops::commutative)
     );
-    return global_result.lcp_sum / global_result.num_strs;
+    return global_result.lcp_sum / std::max(size_t{1}, global_result.num_strs);
 }
 
 template <typename Comparator, typename Data>

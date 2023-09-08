@@ -441,11 +441,6 @@ public:
         using dss_mehnert::measurement::MeasuringTool;
         auto& measuring_tool = MeasuringTool::measuringTool();
 
-        // todo this is wrong
-        if (container.empty()) {
-            return {};
-        }
-
         measuring_tool.start("all_to_all_strings_intern_copy");
         auto [send_buf_char, send_counts_char] =
             _internal::write_send_buf<compress_prefixes>(container, send_counts);
@@ -481,10 +476,6 @@ struct AllToAllStringImplPrefixDoubling : private AllToAllStringImpl<
     ) {
         using dss_mehnert::measurement::MeasuringTool;
         auto& measuring_tool = MeasuringTool::measuringTool();
-
-        if (container.empty()) {
-            return {};
-        }
 
         measuring_tool.start("all_to_all_strings_intern_copy");
         auto [send_buf_char, send_counts_char] =
@@ -533,10 +524,6 @@ struct AllToAllStringImplPrefixDoubling : private AllToAllStringImpl<
     ) {
         using dss_mehnert::measurement::MeasuringTool;
         auto& measuring_tool = MeasuringTool::measuringTool();
-
-        if (container.empty()) {
-            return {};
-        }
 
         measuring_tool.start("all_to_all_strings_intern_copy");
         auto [send_buf_char, send_counts_char] =
