@@ -173,9 +173,6 @@ protected:
 
         return sorted_container;
     }
-
-private:
-    static constexpr bool debug = false;
 };
 
 template <
@@ -194,24 +191,20 @@ public:
 
         // todo make phase names consistent
         auto string_ptr = container.make_string_lcp_ptr();
-        auto const& ss = string_ptr.active();
         this->measuring_tool_.setPhase("local_sorting");
 
-        if constexpr (debug) {
-            auto op = [&ss](auto sum, auto const& str) { return sum + ss.get_length(str) + 1; };
-            size_t chars_in_set = std::accumulate(std::begin(ss), std::end(ss), size_t{0}, op);
-            this->measuring_tool_.add(chars_in_set, "chars_in_set");
-        }
+        this->measuring_tool_.add(container.char_size(), "chars_in_set");
 
         this->measuring_tool_.start("local_sorting", "sort_locally");
         tlx::sort_strings_detail::radixsort_CI3(string_ptr, 0, 0);
         this->measuring_tool_.stop("local_sorting", "sort_locally", comms.comm_root());
 
-        if (comms.comm_root().size() == 1)
+        if (comms.comm_root().size() == 1) {
             return container;
+        }
 
         this->measuring_tool_.start("avg_lcp");
-        const size_t lcp_summand = 5u;
+        size_t const lcp_summand = 5u;
         auto lcp_begin = string_ptr.lcp();
         auto lcp_end = string_ptr.lcp() + string_ptr.size();
         auto avg_lcp = compute_global_lcp_average(lcp_begin, lcp_end, comms.comm_root());
@@ -225,16 +218,6 @@ public:
             container = this->sort_partial(std::move(container), level, extra_sample_args, {});
             this->measuring_tool_.stop("sort_globally", "partial_sorting", comms.comm_root());
             this->measuring_tool_.setRound(++round);
-
-            if constexpr (debug) {
-                auto local_color = level.comm_group.rank() / level.group_size();
-                auto global_color = comms.comm_root().rank() / level.group_size();
-
-                if (level.comm_group.is_root()) {
-                    std::cout << "iter=" << round << " group_world=" << global_color
-                              << " group=" << local_color << "\n";
-                }
-            }
         }
 
         this->measuring_tool_.start("sort_globally", "final_sorting");
@@ -245,9 +228,6 @@ public:
         this->measuring_tool_.setRound(0);
         return sorted_container;
     }
-
-private:
-    static constexpr bool debug = false;
 };
 
 } // namespace sorter

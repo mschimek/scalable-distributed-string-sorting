@@ -157,6 +157,8 @@ PairItSizeT<StringPtr> locateSplitterLeft(
     int const tag,
     RBC::Comm const& comm
 ) {
+    auto const mpi_type = kamping::mpi_datatype<ptrdiff_t>();
+
     Comparator<StringPtr> const comp;
     auto const& ss = strptr.active();
     auto const begin = ss.begin(), end = ss.end();
@@ -167,34 +169,37 @@ PairItSizeT<StringPtr> locateSplitterLeft(
 
         // m: my; t: theirs
         // Number of elemements < or == or > than the splitter
-        int64_t const mleft = begin_geq - begin;
-        int64_t const mright = end - end_geq;
-        int64_t const mmiddle = ss.size() - mleft - mright;
+        ptrdiff_t const mleft = begin_geq - begin;
+        ptrdiff_t const mright = end - end_geq;
+        ptrdiff_t const mmiddle = ss.size() - mleft - mright;
 
-        std::array<int64_t, 3> send = {mleft, mright, mmiddle};
-        std::array<int64_t, 3> recv;
+        // todo this should be a size_t
+        std::array<ptrdiff_t, 3> send = {mleft, mright, mmiddle};
+        std::array<ptrdiff_t, 3> recv;
         // clang-format off
-        RBC::Sendrecv(send.data(), 3, kamping::mpi_datatype<int64_t>(), partner, tag,
-                      recv.data(), 3, kamping::mpi_datatype<int64_t>(), partner, tag,
+        RBC::Sendrecv(send.data(), 3, mpi_type, partner, tag,
+                      recv.data(), 3, mpi_type, partner, tag,
                       comm, MPI_STATUS_IGNORE);
         // clang-format on
+        _internal::add_comm_volume<ptrdiff_t>(3);
         auto [tleft, tright, tmiddle] = recv;
 
-        int64_t const perf_split = (ss.size() + tleft + tright + tmiddle) / 2;
-        int64_t const mkeep = std::min(mmiddle, std::max(perf_split - mleft - tleft, int64_t{0}));
-        int64_t const tkeep = std::min(tmiddle, std::max(perf_split - tright - mright, int64_t{0}));
+        ptrdiff_t const split = (ss.size() + tleft + tright + tmiddle) / 2;
+        ptrdiff_t const mkeep = std::min(mmiddle, std::max(split - mleft - tleft, ptrdiff_t{0}));
+        ptrdiff_t const tkeep = std::min(tmiddle, std::max(split - tright - mright, ptrdiff_t{0}));
 
         return {begin + mleft + mkeep, tleft + tmiddle - tkeep};
     } else {
         auto const begin_geq = std::lower_bound(begin, end, splitter, comp);
 
-        int64_t send_cnt = end - begin_geq;
-        int64_t recv_cnt = -1;
+        ptrdiff_t send_cnt = end - begin_geq;
+        ptrdiff_t recv_cnt = -1;
         // clang-format off
-        RBC::Sendrecv(&send_cnt, 1, kamping::mpi_datatype<int64_t>(), partner, tag,
-                      &recv_cnt, 1, kamping::mpi_datatype<int64_t>(), partner, tag,
+        RBC::Sendrecv(&send_cnt, 1, mpi_type, partner, tag,
+                      &recv_cnt, 1, mpi_type, partner, tag,
                       comm, MPI_STATUS_IGNORE);
         // clang-format on
+        _internal::add_comm_volume<ptrdiff_t>(1);
         return {begin_geq, recv_cnt};
     }
 }
@@ -224,40 +229,42 @@ PairItSizeT<StringPtr> locateSplitterRight(
     auto const& ss = strptr.active();
     auto const begin = ss.begin(), end = ss.end();
 
-    auto const mpi_type = kamping::mpi_datatype<int64_t>();
+    auto const mpi_type = kamping::mpi_datatype<ptrdiff_t>();
     if (is_robust) {
         auto const begin_geq = std::lower_bound(begin, end, splitter, comp);
         auto const end_geq = std::upper_bound(begin_geq, end, splitter, comp);
 
         // m: my; t: theirs
-        int64_t const mleft = begin_geq - begin;
-        int64_t const mright = end - end_geq;
-        int64_t const mmiddle = ss.size() - mleft - mright;
+        ptrdiff_t const mleft = begin_geq - begin;
+        ptrdiff_t const mright = end - end_geq;
+        ptrdiff_t const mmiddle = ss.size() - mleft - mright;
 
-        std::array<int64_t, 3> send = {mleft, mright, mmiddle};
-        std::array<int64_t, 3> recv;
+        std::array<ptrdiff_t, 3> send = {mleft, mright, mmiddle};
+        std::array<ptrdiff_t, 3> recv;
         // clang-format off
         RBC::Sendrecv(send.data(), 3, mpi_type, partner, tag,
                       recv.data(), 3, mpi_type, partner, tag,
                       comm, MPI_STATUS_IGNORE);
         // clang-format on
+        _internal::add_comm_volume<ptrdiff_t>(3);
         auto [tleft, tright, tmiddle] = recv;
 
-        int64_t const perf_split = (ss.size() + tleft + tright + tmiddle) / 2;
-        int64_t const mkeep = std::min(mmiddle, std::max(perf_split - mright - tright, int64_t{0}));
-        int64_t const tkeep = std::min(tmiddle, std::max(perf_split - tleft - mleft, int64_t{0}));
+        ptrdiff_t const split = (ss.size() + tleft + tright + tmiddle) / 2;
+        ptrdiff_t const mkeep = std::min(mmiddle, std::max(split - mright - tright, ptrdiff_t{0}));
+        ptrdiff_t const tkeep = std::min(tmiddle, std::max(split - tleft - mleft, ptrdiff_t{0}));
 
         return {end - mright - mkeep, tright + tmiddle - tkeep};
     } else {
         auto begin_geq = std::lower_bound(begin, end, splitter, comp);
 
-        int64_t send_cnt = begin_geq - begin;
-        int64_t recv_cnt = -1;
+        ptrdiff_t send_cnt = begin_geq - begin;
+        ptrdiff_t recv_cnt = -1;
         // clang-format off
         RBC::Sendrecv(&send_cnt, 1, mpi_type, partner, tag,
                       &recv_cnt, 1, mpi_type, partner, tag,
                       comm, MPI_STATUS_IGNORE);
         // clang-format on
+        _internal::add_comm_volume<ptrdiff_t>(1);
         return {begin_geq, recv_cnt};
     }
 }

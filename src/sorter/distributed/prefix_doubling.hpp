@@ -69,15 +69,10 @@ public:
         this->measuring_tool_.start("init_container");
         // create a new container with additional PE rank and string index
         StringPEIndexContainer container{std::move(container_), comms.comm_root().rank()};
-        auto string_ptr = container.make_string_lcp_ptr();
-        auto const& ss = string_ptr.active();
         this->measuring_tool_.stop("init_container");
 
-        if constexpr (debug) {
-            auto op = [&ss](auto sum, auto const& str) { return sum + ss.get_length(str) + 1; };
-            size_t chars_in_set = std::accumulate(begin(ss), end(ss), size_t{0}, op);
-            this->measuring_tool_.add(chars_in_set, "chars_in_set");
-        }
+        auto string_ptr = container.make_string_lcp_ptr();
+        this->measuring_tool_.add(container.char_size(), "chars_in_set");
 
         this->measuring_tool_.start("local_sorting", "sort_locally");
         tlx::sort_strings_detail::radixsort_CI3(string_ptr, 0, 0);
@@ -134,7 +129,6 @@ public:
     }
 
 private:
-    static constexpr bool debug = false;
     static constexpr uint64_t start_depth = 8;
 
     std::vector<StringIndexPEIndex> writeback_permutation(auto& sorted_container) {

@@ -16,9 +16,16 @@
 #include "strings/stringcontainer.hpp"
 #include "strings/stringset.hpp"
 #include "strings/stringtools.hpp"
+#include "util/measuringTool.hpp"
 
 namespace RQuick2 {
 namespace _internal {
+
+template <typename T>
+void add_comm_volume(size_t const count) {
+    using dss_mehnert::measurement::MeasuringTool;
+    MeasuringTool::measuringTool().addRawCommunication(sizeof(T) * count, "RQuick");
+}
 
 template <typename StringPtr>
 struct RawStrings {
@@ -105,12 +112,14 @@ public:
             auto const char_type = kamping::mpi_datatype<Char>();
             RBC::Isend(this->raw_strs.data(), this->raw_strs.size(), char_type, dest, char_tag, 
                        comm, requests.data());
+            add_comm_volume<Char>(this->raw_strs.size());
         }
 
         if constexpr (has_index) {
             auto const idx_type = kamping::mpi_datatype<uint64_t>();
             RBC::Isend(this->indices.data(), this->indices.size(), idx_type, dest, idx_tag,
                        comm, requests.data() + 1);
+            add_comm_volume<uint64_t>(this->indices.size());
         }
         // clang-format on
         MPI_Waitall(requests.size(), requests.data(), MPI_STATUSES_IGNORE);
@@ -168,6 +177,7 @@ public:
                        comm, requests.data());
             RBC::Isend(this->indices.data(), this->indices.size(), idx_type, partner, idx_tag,
                        comm, requests.data() + 1);
+            add_comm_volume<uint64_t>(this->indices.size());
         }
 
         {
@@ -176,6 +186,7 @@ public:
 
             RBC::Isend(this->raw_strs.data(), send_cnt_char, char_type, partner, char_tag,
                        comm, requests.data() + 2);
+            add_comm_volume<Char>(this->raw_strs.size());
 
             MPI_Status status;
             RBC::Probe(partner, char_tag, comm, &status);
@@ -204,19 +215,23 @@ public:
             this->indices.resize(1);
             std::array<uint64_t, 2> send_recv_buf = {char_size, this->indices[0]};
             RBC::Bcast(send_recv_buf.data(), 2, idx_type, root, comm);
+            add_comm_volume<uint64_t>(2);
 
             std::tie(char_size, this->indices.front()) = std::tuple_cat(send_recv_buf);
         } else {
             RBC::Bcast(&char_size, 1, size_type, root, comm);
+            add_comm_volume<size_t>(1);
 
             if constexpr (has_index) {
                 this->indices.resize(1);
                 RBC::Bcast(this->indices.data(), 1, idx_type, root, comm);
+                add_comm_volume<uint64_t>(1);
             }
         }
 
         this->raw_strs.resize(char_size);
         RBC::Bcast(this->raw_strs.data(), char_size, char_type, root, comm);
+        add_comm_volume<Char>(this->raw_strs.size());
 
         assert(std::count(this->raw_strs.begin(), this->raw_strs.end(), '\0') == 1);
         assert(this->raw_strs.back() == '\0');
@@ -252,6 +267,7 @@ using Data_ = std::conditional_t<
     DataMembers<StringPtr, RawStrings>>;
 
 } // namespace _internal
+
 
 // todo allow for LCP values
 // todo get rid of index string container

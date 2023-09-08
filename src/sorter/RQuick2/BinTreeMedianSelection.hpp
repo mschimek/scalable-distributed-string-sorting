@@ -108,7 +108,6 @@ selectMedian(StringSet const& ss, std::mt19937_64& async_gen, RandomBitStore& bi
 }
 
 } // namespace _internal
-//
 
 template <class StringPtr>
 StringT<StringPtr> select(
