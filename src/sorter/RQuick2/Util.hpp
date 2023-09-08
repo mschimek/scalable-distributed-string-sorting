@@ -106,6 +106,7 @@ public:
     }
 
     void recv(int const src, int const tag, RBC::Comm const& comm, bool append = false) {
+        // clang-format off
         auto char_type = kamping::mpi_datatype<Char>();
         MPI_Status status;
         RBC::Probe(src, tag, comm, &status);
@@ -115,25 +116,22 @@ public:
 
         size_t offset = append ? this->raw_strs.size() : 0;
         this->raw_strs.resize(offset + count_chars);
-        // clang-format off
         RBC::Recv(this->raw_strs.data() + offset, count_chars, char_type,
                   src, tag, comm, MPI_STATUS_IGNORE);
-        // clang-format on
 
         if constexpr (has_index) {
             auto idx_type = kamping::mpi_datatype<uint64_t>();
             RBC::Probe(src, tag, comm, &status);
 
             int count = 0;
-            MPI_Get_count(&status, idx_type, &count_chars);
+            MPI_Get_count(&status, idx_type, &count);
 
             size_t idx_offset = append ? this->indices.size() : 0;
-            this->indices.resize(count);
-            // clang-format off
-            RBC::Recv(this->indices.data() + idx_offset, count_chars, idx_type,
+            this->indices.resize(idx_offset + count);
+            RBC::Recv(this->indices.data() + idx_offset, count, idx_type,
                       src, tag, comm, MPI_STATUS_IGNORE);
-            // clang-format on
         }
+        // clang-format on
     }
 
     void sendrecv(
@@ -145,7 +143,7 @@ public:
     ) {
         // clang-format off
         auto const size_type = kamping::mpi_datatype<size_t>();
-        auto char_send_cnt = this->raw_strs.size(), char_recv_cnt = -1;
+        size_t char_send_cnt = this->raw_strs.size(), char_recv_cnt = 0;
         RBC::Sendrecv(&char_send_cnt, 1, size_type, partner, tag,
                       &char_recv_cnt, 1, size_type, partner, tag,
                       comm, MPI_STATUS_IGNORE);
@@ -275,7 +273,7 @@ void copy_into(StringPtr const& strptr, Container<StringPtr>& container) {
 
 template <typename StringPtr>
 struct Data : public _internal::Data_<StringPtr> {
-    using _internal::Data_<StringPtr>::DataMembers;
+    using _internal::Data_<StringPtr>::Data_;
 };
 
 template <typename StringPtr>

@@ -424,9 +424,7 @@ Container<StringPtr> sort(
         // hypercube.
 
         auto const target = comm.getRank() - pow;
-        // Data<StringPtr> send_data{std::move(local_strs)};
         local_data.send(target, tag, comm);
-        // todo is container guaranteed to be empty here?
 
         // This process is not part of 'sub_comm'. We call
         // this function to support MPI implementations
