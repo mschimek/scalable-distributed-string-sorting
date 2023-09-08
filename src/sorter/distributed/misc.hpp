@@ -444,7 +444,7 @@ splitter_sort(Data&& data, std::mt19937_64& gen, Comparator& comp, Communicator 
 template <typename StringPtr>
 RQuick2::Container<StringPtr>
 splitter_sort_v2(RQuick2::Data<StringPtr>&& data, std::mt19937_64& gen, Communicator const& comm) {
-    bool const is_robust = true;
+    bool const is_robust = !StringPtr::StringSet::is_indexed;
     int const tag = 23560;
     auto comm_mpi = comm.mpi_communicator();
     return RQuick2::sort(std::move(data), tag, gen, comm_mpi, is_robust);

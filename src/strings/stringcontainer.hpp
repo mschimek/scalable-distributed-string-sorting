@@ -43,9 +43,7 @@ public:
         std::vector<String> strings;
         strings.reserve(raw_strings.size() / 100);
 
-        auto init = [](auto str, auto) {
-            return String{str};
-        };
+        auto init = [](auto str, auto) { return String{str}; };
         init_str_len(std::back_inserter(strings), raw_strings, init);
         return strings;
     }
@@ -62,9 +60,7 @@ public:
         std::vector<String> strings;
         strings.reserve(raw_strings.size() / 100);
 
-        auto init = [](auto str, auto len) {
-            return String{str, Length{len}};
-        };
+        auto init = [](auto str, auto len) { return String{str, Length{len}}; };
         init_str_len(std::back_inserter(strings), raw_strings, init);
         return strings;
     }
@@ -128,9 +124,7 @@ public:
         auto num_strs = std::accumulate(intervals.begin(), intervals.end(), size_t{0});
         std::vector<String> strings(num_strs);
 
-        auto init = [](auto str, auto len) {
-            return String{str, Length{len}};
-        };
+        auto init = [](auto str, auto len) { return String{str, Length{len}}; };
         init_str_len(strings.begin(), raw_strings, init);
 
         auto str = strings.begin();
@@ -434,34 +428,17 @@ template <typename StringSet_>
 class StringContainer : public BaseStringContainer<StringSet_, StringContainer<StringSet_>> {
 public:
     using Base = BaseStringContainer<StringSet_, StringContainer<StringSet_>>;
-
-    static constexpr bool isIndexed = false;
+    using Char = Base::Char;
 
     StringContainer() = default;
 
-    explicit StringContainer(std::vector<typename Base::Char>&& raw_strings)
-        : Base{std::move(raw_strings)} {};
-};
+    template <typename... Args>
+    explicit StringContainer(std::vector<Char>&& raw_strings, Args&&... args)
+        : Base{std::move(raw_strings), std::forward<Args>(args)...} {}
 
-// todo remove this class
-template <typename StringSet_>
-class IndexStringContainer
-    : public BaseStringContainer<StringSet_, IndexStringContainer<StringSet_>> {
-public:
-    using Base = BaseStringContainer<StringSet_, IndexStringContainer<StringSet_>>;
-    using Char = Base::Char;
-
-    static_assert(StringSet_::is_indexed);
-    static constexpr bool isIndexed = true;
-
-    IndexStringContainer() = default;
-
-    explicit IndexStringContainer(
-        std::vector<Char>&& raw_strings, std::vector<uint64_t> const& indices
-    )
-        : Base{std::move(raw_strings), indices} {};
-
-    void update(std::vector<Char>&& raw_strings, std::vector<uint64_t> indices) {
+    template <typename Container_ = StringContainer<StringSet_>>
+    std::enable_if_t<Container_::isIndexed>
+    update(std::vector<Char>&& raw_strings, std::vector<uint64_t> const& indices) {
         this->set(std::move(raw_strings));
         this->update_strings(indices);
     }

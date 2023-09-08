@@ -77,7 +77,7 @@ std::enable_if_t<Sampler::isIndexed, std::vector<size_t>>
 compute_partition(StringPtr string_ptr, Params const& params, Communicator const& comm) {
     using namespace dss_schimek;
     using Comparator = IndexStringComparator;
-    using StringContainer = IndexStringContainer<UCharLengthIndexStringSet>;
+    using StringContainer = StringContainer<UCharLengthIndexStringSet>;
     using RQuickData = RQuick::Data<StringContainer, StringContainer::isIndexed>;
 
     auto& measuring_tool = measurement::MeasuringTool::measuringTool();

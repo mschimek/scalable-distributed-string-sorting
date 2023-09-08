@@ -258,7 +258,7 @@ using Data_ = std::conditional_t<
 template <typename StringPtr>
 using Container = std::conditional_t<
     StringPtr::StringSet::is_indexed,
-    dss_schimek::IndexStringContainer<typename StringPtr::StringSet>,
+    dss_schimek::StringContainer<typename StringPtr::StringSet>,
     dss_schimek::StringContainer<typename StringPtr::StringSet>>;
 
 template <typename StringPtr>
