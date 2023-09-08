@@ -43,7 +43,9 @@ public:
         std::vector<String> strings;
         strings.reserve(raw_strings.size() / 100);
 
-        auto init = [](auto str, auto) { return String{str}; };
+        auto init = [](auto str, auto) {
+            return String{str};
+        };
         init_str_len(std::back_inserter(strings), raw_strings, init);
         return strings;
     }
@@ -60,7 +62,9 @@ public:
         std::vector<String> strings;
         strings.reserve(raw_strings.size() / 100);
 
-        auto init = [](auto str, auto len) { return String{str, Length{len}}; };
+        auto init = [](auto str, auto len) {
+            return String{str, Length{len}};
+        };
         init_str_len(std::back_inserter(strings), raw_strings, init);
         return strings;
     }
@@ -124,7 +128,9 @@ public:
         auto num_strs = std::accumulate(intervals.begin(), intervals.end(), size_t{0});
         std::vector<String> strings(num_strs);
 
-        auto init = [](auto str, auto len) { return String{str, Length{len}}; };
+        auto init = [](auto str, auto len) {
+            return String{str, Length{len}};
+        };
         init_str_len(strings.begin(), raw_strings, init);
 
         auto str = strings.begin();
@@ -162,12 +168,15 @@ template <typename StringSet_, typename Container>
 class BaseStringContainer : private _internal::InitPolicy<StringSet_> {
 public:
     using StringSet = StringSet_;
-    using StringPtr = tlx::sort_strings_detail::StringPtr<StringSet>;
     using Char = StringSet::Char;
     using CharIterator = StringSet::CharIterator;
     using String = StringSet::String;
 
+    using StringPtr = tlx::sort_strings_detail::StringPtr<StringSet>;
+    using AutoStringPtr = StringPtr;
+
     static constexpr bool isIndexed = StringSet::is_indexed;
+    static constexpr bool has_lcps = false;
 
     BaseStringContainer() : raw_strings_{std::make_unique<std::vector<Char>>()} {}
 
@@ -185,9 +194,12 @@ public:
     std::vector<Char>&& release_raw_strings() { return std::move(*raw_strings_); }
     std::vector<String>&& release_strings() { return std::move(strings_); }
 
-    void swap(Container& rhs) {
-        std::swap(raw_strings_, rhs.raw_strings_);
-        std::swap(strings_, rhs.strings_);
+    friend void swap(
+        BaseStringContainer<StringSet, Container>& lhs,
+        BaseStringContainer<StringSet, Container>& rhs
+    ) {
+        std::swap(lhs.raw_strings_, rhs.raw_strings_);
+        std::swap(rhs.strings_, rhs.strings_);
     }
 
     std::vector<unsigned char> getRawString(int64_t i) {
@@ -202,6 +214,8 @@ public:
 
     StringSet make_string_set() { return {strings(), strings() + size()}; }
     StringPtr make_string_ptr() { return {make_string_set()}; }
+
+    auto make_auto_ptr() { return static_cast<Container*>(this)->make_auto_ptr_(); }
 
     void resize_strings(size_t const count) { strings_.resize(count, String{}); }
 
@@ -260,6 +274,7 @@ public:
 
 protected:
     static constexpr size_t approx_string_length = 10;
+
     std::unique_ptr<std::vector<Char>> raw_strings_;
     std::vector<String> strings_;
 
@@ -277,16 +292,24 @@ protected:
             std::forward<Args>(args)...
         );
     }
+
+private:
+    StringPtr make_auto_ptr_() { return make_string_ptr(); }
 };
 
 template <typename StringSet_, typename Container>
 class BaseStringLcpContainer : public BaseStringContainer<StringSet_, Container> {
+    friend BaseStringContainer<StringSet_, Container>;
+
 public:
     using Base = BaseStringContainer<StringSet_, Container>;
     using Char = Base::Char;
     using String = Base::String;
 
     using StringLcpPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet_, size_t>;
+    using AutoStringPtr = StringLcpPtr;
+
+    static constexpr bool has_lcps = true;
 
     BaseStringLcpContainer() = default;
 
@@ -297,10 +320,14 @@ public:
     std::vector<size_t> const& savedLcps() const { return savedLcps_; }
     std::vector<size_t>&& release_lcps() { return std::move(lcps_); }
 
-    void swap(Container& rhs) {
-        std::swap(this->raw_strings_, rhs.raw_strings_);
-        std::swap(this->strings_, rhs.strings_);
-        std::swap(this->lcps_, rhs.lcps_);
+    friend void swap(
+        BaseStringLcpContainer<StringSet_, Container>& lhs,
+        BaseStringLcpContainer<StringSet_, Container>& rhs
+    ) {
+        std::swap(lhs.raw_strings_, rhs.raw_strings_);
+        std::swap(lhs.strings_, rhs.strings_);
+        std::swap(lhs.lcps_, rhs.lcps_);
+        std::swap(lhs.savedLcps_, rhs.savedLcps_);
     }
 
     StringLcpPtr make_string_lcp_ptr() { return {this->make_string_set(), this->lcp_array()}; }
@@ -397,6 +424,8 @@ protected:
     )
         : Base{std::move(raw_strings), std::forward<Args>(args)...},
           lcps_(std::move(lcps)) {}
+
+    StringLcpPtr make_auto_ptr_() { return make_string_lcp_ptr(); }
 };
 
 

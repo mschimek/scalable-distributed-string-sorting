@@ -298,7 +298,7 @@ void sortRec(
     auto const is_left_group = myrank < nprocs / 2;
 
     // Select pivot globally with binary tree median selection.
-    auto const strptr = make_str_ptr<StringPtr>(local_strings);
+    auto const strptr = local_strings.make_auto_ptr();
     auto const pivot = selectSplitter(gen, bit_store, strptr, buffers, tag, comm);
     tracker.median_select_t.stop();
 
@@ -331,7 +331,7 @@ void sortRec(
     buffers.send_data.sendrecv(buffers.recv_data, recv_cnt, partner, tag, comm);
 
     buffers.recv_strings.resize_strings(buffers.recv_data.get_num_strings());
-    buffers.recv_data.read_into(make_str_ptr<StringPtr>(buffers.recv_strings));
+    buffers.recv_data.read_into(buffers.recv_strings.make_auto_ptr());
     tracker.exchange_t.stop();
 
     // Merge received elements with own elements.
@@ -339,7 +339,7 @@ void sortRec(
 
     buffers.merge_strings.resize_strings(buffers.recv_strings.size() + own_ptr.size());
 
-    merge(own_ptr, make_str_ptr<StringPtr>(buffers.recv_strings), buffers.merge_strings);
+    merge(own_ptr, buffers.recv_strings.make_auto_ptr(), buffers.merge_strings);
     buffers.merge_strings.orderRawStrings(buffers.char_buffer);
 
     using std::swap;
@@ -395,9 +395,9 @@ Container<StringPtr> sort(
         tracker.local_sort_t.start(comm);
         Container<StringPtr> local_strings;
         local_strings.resize_strings(local_data.get_num_strings());
-        local_data.read_into(make_str_ptr<StringPtr>(local_strings));
+        local_data.read_into(local_strings.make_auto_ptr());
         std::swap(local_strings.raw_strings(), local_data.raw_strs);
-        sortLocally(make_str_ptr<StringPtr>(local_strings));
+        sortLocally(local_strings.make_auto_ptr());
         tracker.local_sort_t.stop();
 
         return local_strings;
@@ -453,7 +453,7 @@ Container<StringPtr> sort(
 
     Container<StringPtr> local_strings;
     local_strings.resize_strings(local_data.get_num_strings());
-    local_data.read_into(make_str_ptr<StringPtr>(local_strings));
+    local_data.read_into(local_strings.make_auto_ptr());
     std::swap(local_strings.raw_strings(), local_data.raw_strs);
 
     // todo consider using reserve
@@ -462,7 +462,7 @@ Container<StringPtr> sort(
 
 
     tracker.local_sort_t.start(comm);
-    sortLocally(make_str_ptr<StringPtr>(local_strings));
+    sortLocally(local_strings.make_auto_ptr());
     tracker.local_sort_t.stop();
 
     RandomBitStore bit_store;

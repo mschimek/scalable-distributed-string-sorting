@@ -250,27 +250,6 @@ struct Comparator<StringPtr, std::enable_if_t<StringPtr::StringSet::is_indexed>>
     }
 };
 
-template <class StringPtr>
-StringPtr make_str_ptr(Container<StringPtr>& container) {
-    if constexpr (StringPtr::with_lcp) {
-        static_assert(std::is_same_v<StringPtr, typename Container<StringPtr>::StringLcpPtr>);
-        return container.make_string_lcp_ptr();
-    } else {
-        static_assert(std::is_same_v<StringPtr, typename Container<StringPtr>::StringPtr>);
-        return container.make_string_ptr();
-    }
-}
-
-template <typename StringPtr>
-void copy_into(StringPtr const& strptr, Container<StringPtr>& container) {
-    auto const& ss = strptr.active();
-
-    container.resize_strings(strptr.size());
-    std::copy(ss.begin(), ss.end(), container.getStrings().begin());
-
-    // todo consider lcp values
-}
-
 template <typename StringPtr>
 struct Data : public _internal::Data_<StringPtr> {
     using _internal::Data_<StringPtr>::Data_;
