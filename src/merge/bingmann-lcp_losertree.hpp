@@ -68,7 +68,7 @@ private:
             std::swap(defender, contender);
             return;
         }
-#if 1
+
         if (defender.lcp > contender.lcp) {
             // CASE 2: curr->lcp > contender->lcp => curr < contender
             std::swap(defender, contender);
@@ -91,20 +91,7 @@ private:
         } else {
             // CASE 3: curr->lcp < contender->lcp => contender < curr  => nothing to do
         }
-#else
-        lcp_compare(
-            contender.idx,
-            contenderStream.firstString(),
-            contender.lcp,
-            defender.idx,
-            defenderStream.firstString(),
-            defender.lcp,
-            contender.idx,
-            contender.lcp,
-            defender.idx,
-            defender.lcp
-        );
-#endif
+
         assert(
             scmp(streams[contender.idx].firstString(), streams[defender.idx].firstString()) <= 0
         );
@@ -116,7 +103,6 @@ private:
     }
 
     void initTree(lcp_t knownCommonLcp) {
-        // std::cout << "inittree start\n";
         for (size_t k = 1; k <= K; k++) {
             Node contender;
             contender.idx = k;
@@ -124,18 +110,13 @@ private:
 
             size_t nodeIdx = K + k;
 
-            // std::cout << "nodeIdx " << nodeIdx << "\n";
-
             while (nodeIdx % 2 == 0 && nodeIdx > 2) {
                 nodeIdx >>= 1;
-                // std::cout << "play against " << nodeIdx << "\n";
                 updateNode(contender, nodes[nodeIdx]);
             }
             nodeIdx = (nodeIdx + 1) / 2;
-            // std::cout << "save as " << nodeIdx << "\n";
             nodes[nodeIdx] = contender;
         }
-        // std::cout << "inittree done\n";
     }
 
 public:
@@ -156,46 +137,36 @@ public:
         const LcpStringPtr end = outStream.sub(length, 0);
         while (outStream < end) {
             // take winner and put into output
-
             size_t winnerIdx = nodes[1].idx;
-            // std::cout << "winnerIdx " << winnerIdx << std::endl;
 
             outStream.setFirst(streams[winnerIdx].firstString(), nodes[1].lcp);
             ++outStream;
 
             // advance winner stream
-
             Stream& stream = streams[winnerIdx];
             ++stream;
 
             // run new items from winner stream up the tree
-
             Node& contender = nodes[1];
 
             if (!stream.empty())
                 contender.lcp = streams[winnerIdx].firstLcp();
 
             size_t nodeIdx = winnerIdx + K;
-            // std::cout << "nodeIdx " << nodeIdx << "\n";
 
             while (nodeIdx > 2) {
                 nodeIdx = (nodeIdx + 1) / 2;
-                // std::cout << "play against " << nodeIdx << "\n";
                 updateNode(contender, nodes[nodeIdx]);
             }
-            // std::cout << "play against " << nodeIdx << "\n";
-
-            // for (size_t nodeIdx = (K + winnerIdx) >> 1; nodeIdx >= 1; nodeIdx >>= 1)
-            // {
-            //     updateNode(contender, nodes[nodeIdx]);
-            // }
         }
     }
 };
 
 } // namespace bingmann
 
+
 namespace dss_schimek {
+
 template <size_t K, typename StringSet>
 class LcpStringLoserTree_ {
     using Stream = dss_schimek::StringLcpPtrMergeAdapter<StringSet>;
@@ -225,7 +196,7 @@ private:
             std::swap(defender, contender);
             return;
         }
-#if 1
+
         if (defender.lcp > contender.lcp) {
             // CASE 2: curr->lcp > contender->lcp => curr < contender
             std::swap(defender, contender);
@@ -235,8 +206,6 @@ private:
 
             CharIt s1 = defenderStream.firstStringChars() + (lcp - defenderStream.firstLcp());
             CharIt s2 = contenderStream.firstStringChars() + (lcp - contenderStream.firstLcp());
-            // std::cout << "\t\tdefender: " << s1 << std::endl;
-            // std::cout << "\t\tcontender: " << s2 << std::endl;
 
             // check the strings starting after lcp and calculate new lcp
             while (*s1 != 0 && *s1 == *s2)
@@ -250,20 +219,7 @@ private:
         } else {
             // CASE 3: curr->lcp < contender->lcp => contender < curr  => nothing to do
         }
-#else
-        lcp_compare(
-            contender.idx,
-            contenderStream.firstString(),
-            contender.lcp,
-            defender.idx,
-            defenderStream.firstString(),
-            defender.lcp,
-            contender.idx,
-            contender.lcp,
-            defender.idx,
-            defender.lcp
-        );
-#endif
+
         // todo is this postcondition correct?
         // assert(
         //     scmp(
@@ -294,7 +250,7 @@ private:
             std::swap(defender, contender);
             return;
         }
-#if 1
+
         if (defender.lcp > contender.lcp) {
             // CASE 2: curr->lcp > contender->lcp => curr < contender
             std::swap(defender, contender);
@@ -319,20 +275,7 @@ private:
         } else {
             // CASE 3: curr->lcp < contender->lcp => contender < curr  => nothing to do
         }
-#else
-        lcp_compare(
-            contender.idx,
-            contenderStream.firstString(),
-            contender.lcp,
-            defender.idx,
-            defenderStream.firstString(),
-            defender.lcp,
-            contender.idx,
-            contender.lcp,
-            defender.idx,
-            defender.lcp
-        );
-#endif
+
         assert(
             scmp(
                 streams[contender.idx].firstStringChars(),
@@ -340,7 +283,6 @@ private:
             )
             <= 0
         );
-
         assert(
             calc_lcp(
                 streams[contender.idx].firstStringChars(),
@@ -351,7 +293,6 @@ private:
     }
 
     void initTree(lcp_t knownCommonLcp) {
-        // std::cout << "inittree start\n";
         for (size_t k = 1; k <= K; k++) {
             Node contender;
             contender.idx = k;
@@ -359,23 +300,18 @@ private:
 
             size_t nodeIdx = K + k;
 
-            // std::cout << "nodeIdx " << nodeIdx << "\n";
-
             while (nodeIdx % 2 == 0 && nodeIdx > 2) {
                 nodeIdx >>= 1;
-                // std::cout << "play against " << nodeIdx << "\n";
                 updateNode(contender, nodes[nodeIdx]);
             }
             nodeIdx = (nodeIdx + 1) / 2;
-            // std::cout << "save as " << nodeIdx << "\n";
             nodes[nodeIdx] = contender;
         }
-        // std::cout << "inittree done\n";
     }
 
 public:
     LcpStringLoserTree_(
-        dss_schimek::StringLcpPtrMergeAdapter<StringSet> const& input,
+        Stream const& input,
         std::vector<size_t> const& offsets,
         std::vector<size_t> const& sizes,
         lcp_t knownCommonLcp = 0
@@ -386,120 +322,67 @@ public:
         initTree(knownCommonLcp);
     }
 
-    void writeElementsToStream(
-        dss_schimek::StringLcpPtrMergeAdapter<StringSet> outStream,
-        const size_t length,
-        std::vector<size_t>& oldLcps
-    ) {
-        const dss_schimek::StringLcpPtrMergeAdapter<StringSet> end = outStream.sub(length, 0);
+    void
+    writeElementsToStream(Stream outStream, const size_t length, std::vector<size_t>& oldLcps) {
+        Stream const end = outStream.sub(length, 0);
+
         oldLcps.clear();
         oldLcps.reserve(length);
         while (outStream < end) {
             // take winner and put into output
-            // std::cout << "after tournament" << std::endl;
-            // for (size_t i = 1; i < K + 1; ++i) {
-            //  std::cout << i << " idx: " << nodes[i].idx << " string: " <<
-            //  streams[nodes[i].idx].firstStringChars() << " lcp: " << nodes[i].lcp << std::endl;
-            //}
-            // std::cout << "\n\n";
-
             size_t winnerIdx = nodes[1].idx;
 
-            // outStream.setFirst(streams[winnerIdx].firstString(), nodes[1].lcp);
-            // std::cout << streams[winnerIdx].firstStringChars() << " lcp: " <<
-            // streams[winnerIdx].firstLcp() << std::endl;
             outStream.setFirst(streams[winnerIdx].firstString(), nodes[1].lcp);
             oldLcps.emplace_back(streams[winnerIdx].firstLcp());
 
             ++outStream;
 
             // advance winner stream
-
             Stream& stream = streams[winnerIdx];
             ++stream;
-            // run new items from winner stream up the tree
 
+            // run new items from winner stream up the tree
             Node& contender = nodes[1];
 
             if (!stream.empty())
                 contender.lcp = streams[winnerIdx].firstLcp();
 
             size_t nodeIdx = winnerIdx + K;
-            // std::cout << "nodeIdx " << nodeIdx << "\n";
-            // std::cout << "before tournament" << std::endl;
-            // for (size_t i = 1; i < K + 1; ++i) {
-            //   std::cout << i << " idx: " << nodes[i].idx << " string: " <<
-            //   streams[nodes[i].idx].firstStringChars() << " lcp: " << nodes[i].lcp << std::endl;
-            // }
-            // std::cout << "\n\n";
             while (nodeIdx > 2) {
                 nodeIdx = (nodeIdx + 1) / 2;
-                // std::cout << "play against " << nodeIdx << "\n";
                 updateNodeCompressedPrefix(contender, nodes[nodeIdx]);
             }
-            // std::cout << "play against " << nodeIdx << "\n";
-
-            // for (size_t nodeIdx = (K + winnerIdx) >> 1; nodeIdx >= 1; nodeIdx >>= 1)
-            // {
-            //     updateNode(contender, nodes[nodeIdx]);
-            // }
         }
     }
-    void writeElementsToStream(
-        dss_schimek::StringLcpPtrMergeAdapter<StringSet> outStream, const size_t length
-    ) {
-        const dss_schimek::StringLcpPtrMergeAdapter<StringSet> end = outStream.sub(length, 0);
+
+    void writeElementsToStream(Stream outStream, size_t const length) {
+        Stream end = outStream.sub(length, 0);
         while (outStream < end) {
             // take winner and put into output
-            // std::cout << "after tournament" << std::endl;
-            // for (size_t i = 1; i < K + 1; ++i) {
-            //  std::cout << i << " idx: " << nodes[i].idx << " string: " <<
-            //  streams[nodes[i].idx].firstStringChars() << " lcp: " << nodes[i].lcp << std::endl;
-            //}
-            // std::cout << "\n\n";
-
             size_t winnerIdx = nodes[1].idx;
 
-            // outStream.setFirst(streams[winnerIdx].firstString(), nodes[1].lcp);
-            // std::cout << streams[winnerIdx].firstStringChars() << " lcp: " <<
-            // streams[winnerIdx].firstLcp() << std::endl;
             outStream.setFirst(streams[winnerIdx].firstString(), nodes[1].lcp);
-
             ++outStream;
 
             // advance winner stream
-
             Stream& stream = streams[winnerIdx];
             ++stream;
-            // run new items from winner stream up the tree
 
+            // run new items from winner stream up the tree
             Node& contender = nodes[1];
 
             if (!stream.empty())
                 contender.lcp = streams[winnerIdx].firstLcp();
 
             size_t nodeIdx = winnerIdx + K;
-            // std::cout << "nodeIdx " << nodeIdx << "\n";
-            // std::cout << "before tournament" << std::endl;
-            // for (size_t i = 1; i < K + 1; ++i) {
-            //   std::cout << i << " idx: " << nodes[i].idx << " string: " <<
-            //   streams[nodes[i].idx].firstStringChars() << " lcp: " << nodes[i].lcp << std::endl;
-            // }
-            // std::cout << "\n\n";
             while (nodeIdx > 2) {
                 nodeIdx = (nodeIdx + 1) / 2;
-                // std::cout << "play against " << nodeIdx << "\n";
                 updateNode(contender, nodes[nodeIdx]);
             }
-            // std::cout << "play against " << nodeIdx << "\n";
-
-            // for (size_t nodeIdx = (K + winnerIdx) >> 1; nodeIdx >= 1; nodeIdx >>= 1)
-            // {
-            //     updateNode(contender, nodes[nodeIdx]);
-            // }
         }
     }
 };
+
 } // namespace dss_schimek
 
 /******************************************************************************/
