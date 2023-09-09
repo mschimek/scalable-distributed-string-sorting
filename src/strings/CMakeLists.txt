@@ -4,4 +4,5 @@ target_sources(dss_base
         stringptr.hpp
         stringset.hpp
         stringtools.hpp
+        bound.hpp
 )
