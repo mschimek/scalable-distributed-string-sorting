@@ -411,7 +411,7 @@ struct StringData : public Args... {
 
     inline void setChars(String string_) { string = string_; }
 
-    inline String getChars() { return string; }
+    inline String getChars() const { return string; }
 };
 
 template <typename Data, typename T>
@@ -481,6 +481,9 @@ public:
     typedef typename Traits::Container Container;
 
     static constexpr bool is_indexed{has_member<String, Index>};
+
+    //! Construct from begin and end string pointers
+    GenericStringSet() = default;
 
     //! Construct from begin and end string pointers
     GenericStringSet(Iterator begin, Iterator end) : begin_(begin), end_(end) {}
@@ -553,6 +556,7 @@ public:
     //! check if string a is less or equal to string b at iterators ai and bi.
     bool
     is_leq(String const& a, CharIterator const& ai, String const& b, CharIterator const& bi) const {
+        // todo use is_end here
         if constexpr (has_member<String, Index>) {
             return (*ai == 0 && *bi == 0) ? (a.index <= b.index) : (*ai <= *bi);
         } else {

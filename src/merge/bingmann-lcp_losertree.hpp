@@ -260,8 +260,6 @@ private:
 
             CharIt s1 = defenderStream.firstStringChars() + lcp;
             CharIt s2 = contenderStream.firstStringChars() + lcp;
-            // std::cout << "\t\tdefender: " << s1 << std::endl;
-            // std::cout << "\t\tcontender: " << s2 << std::endl;
 
             // check the strings starting after lcp and calculate new lcp
             while (*s1 != 0 && *s1 == *s2)

@@ -19,7 +19,6 @@
 #include "strings/stringset.hpp"
 
 namespace dss_schimek {
-
 namespace _internal {
 
 template <typename OutIt, typename Char, typename Init>
@@ -324,7 +323,7 @@ public:
     StringLcpPtr make_string_lcp_ptr() { return {this->make_string_set(), this->lcp_array()}; }
 
     void resize_strings(size_t const count) {
-        this->strings_.resize(count);
+        this->strings_.resize(count, String{});
         this->lcps_.resize(count);
     }
 
@@ -336,8 +335,7 @@ public:
     void update(std::vector<Char>&& raw_strings) {
         set(std::move(raw_strings));
         this->update_strings();
-        if (lcps_.size() != this->size())
-            lcps_.resize(this->size(), 0);
+        lcps_.resize(this->size(), 0);
     }
 
     void deleteLcps() {
@@ -473,7 +471,6 @@ public:
             std::move(str_indices)} {}
 };
 
-// todo same here
 template <typename StringSet_>
 class IndexStringLcpContainer
     : public BaseStringLcpContainer<StringSet_, IndexStringLcpContainer<StringSet_>> {
