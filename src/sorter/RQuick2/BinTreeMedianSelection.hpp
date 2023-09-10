@@ -59,11 +59,11 @@ StringPtr selectMedians(
     assert(local_strptr.size() <= n);
     assert(recv_strptr.size() <= n);
 
-    auto& local_ss = local_strptr.active();
-    auto& recv_ss = recv_strptr.active();
+    auto const& local_ss = local_strptr.active();
+    auto const& recv_ss = recv_strptr.active();
 
     merge_strings.resize_strings(local_strptr.size() + recv_strptr.size());
-    // todo use string merge here (if LCPs are present)
+    // todo consider using lcp merge here (it isn't really worth it though)
     std::merge(
         local_ss.begin(),
         local_ss.end(),
@@ -125,8 +125,8 @@ StringT<StringPtr> select(
     assert(strptr.active().check_order());
 
     int const tailing_zeros = tlx::ffs(comm.getRank()) - 1;
-    int const iterations =
-        comm.getRank() > 0 ? tailing_zeros : tlx::integer_log2_ceil(comm.getSize());
+    int const log2_ceil = tlx::integer_log2_ceil(comm.getSize());
+    int const iterations = comm.getRank() > 0 ? tailing_zeros : log2_ceil;
 
     for (int it = 0; it != iterations; ++it) {
         auto const source = myrank + (1 << it);
@@ -147,6 +147,10 @@ StringT<StringPtr> select(
         auto const& ss = medians.active();
         buffers.median_strings.resize_strings(ss.size());
         std::copy(ss.begin(), ss.end(), buffers.median_strings.getStrings().begin());
+        // todo lcp values aren't really worth it here
+        if constexpr (StringPtr::with_lcp) {
+            std::copy_n(strptr.lcp(), strptr.size(), buffers.median_strings.lcp_array());
+        }
 
         buffers.median_strings.orderRawStrings(buffers.char_buffer);
         strptr = buffers.median_strings.make_auto_ptr();
@@ -155,15 +159,27 @@ StringT<StringPtr> select(
     if (myrank == 0) {
         auto median = _internal::selectMedian(strptr.active(), async_gen, bit_gen);
 
-        buffers.recv_data.write(StringPtr{{&median, &median + 1}});
-        return buffers.recv_data.bcast_single(0, comm);
+        if constexpr (StringPtr::with_lcp) {
+            size_t lcp = 0;
+            buffers.recv_data.write(StringPtr{{&median, &median + 1}, &lcp});
+        } else {
+            buffers.recv_data.write(StringPtr{{&median, &median + 1}});
+        }
+        buffers.recv_data.bcast_single(0, comm);
     } else {
         int const target = myrank - (1 << tailing_zeros);
         buffers.send_data.write(strptr);
         buffers.send_data.send(target, tag, comm);
 
-        return buffers.recv_data.bcast_single(0, comm);
+        buffers.recv_data.bcast_single(0, comm);
     }
+
+    buffers.median_strings.resize_strings(1);
+    auto median_ptr = buffers.median_strings.make_auto_ptr();
+    buffers.recv_data.read_into(median_ptr);
+    std::swap(buffers.median_strings.raw_strings(), buffers.recv_data.raw_strs);
+
+    return median_ptr.active()[median_ptr.active().begin()];
 }
 
 } // namespace BinTreeMedianSelection

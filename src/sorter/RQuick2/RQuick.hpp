@@ -75,7 +75,7 @@ inline void split(RBC::Comm const& comm, RBC::Comm* subcomm) {
     auto const nprocs = comm.getSize();
     auto const myrank = comm.getRank();
 
-    bool is_left_group = myrank < (nprocs / 2);
+    bool const is_left_group = myrank < (nprocs / 2);
 
     int first = 0, last = 0;
     if (is_left_group) {
@@ -159,13 +159,13 @@ PairItSizeT<StringPtr> locateSplitterLeft(
 ) {
     auto const mpi_type = kamping::mpi_datatype<ptrdiff_t>();
 
-    Comparator<StringPtr> const comp;
     auto const& ss = strptr.active();
     auto const begin = ss.begin(), end = ss.end();
+
     if (is_robust) {
-        // todo could consider lcps here
-        auto const begin_geq = std::lower_bound(begin, end, splitter, comp);
-        auto const end_geq = std::upper_bound(begin_geq, end, splitter, comp);
+        auto const begin_geq = lower_bound(strptr, splitter);
+        auto const strptr_geq = strptr.sub(begin_geq - begin, end - begin_geq);
+        auto const end_geq = upper_bound(strptr_geq, splitter);
 
         // m: my; t: theirs
         // Number of elemements < or == or > than the splitter
@@ -189,7 +189,7 @@ PairItSizeT<StringPtr> locateSplitterLeft(
 
         return {begin + mleft + mkeep, tleft + tmiddle - tkeep};
     } else {
-        auto const begin_geq = std::lower_bound(begin, end, splitter, comp);
+        auto const begin_geq = lower_bound(strptr, splitter);
 
         ptrdiff_t send_cnt = end - begin_geq;
         ptrdiff_t recv_cnt = -1;
@@ -224,14 +224,14 @@ PairItSizeT<StringPtr> locateSplitterRight(
     int const tag,
     RBC::Comm const& comm
 ) {
-    Comparator<StringPtr> const comp;
     auto const& ss = strptr.active();
     auto const begin = ss.begin(), end = ss.end();
 
     auto const mpi_type = kamping::mpi_datatype<ptrdiff_t>();
     if (is_robust) {
-        auto const begin_geq = std::lower_bound(begin, end, splitter, comp);
-        auto const end_geq = std::upper_bound(begin_geq, end, splitter, comp);
+        auto const begin_geq = lower_bound(strptr, splitter);
+        auto const strptr_geq = strptr.sub(begin_geq - begin, end - begin_geq);
+        auto const end_geq = upper_bound(strptr_geq, splitter);
 
         // m: my; t: theirs
         ptrdiff_t const mleft = begin_geq - begin;
@@ -254,7 +254,7 @@ PairItSizeT<StringPtr> locateSplitterRight(
 
         return {end - mright - mkeep, tright + tmiddle - tkeep};
     } else {
-        auto begin_geq = std::lower_bound(begin, end, splitter, comp);
+        auto begin_geq = lower_bound(strptr, splitter);
 
         ptrdiff_t send_cnt = begin_geq - begin;
         ptrdiff_t recv_cnt = -1;
@@ -266,19 +266,6 @@ PairItSizeT<StringPtr> locateSplitterRight(
         _internal::add_comm_volume<ptrdiff_t>(1);
         return {begin_geq, recv_cnt};
     }
-}
-
-template <class StringPtr>
-void merge(StringPtr const& strptr1, StringPtr const& strptr2, Container<StringPtr>& dest) {
-    auto const ss1 = strptr1.active(), ss2 = strptr2.active();
-    assert(ss1.check_order() && ss2.check_order());
-
-    dest.resize_strings(strptr1.size() + strptr2.size());
-
-    // todo use string merge
-    Comparator<StringPtr> const comp;
-    auto const dest_set = dest.make_string_set();
-    std::merge(ss1.begin(), ss1.end(), ss2.begin(), ss2.end(), dest_set.begin(), comp);
 }
 
 template <class StringPtr, class Tracker>
@@ -342,9 +329,6 @@ void sortRec(
 
     // Merge received elements with own elements.
     tracker.merge_t.start(comm);
-
-    buffers.merge_strings.resize_strings(buffers.recv_strings.size() + own_ptr.size());
-
     merge(own_ptr, buffers.recv_strings.make_auto_ptr(), buffers.merge_strings);
     buffers.merge_strings.orderRawStrings(buffers.char_buffer);
 
@@ -379,10 +363,18 @@ void sortRec(
 template <class StringPtr>
 void sortLocally(StringPtr const& strptr) {
     if constexpr (StringPtr::StringSet::is_indexed) {
-        std::vector<uint64_t> lcps(strptr.size());
-        auto strlcpptr = tlx::sort_strings_detail::StringLcpPtr{strptr.active(), lcps.data()};
-        tlx::sort_strings_detail::radixsort_CI3(strlcpptr, 0, 0);
-        dss_mehnert::sort_duplicates(strlcpptr);
+        if constexpr (StringPtr::with_lcp) {
+            tlx::sort_strings_detail::radixsort_CI3(strptr, 0, 0);
+            dss_mehnert::sort_duplicates(strptr);
+        } else {
+            using StringSet = typename StringPtr::StringSet;
+            using StringLcpPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
+
+            std::vector<size_t> lcps(strptr.size());
+            StringLcpPtr str_lcp_ptr{strptr.active(), lcps.data()};
+            tlx::sort_strings_detail::radixsort_CI3(str_lcp_ptr, 0, 0);
+            dss_mehnert::sort_duplicates(str_lcp_ptr);
+        }
     } else {
         tlx::sort_strings_detail::radixsort_CI3(strptr, 0, 0);
     }
@@ -420,7 +412,7 @@ Container<StringPtr> sort(
         // and receive elements.
 
         auto const source = pow + comm.getRank();
-        local_data.recv(source, tag, comm, true);
+        local_data.recv(source, tag, comm, true, false);
 
         RBC::Comm sub_comm;
         RBC::Comm_create_group(comm, &sub_comm, 0, pow - 1);
@@ -430,7 +422,7 @@ Container<StringPtr> sort(
         // hypercube.
 
         auto const target = comm.getRank() - pow;
-        local_data.send(target, tag, comm);
+        local_data.send(target, tag, comm, false);
 
         // This process is not part of 'sub_comm'. We call
         // this function to support MPI implementations
@@ -465,7 +457,6 @@ Container<StringPtr> sort(
     // todo consider using reserve
     TemporaryBuffers<StringPtr> buffers;
     buffers.recv_data = std::move(local_data);
-
 
     tracker.local_sort_t.start(comm);
     sortLocally(local_strings.make_auto_ptr());
