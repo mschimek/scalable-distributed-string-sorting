@@ -128,14 +128,26 @@ void lcp_merge(StringLcpPtr const& lhs, StringLcpPtr const& rhs, StringLcpPtr co
             }
         }
 
-        assert_equal(calc_lcp(dest.active(), *(d_str - 2), *(d_str - 1)), *(d_lcp - 1));
+        assert_equal(
+            calc_lcp(
+                dest.active().get_chars(dest.active()[d_str - 2], 0),
+                dest.active().get_chars(dest.active()[d_str - 1], 0)
+            ),
+            *(d_lcp - 1)
+        );
     }
 
-    // copy remaining strings
-    d_str = std::copy(defender.active().begin(), defender.active().end(), d_str);
-    d_str = std::copy(contender.active().begin(), contender.active().end(), d_str);
-    d_lcp = std::copy_n(defender.lcp(), defender.size(), d_lcp);
-    d_lcp = std::copy_n(contender.lcp(), contender.size(), d_lcp);
+    // copy remaining strings and LCP values
+    if (!defender.empty()) {
+        d_str = std::copy(defender.active().begin(), defender.active().end(), d_str);
+        d_lcp = std::copy_n(defender.lcp(), defender.size(), d_lcp);
+    } else if (!contender.empty()) {
+        d_str = std::copy(contender.active().begin(), contender.active().end(), d_str);
+
+        // special case for first contender string (a nasty bug layeth burried here)
+        *d_lcp++ = curr_lcp;
+        d_lcp = std::copy_n(contender.lcp() + 1, contender.size() - 1, d_lcp);
+    }
 
     assert_equal(d_str, dest.active().end());
     assert_equal(std::distance(dest.lcp(), d_lcp), std::ssize(dest));
