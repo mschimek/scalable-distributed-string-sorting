@@ -27,6 +27,7 @@
 #include "sorter/distributed/bloomfilter.hpp"
 #include "sorter/distributed/merge_sort.hpp"
 #include "sorter/distributed/multi_level.hpp"
+#include "sorter/distributed/partition.hpp"
 #include "sorter/distributed/prefix_doubling.hpp"
 #include "util/measuringTool.hpp"
 #include "variant_selection.hpp"
@@ -76,6 +77,7 @@ template <
     typename StringSet,
     typename StringGenerator,
     typename SamplePolicy,
+    typename PartitionPolicy,
     typename MPIAllToAllRoutine,
     typename Subcommunicators,
     typename LcpCompression,
@@ -119,7 +121,13 @@ void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicat
     measuring_tool.stop("none", "create_communicators", comm);
 
     using dss_mehnert::sorter::DistributedMergeSort;
-    DistributedMergeSort<StringLcpPtr, Subcommunicators, AllToAllPolicy, SamplePolicy> merge_sort;
+    DistributedMergeSort<
+        StringLcpPtr,
+        Subcommunicators,
+        AllToAllPolicy,
+        SamplePolicy,
+        PartitionPolicy>
+        merge_sort;
     auto sorted_container = merge_sort.sort(std::move(input_container), comms);
 
     measuring_tool.stop("none", "sorting_overall", comm);
@@ -153,6 +161,7 @@ template <
     typename StringSet,
     typename StringGenerator,
     typename SamplePolicy,
+    typename PartitionPolicy,
     typename MPIAllToAllRoutine,
     typename Subcommunicators,
     typename LcpCompression,
@@ -206,6 +215,7 @@ void run_prefix_doubling(
         Subcommunicators,
         AllToAllPolicy,
         SamplePolicy,
+        PartitionPolicy,
         BloomFilterPolicy>
         merge_sort;
     auto permutation = merge_sort.sort(std::move(input_container), comms);
@@ -260,6 +270,8 @@ std::string get_result_prefix(
            + " num_levels=" + std::to_string(args.levels.size())
            + " iteration=" + std::to_string(args.iteration)
            + " strong_scaling=" + std::to_string(args.strong_scaling)
+           + " rquick_v1=" + std::to_string(key.rquick_v1)
+           + " rquick_lcp=" + std::to_string(key.rquick_lcp)
            + " lcp_compression=" + std::to_string(key.lcp_compression)
            + " prefix_compression=" + std::to_string(key.prefix_compression)
            + " prefix_doubling=" + std::to_string(key.prefix_doubling)
@@ -272,6 +284,7 @@ template <
     typename StringSet,
     typename StringGenerator,
     typename SamplePolicy,
+    typename PartitionPolicy,
     typename MPIAllToAllRoutine,
     typename Subcommunicators,
     typename LcpCompression,
@@ -281,6 +294,7 @@ void print_config(
     std::string_view prefix, SorterArgs const& args, PolicyEnums::CombinationKey const& key
 ) {
     // todo print string generator arguments
+    // todo partition policy
     std::cout << prefix << " key=string_generator name=" << StringGenerator::getName() << "\n";
     std::cout << prefix << " key=sampler name=" << SamplePolicy::getName() << "\n";
     std::cout << prefix << " key=alltoall_routine name=" << MPIAllToAllRoutine::getName() << "\n";
@@ -398,25 +412,56 @@ void arg3(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
     }
 }
 
+template <typename StringSet, typename Generator, typename Sampler>
+void arg2b(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
+    using namespace dss_mehnert::partition;
+    using Char = typename StringSet::Char;
+
+    constexpr bool is_indexed = Sampler::isIndexed;
+
+    tlx_die_verbose_if(
+        key.rquick_v1 && key.rquick_lcp,
+        "RQuick v1 does not support using LCP values"
+    );
+
+    if (key.rquick_v1) {
+        if constexpr (CliOptions::enable_rquick_v1) {
+            arg3<StringSet, Generator, Sampler, RQuickV1<Char, is_indexed>>(key, args);
+        } else {
+            die_with_feature("CLI_ENABLE_RQUICK_V1");
+        }
+    } else {
+        if (key.rquick_lcp) {
+            if constexpr (CliOptions::enable_rquick_v1) {
+                arg3<StringSet, Generator, Sampler, RQuickV2<Char, is_indexed, true>>(key, args);
+            } else {
+                die_with_feature("CLI_ENABLE_RQUICK_LCP");
+            }
+        } else {
+            arg3<StringSet, Generator, Sampler, RQuickV2<Char, is_indexed, false>>(key, args);
+        }
+    }
+}
+
 template <typename... Args>
 void arg2(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
     using namespace dss_mehnert::sample;
 
     switch (key.sample_policy) {
         case PolicyEnums::SampleString::numStrings: {
-            arg3<Args..., NumStringsPolicy>(key, args);
+            arg2b<Args..., NumStringsPolicy>(key, args);
             break;
         }
         case PolicyEnums::SampleString::numChars: {
-            arg3<Args..., NumCharsPolicy>(key, args);
+            arg2b<Args..., NumCharsPolicy>(key, args);
             break;
         }
         case PolicyEnums::SampleString::indexedNumStrings: {
-            arg3<Args..., IndexedNumStringsPolicy>(key, args);
+            arg2b<Args..., IndexedNumStringsPolicy>(key, args);
             break;
         }
         case PolicyEnums::SampleString::indexedNumChars: {
-            arg3<Args..., IndexedNumCharsPolicy>(key, args);
+            arg2b<Args..., IndexedNumCharsPolicy>(key, args);
             break;
         }
     };
@@ -459,6 +504,8 @@ int main(int argc, char* argv[]) {
     bool check = false;
     bool check_exhaustive = false;
     bool strong_scaling = false;
+    bool rquick_v1 = false;
+    bool rquick_lcp = false;
     bool prefix_compression = false;
     bool lcp_compression = false;
     bool prefix_doubling = false;
@@ -503,6 +550,8 @@ int main(int argc, char* argv[]) {
         "strategy to use for splitter sampling "
         "([0]=strings, 1=chars, 2=indexedStrings, 3=indexedChars)"
     );
+    cp.add_flag('Q', "rquick-v1", rquick_v1, "use version 1 of RQuick (defaults to v2)");
+    cp.add_flag('L', "rquick-lcp", rquick_lcp, "use LCP values in RQuick (only with v2)");
     cp.add_flag(
         'l',
         "lcp-compression",
@@ -558,6 +607,8 @@ int main(int argc, char* argv[]) {
         .sample_policy = PolicyEnums::getSampleString(sample_policy),
         .alltoall_routine = PolicyEnums::getMPIRoutineAllToAll(alltoall_routine),
         .subcomms = PolicyEnums::getSubcommunicators(comm_split),
+        .rquick_v1 = rquick_v1,
+        .rquick_lcp = rquick_lcp,
         .prefix_compression = prefix_compression,
         .lcp_compression = lcp_compression,
         .prefix_doubling = prefix_doubling,

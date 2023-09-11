@@ -118,17 +118,18 @@ inline Subcommunicators getSubcommunicators(size_t i) {
     }
 };
 
+// todo merge with sorterargs
 struct CombinationKey {
     StringGenerator string_generator;
     SampleString sample_policy;
     MPIRoutineAllToAll alltoall_routine;
     Subcommunicators subcomms;
+    bool rquick_v1;
+    bool rquick_lcp;
     bool prefix_compression;
     bool lcp_compression;
     bool prefix_doubling;
     bool grid_bloomfilter;
-
-    auto operator<=>(CombinationKey const&) const = default;
 };
 
 } // namespace PolicyEnums
