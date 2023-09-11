@@ -96,14 +96,15 @@ public:
 
     DataMembers(std::vector<CharType> raw_strs) : RawStrings<StringPtr>{std::move(raw_strs)} {}
 
-    size_t get_num_strings() const {
+    size_t get_num_strings(bool const ignore_lcps = false) const {
         if constexpr (has_index) {
             return this->indices.size();
         } else if constexpr (has_lcp) {
-            return this->lcps.size();
-        } else {
-            return std::count(this->raw_strs.begin(), this->raw_strs.end(), '\0');
+            if (!ignore_lcps) {
+                return this->lcps.size();
+            }
         }
+        return std::count(this->raw_strs.begin(), this->raw_strs.end(), '\0');
     }
 
     void write(StringPtr const& strptr) {
@@ -129,7 +130,7 @@ public:
         }
     }
 
-    void read_into(StringPtr const& strptr) {
+    void read_into(StringPtr const& strptr, bool const copy_lcps = true) {
         using dss_schimek::Index;
         using dss_schimek::Length;
 
@@ -150,8 +151,10 @@ public:
         }
 
         if constexpr (has_lcp) {
-            assert(this->lcps.size() == strptr.size());
-            std::copy(this->lcps.begin(), this->lcps.end(), strptr.lcp());
+            if (copy_lcps) {
+                assert(this->lcps.size() == strptr.size());
+                std::copy(this->lcps.begin(), this->lcps.end(), strptr.lcp());
+            }
         }
     }
 

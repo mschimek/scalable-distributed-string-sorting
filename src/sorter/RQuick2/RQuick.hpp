@@ -445,8 +445,8 @@ Container<StringPtr> sort(
     assert(tlx::is_power_of_two(comm.getSize()));
 
     Container<StringPtr> local_strings;
-    local_strings.resize_strings(local_data.get_num_strings());
-    local_data.read_into(local_strings.make_auto_ptr());
+    local_strings.resize_strings(local_data.get_num_strings(true));
+    local_data.read_into(local_strings.make_auto_ptr(), false);
     std::swap(local_strings.raw_strings(), local_data.raw_strs);
 
     TemporaryBuffers<StringPtr> buffers;
