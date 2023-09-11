@@ -9,25 +9,29 @@ template <typename StringLcpPtr>
 void sort_duplicates(StringLcpPtr const& strptr) {
     constexpr auto comp = [](auto const& lhs, auto const& rhs) { return lhs.index < rhs.index; };
 
-    auto const& ss = strptr.active();
-    size_t i = 0, begin = 0, prev_length = 0;
-    for (auto it = ss.begin(); it != ss.end(); ++it, ++i) {
-        auto const& string = ss[it];
-        auto const lcp = strptr.get_lcp(i);
-        auto const curr_length = ss.get_length(string);
+    if (!strptr.active().empty()) {
+        auto const& ss = strptr.active();
 
-        if (prev_length != lcp || curr_length != lcp) {
-            if (begin + 1 != i) {
-                std::sort(ss.begin() + begin, ss.begin() + i, comp);
-                begin = i;
+        size_t prev_length = ss.get_length(ss[ss.begin()]);
+        auto curr_begin = ss.begin();
+
+        size_t i = 1;
+        for (auto it = ss.begin() + 1; it != ss.end(); ++it, ++i) {
+            auto const lcp = strptr.get_lcp(i);
+            auto const curr_length = ss.get_length(ss[it]);
+
+            if (prev_length != lcp || curr_length != prev_length) {
+                if (it - curr_begin > 1) {
+                    std::sort(curr_begin, it, comp);
+                }
+                curr_begin = it;
             }
+            prev_length = curr_length;
         }
 
-        prev_length = curr_length;
-    }
-
-    if (begin + 2 < ss.size()) {
-        std::sort(ss.begin() + begin, ss.end(), comp);
+        if (ss.end() - curr_begin > 1) {
+            std::sort(curr_begin, ss.end(), comp);
+        }
     }
 }
 
