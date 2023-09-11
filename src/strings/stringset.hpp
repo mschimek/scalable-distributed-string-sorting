@@ -532,26 +532,27 @@ public:
         c.first = NULL;
     }
 
-    // todo the semantics of indexed comparisons are questionable
     //! check equality of two strings a and b at char iterators ai and bi.
-    bool is_equal(String const& a, CharIterator const& ai, String const& b, CharIterator const& bi)
-        const {
-        return (*ai == *bi) && (!is_end(a, ai));
-    }
+    // bool is_equal(String const& a, CharIterator const& ai, String const& b, CharIterator const&
+    // bi)
+    //     const {
+    //     return (!is_end(a, ai)) && (!is_end(b, bi)) && (*ai == *bi);
+    // }
 
     //! check if string a is less or equal to string b at iterators ai and bi.
-    bool is_less(String const& a, CharIterator const& ai, String const& b, CharIterator const& bi)
-        const {
-        return (*ai < *bi);
-        // }
-    }
+    // bool is_less(String const& a, CharIterator const& ai, String const& b, CharIterator const&
+    // bi)
+    //     const {
+    //     return (*ai < *bi);
+    // }
 
     //! check if string a is less or equal to string b at iterators ai and bi.
-    bool
-    is_leq(String const& a, CharIterator const& ai, String const& b, CharIterator const& bi) const {
-        // todo use is_end here
-        return (*ai <= *bi);
-    }
+    // bool
+    // is_leq(String const& a, CharIterator const& ai, String const& b, CharIterator const& bi)
+    // const {
+    //     // todo use is_end here
+    //     return (*ai <= *bi);
+    // }
 
     //! Return up to 1 characters of string s at iterator i packed into a uint8
     //! (only works correctly for 8-bit characters)

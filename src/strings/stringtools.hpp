@@ -148,7 +148,7 @@ static inline std::pair<bool, size_t> leq_lcp(CharIterator _s1, CharIterator _s2
     return make_pair((*s1 - *s2) <= 0, s1 - _s1);
 }
 /// calculate lcp by scanning
-static inline unsigned int calc_lcp(const string _s1, const string _s2) {
+static inline size_t calc_lcp(const string _s1, const string _s2) {
     string s1 = _s1, s2 = _s2;
 
     size_t h = 0;
@@ -158,7 +158,7 @@ static inline unsigned int calc_lcp(const string _s1, const string _s2) {
     return h;
 }
 
-static inline unsigned int calc_lcp(unsigned char const* _s1, unsigned char const* _s2) {
+static inline size_t calc_lcp(unsigned char const* _s1, unsigned char const* _s2) {
     size_t h = 0;
     while (_s1[h] != 0 && _s1[h] == _s2[h])
         ++h;
@@ -167,7 +167,7 @@ static inline unsigned int calc_lcp(unsigned char const* _s1, unsigned char cons
 
 /// calculate lcp by scanning
 template <typename StringSet>
-static inline unsigned int calc_lcp(
+static inline size_t calc_lcp(
     StringSet const& ss, const typename StringSet::String& s1, const typename StringSet::String& s2
 ) {
     typename StringSet::CharIterator c1 = ss.get_chars(s1, 0);

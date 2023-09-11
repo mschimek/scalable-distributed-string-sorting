@@ -433,19 +433,11 @@ lower_bound(StringPtr const& strptr, StringT<StringPtr> const& value) {
     if constexpr (StringPtr::with_lcp) {
         auto [result, lcp] = dss_mehnert::lcp_lower_bound(strptr, value);
 
-        auto before = result;
         if constexpr (StringPtr::StringSet::is_indexed) {
             auto const bound_ptr = strptr.sub(result - begin, end - result);
             std::tie(result, lcp) = lower_bound_index(bound_ptr, value, lcp);
         }
 
-        if (std::lower_bound(begin, end, value, comp) != result) {
-            printf("%s\n", value.getChars());
-            std::cout << before - begin << std::endl;
-            std::cout << result - begin << std::endl;
-            std::cout << std::lower_bound(begin, end, value, comp) - begin << std::endl;
-            strptr.active().print();
-        }
         assert_equal(std::lower_bound(begin, end, value, comp), result);
         return {result, lcp};
 
@@ -478,10 +470,9 @@ lower_upper_bound(StringPtr const& strptr, StringT<StringPtr> const& value) {
     auto const end = strptr.active().end();
 
     if constexpr (StringPtr::with_lcp) {
-        // todo use lcp value
         auto const [lower, lower_lcp] = lower_bound(strptr, value);
         auto const strptr_geq = strptr.sub(lower - begin, end - lower);
-        auto const [upper, upper_lcp] = upper_bound(strptr_geq, value);
+        auto const [upper, upper_lcp] = dss_mehnert::lcp_upper_bound(strptr_geq, value, lower_lcp);
         return {lower, upper};
 
     } else {
