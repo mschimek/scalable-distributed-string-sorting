@@ -117,7 +117,6 @@ class RQuickV2 : public PartitionPolicy<is_indexed, RQuickV2<Char, is_indexed, u
 private:
     static constexpr int tag = 23560;
     static constexpr uint64_t seed = 3469931;
-    static constexpr bool is_robust = !is_indexed;
 
     using StringSet = SorterStringSet<Char, is_indexed>;
     using StringPtr = std::conditional_t<
@@ -139,7 +138,7 @@ private:
             data.raw_strs = std::move(samples);
         }
         // LCP array initialization is done by RQuick
-        return RQuick2::sort(std::move(data), tag, gen, comm_mpi, is_robust);
+        return RQuick2::sort(std::move(data), tag, gen, comm_mpi);
     }
 };
 

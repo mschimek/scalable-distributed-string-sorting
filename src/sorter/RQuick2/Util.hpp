@@ -23,6 +23,34 @@
 #include "util/measuringTool.hpp"
 
 namespace RQuick2 {
+
+template <typename StringPtr>
+using StringT = typename StringPtr::StringSet::String;
+
+template <typename StringPtr>
+using IteratorT = typename StringPtr::StringSet::Iterator;
+
+template <typename StringPtr>
+using CharT = typename StringPtr::StringSet::Char;
+
+template <typename StringPtr, typename Enable = void>
+struct Comparator;
+
+template <typename StringPtr>
+struct Comparator<StringPtr, std::enable_if_t<!StringPtr::StringSet::is_indexed>> {
+    bool operator()(StringT<StringPtr> const& lhs, StringT<StringPtr> const& rhs) {
+        return dss_schimek::scmp(lhs.string, rhs.string) < 0;
+    }
+};
+
+template <typename StringPtr>
+struct Comparator<StringPtr, std::enable_if_t<StringPtr::StringSet::is_indexed>> {
+    bool operator()(StringT<StringPtr> const& lhs, StringT<StringPtr> const& rhs) {
+        auto const ord = dss_schimek::scmp(lhs.string, rhs.string);
+        return ord == 0 ? lhs.index < rhs.index : ord < 0;
+    }
+};
+
 namespace _internal {
 
 template <typename T>
@@ -358,38 +386,116 @@ using Data_ = std::conditional_t<
         DataMembers<StringPtr, RawStrings, LcpValues>,
         DataMembers<StringPtr, RawStrings>>>;
 
-} // namespace _internal
+template <typename StringPtr>
+std::pair<IteratorT<StringPtr>, size_t> lower_bound_index(
+    StringPtr const& strptr,
+    typename StringPtr::StringSet::String const& value,
+    size_t const initial_lcp
+) {
+    auto const& ss = strptr.active();
+    auto const begin = ss.begin(), end = ss.end();
 
+    auto const value_length = value.getLength();
+    auto const value_index = value.getIndex();
+
+    if (!ss.empty()) {
+        assert(initial_lcp <= dss_schimek::calc_lcp(ss, ss[begin], value));
+
+        if (ss[begin].getLength() != value_length || value_length != initial_lcp
+            || value_index <= ss[begin].getIndex()) {
+            // value is already less than or equal to begin
+            return {begin, initial_lcp};
+        }
+
+        size_t i = 1;
+        for (auto it = begin + 1; it != ss.end(); ++it, ++i) {
+            if (strptr.get_lcp(i) != value_length || value_index <= ss[it].getIndex()) {
+                return {it, initial_lcp};
+            }
+        }
+        return {end, 0};
+    } else {
+        return {begin, initial_lcp};
+    }
+}
+
+template <typename StringPtr>
+std::pair<IteratorT<StringPtr>, size_t>
+lower_bound(StringPtr const& strptr, StringT<StringPtr> const& value) {
+    assert(strptr.active().check_order());
+    Comparator<StringPtr> const comp;
+
+    auto const begin = strptr.active().begin();
+    auto const end = strptr.active().end();
+    if constexpr (StringPtr::with_lcp) {
+        auto [result, lcp] = dss_mehnert::lcp_lower_bound(strptr, value);
+
+        auto before = result;
+        if constexpr (StringPtr::StringSet::is_indexed) {
+            auto const bound_ptr = strptr.sub(result - begin, end - result);
+            std::tie(result, lcp) = lower_bound_index(bound_ptr, value, lcp);
+        }
+
+        if (std::lower_bound(begin, end, value, comp) != result) {
+            printf("%s\n", value.getChars());
+            std::cout << before - begin << std::endl;
+            std::cout << result - begin << std::endl;
+            std::cout << std::lower_bound(begin, end, value, comp) - begin << std::endl;
+            strptr.active().print();
+        }
+        assert_equal(std::lower_bound(begin, end, value, comp), result);
+        return {result, lcp};
+
+    } else {
+        return {std::lower_bound(begin, end, value, comp), 0};
+    }
+}
+
+template <typename StringPtr>
+std::pair<IteratorT<StringPtr>, size_t>
+upper_bound(StringPtr const& strptr, StringT<StringPtr> const& value) {
+    assert(strptr.active().check_order());
+    Comparator<StringPtr> const comp;
+
+    auto const begin = strptr.active().begin();
+    auto const end = strptr.active().end();
+    if constexpr (StringPtr::with_lcp) {
+        auto [result, lcp] = dss_mehnert::lcp_upper_bound(strptr, value);
+        assert_equal(std::upper_bound(begin, end, value, comp), result);
+        return {result, lcp};
+    } else {
+        return {std::upper_bound(begin, end, value, comp), 0};
+    }
+}
+
+template <typename StringPtr>
+std::pair<IteratorT<StringPtr>, IteratorT<StringPtr>>
+lower_upper_bound(StringPtr const& strptr, StringT<StringPtr> const& value) {
+    auto const begin = strptr.active().begin();
+    auto const end = strptr.active().end();
+
+    if constexpr (StringPtr::with_lcp) {
+        // todo use lcp value
+        auto const [lower, lower_lcp] = lower_bound(strptr, value);
+        auto const strptr_geq = strptr.sub(lower - begin, end - lower);
+        auto const [upper, upper_lcp] = upper_bound(strptr_geq, value);
+        return {lower, upper};
+
+    } else {
+        auto const [lower, llcp] = lower_bound(strptr, value);
+        auto const strptr_geq = strptr.sub(lower - begin, end - lower);
+        auto const [upper, ulcp] = upper_bound(strptr_geq, value);
+        return {lower, upper};
+    }
+}
+
+} // namespace _internal
 
 template <typename StringPtr>
 using Container = std::conditional_t<
     StringPtr::with_lcp,
     dss_schimek::StringLcpContainer<typename StringPtr::StringSet>,
     dss_schimek::StringContainer<typename StringPtr::StringSet>>;
-
-template <typename StringPtr>
-using StringT = typename StringPtr::StringSet::String;
-
-template <typename StringPtr>
-using CharT = typename StringPtr::StringSet::Char;
-
-template <typename StringPtr, typename Enable = void>
-struct Comparator;
-
-template <typename StringPtr>
-struct Comparator<StringPtr, std::enable_if_t<!StringPtr::StringSet::is_indexed>> {
-    bool operator()(StringT<StringPtr> const& lhs, StringT<StringPtr> const& rhs) {
-        return dss_schimek::scmp(lhs.string, rhs.string) < 0;
-    }
-};
-
-template <typename StringPtr>
-struct Comparator<StringPtr, std::enable_if_t<StringPtr::StringSet::is_indexed>> {
-    bool operator()(StringT<StringPtr> const& lhs, StringT<StringPtr> const& rhs) {
-        auto const ord = dss_schimek::scmp(lhs.string, rhs.string);
-        return ord == 0 ? lhs.index < rhs.index : ord < 0;
-    }
-};
 
 template <class StringPtr>
 void merge(StringPtr const& strptr1, StringPtr const& strptr2, Container<StringPtr>& dest) {
@@ -406,42 +512,10 @@ void merge(StringPtr const& strptr1, StringPtr const& strptr2, Container<StringP
         auto const ss1 = strptr1.active(), ss2 = strptr2.active();
         std::merge(ss1.begin(), ss1.end(), ss2.begin(), ss2.end(), dest_set.begin(), comp);
     }
+
+    assert(dest.make_string_set().check_order());
 }
 
-template <typename StringPtr>
-typename StringPtr::StringSet::Iterator
-lower_bound(StringPtr const& strptr, StringT<StringPtr> const& value) {
-    using dss_schimek::leq_lcp;
-    assert(strptr.active().check_order());
-    Comparator<StringPtr> const comp;
-
-    auto const begin = strptr.active().begin();
-    auto const end = strptr.active().end();
-    if constexpr (StringPtr::with_lcp) {
-        auto result = dss_mehnert::lcp_lower_bound(strptr, value);
-        assert(std::lower_bound(begin, end, value, comp) == result);
-        return result;
-    } else {
-        return std::lower_bound(begin, end, value, comp);
-    }
-}
-
-template <typename StringPtr>
-typename StringPtr::StringSet::Iterator
-upper_bound(StringPtr const& strptr, StringT<StringPtr> const& value) {
-    assert(strptr.active().check_order());
-    Comparator<StringPtr> const comp;
-
-    auto const begin = strptr.active().begin();
-    auto const end = strptr.active().end();
-    if constexpr (StringPtr::with_lcp) {
-        auto result = dss_mehnert::lcp_upper_bound(strptr, value);
-        assert(std::upper_bound(begin, end, value, comp) == result);
-        return result;
-    } else {
-        return std::upper_bound(begin, end, value, comp);
-    }
-}
 
 template <typename StringPtr>
 struct Data : public _internal::Data_<StringPtr> {

@@ -152,7 +152,6 @@ template <class StringPtr>
 PairItSizeT<StringPtr> locateSplitterLeft(
     StringPtr const& strptr,
     StringT<StringPtr> const& splitter,
-    bool const is_robust,
     int const partner,
     int const tag,
     RBC::Comm const& comm
@@ -162,15 +161,25 @@ PairItSizeT<StringPtr> locateSplitterLeft(
     auto const& ss = strptr.active();
     auto const begin = ss.begin(), end = ss.end();
 
-    if (is_robust) {
-        auto const begin_geq = lower_bound(strptr, splitter);
-        auto const strptr_geq = strptr.sub(begin_geq - begin, end - begin_geq);
-        auto const end_geq = upper_bound(strptr_geq, splitter);
+    if constexpr (StringPtr::StringSet::is_indexed) {
+        auto const [begin_geq, _] = _internal::lower_bound(strptr, splitter);
+
+        ptrdiff_t send_cnt = end - begin_geq;
+        ptrdiff_t recv_cnt = -1;
+        // clang-format off
+        RBC::Sendrecv(&send_cnt, 1, mpi_type, partner, tag,
+                      &recv_cnt, 1, mpi_type, partner, tag,
+                      comm, MPI_STATUS_IGNORE);
+        // clang-format on
+        _internal::add_comm_volume<ptrdiff_t>(1);
+        return {begin_geq, recv_cnt};
+    } else {
+        auto const [begin_geq, end_leq] = _internal::lower_upper_bound(strptr, splitter);
 
         // m: my; t: theirs
         // Number of elemements < or == or > than the splitter
         ptrdiff_t const mleft = begin_geq - begin;
-        ptrdiff_t const mright = end - end_geq;
+        ptrdiff_t const mright = end - end_leq;
         ptrdiff_t const mmiddle = ss.size() - mleft - mright;
 
         std::array<ptrdiff_t, 3> send = {mleft, mright, mmiddle};
@@ -188,18 +197,6 @@ PairItSizeT<StringPtr> locateSplitterLeft(
         ptrdiff_t const tkeep = std::min(tmiddle, std::max(split - tright - mright, ptrdiff_t{0}));
 
         return {begin + mleft + mkeep, tleft + tmiddle - tkeep};
-    } else {
-        auto const begin_geq = lower_bound(strptr, splitter);
-
-        ptrdiff_t send_cnt = end - begin_geq;
-        ptrdiff_t recv_cnt = -1;
-        // clang-format off
-        RBC::Sendrecv(&send_cnt, 1, mpi_type, partner, tag,
-                      &recv_cnt, 1, mpi_type, partner, tag,
-                      comm, MPI_STATUS_IGNORE);
-        // clang-format on
-        _internal::add_comm_volume<ptrdiff_t>(1);
-        return {begin_geq, recv_cnt};
     }
 }
 
@@ -219,7 +216,6 @@ template <class StringPtr>
 PairItSizeT<StringPtr> locateSplitterRight(
     StringPtr const& strptr,
     StringT<StringPtr> const& splitter,
-    bool const is_robust,
     int const partner,
     int const tag,
     RBC::Comm const& comm
@@ -228,14 +224,24 @@ PairItSizeT<StringPtr> locateSplitterRight(
     auto const begin = ss.begin(), end = ss.end();
 
     auto const mpi_type = kamping::mpi_datatype<ptrdiff_t>();
-    if (is_robust) {
-        auto const begin_geq = lower_bound(strptr, splitter);
-        auto const strptr_geq = strptr.sub(begin_geq - begin, end - begin_geq);
-        auto const end_geq = upper_bound(strptr_geq, splitter);
+    if constexpr (StringPtr::StringSet::is_indexed) {
+        auto const [begin_geq, _] = _internal::lower_bound(strptr, splitter);
+
+        ptrdiff_t send_cnt = begin_geq - begin;
+        ptrdiff_t recv_cnt = -1;
+        // clang-format off
+        RBC::Sendrecv(&send_cnt, 1, mpi_type, partner, tag,
+                      &recv_cnt, 1, mpi_type, partner, tag,
+                      comm, MPI_STATUS_IGNORE);
+        // clang-format on
+        _internal::add_comm_volume<ptrdiff_t>(1);
+        return {begin_geq, recv_cnt};
+    } else {
+        auto const [begin_geq, end_leq] = _internal::lower_upper_bound(strptr, splitter);
 
         // m: my; t: theirs
         ptrdiff_t const mleft = begin_geq - begin;
-        ptrdiff_t const mright = end - end_geq;
+        ptrdiff_t const mright = end - end_leq;
         ptrdiff_t const mmiddle = ss.size() - mleft - mright;
 
         std::array<ptrdiff_t, 3> send = {mleft, mright, mmiddle};
@@ -253,18 +259,6 @@ PairItSizeT<StringPtr> locateSplitterRight(
         ptrdiff_t const tkeep = std::min(tmiddle, std::max(split - tleft - mleft, ptrdiff_t{0}));
 
         return {end - mright - mkeep, tright + tmiddle - tkeep};
-    } else {
-        auto begin_geq = lower_bound(strptr, splitter);
-
-        ptrdiff_t send_cnt = begin_geq - begin;
-        ptrdiff_t recv_cnt = -1;
-        // clang-format off
-        RBC::Sendrecv(&send_cnt, 1, mpi_type, partner, tag,
-                      &recv_cnt, 1, mpi_type, partner, tag,
-                      comm, MPI_STATUS_IGNORE);
-        // clang-format on
-        _internal::add_comm_volume<ptrdiff_t>(1);
-        return {begin_geq, recv_cnt};
     }
 }
 
@@ -274,7 +268,6 @@ void sortRec(
     RandomBitStore& bit_store,
     Container<StringPtr>& local_strings,
     TemporaryBuffers<StringPtr>& buffers,
-    bool const is_robust,
     Tracker&& tracker,
     int const tag,
     const RBC::Comm& comm
@@ -302,14 +295,14 @@ void sortRec(
     auto const [own_ptr, send_ptr, separator, recv_cnt] = [&] {
         if (is_left_group) {
             auto const [separator, recv_cnt] =
-                locateSplitterLeft(strptr, pivot, is_robust, partner, tag, comm);
+                locateSplitterLeft(strptr, pivot, partner, tag, comm);
 
             auto own_ptr = strptr.sub(0, separator - strptr.active().begin());
             auto send_ptr = strptr.sub(own_ptr.size(), strptr.size() - own_ptr.size());
             return std::tuple{own_ptr, send_ptr, separator, recv_cnt};
         } else {
             auto const [separator, recv_cnt] =
-                locateSplitterRight(strptr, pivot, is_robust, partner, tag, comm);
+                locateSplitterRight(strptr, pivot, partner, tag, comm);
 
             auto send_ptr = strptr.sub(0, separator - strptr.active().begin());
             auto own_ptr = strptr.sub(send_ptr.size(), strptr.size() - send_ptr.size());
@@ -336,6 +329,10 @@ void sortRec(
     swap(local_strings, buffers.merge_strings);
     assert(local_strings.make_string_set().check_order());
 
+    if (!local_strings.make_string_set().check_order()) {
+        local_strings.make_string_set().print();
+    }
+
     tracker.merge_t.stop();
 
     if (nprocs >= 4) {
@@ -352,7 +349,6 @@ void sortRec(
             bit_store,
             local_strings,
             buffers,
-            is_robust,
             std::forward<Tracker>(tracker),
             tag,
             subcomm
@@ -371,9 +367,9 @@ void sortLocally(StringPtr const& strptr) {
             using StringLcpPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
 
             std::vector<size_t> lcps(strptr.size());
-            StringLcpPtr str_lcp_ptr{strptr.active(), lcps.data()};
-            tlx::sort_strings_detail::radixsort_CI3(str_lcp_ptr, 0, 0);
-            dss_mehnert::sort_duplicates(str_lcp_ptr);
+            StringLcpPtr augmented_ptr{strptr.active(), lcps.data()};
+            tlx::sort_strings_detail::radixsort_CI3(augmented_ptr, 0, 0);
+            dss_mehnert::sort_duplicates(augmented_ptr);
         }
     } else {
         tlx::sort_strings_detail::radixsort_CI3(strptr, 0, 0);
@@ -386,7 +382,6 @@ Container<StringPtr> sort(
     Data<StringPtr>&& local_data,
     int const tag,
     Tracker&& tracker,
-    bool const is_robust,
     RBC::Comm comm
 ) {
     if (comm.getSize() == 1) {
@@ -467,7 +462,6 @@ Container<StringPtr> sort(
         bit_store,
         local_strings,
         buffers,
-        is_robust,
         std::forward<Tracker>(tracker),
         tag,
         comm
@@ -494,8 +488,7 @@ Container<StringPtr> sort(
     Data<StringPtr>&& data,
     int const tag,
     std::mt19937_64& async_gen,
-    MPI_Comm const mpi_comm,
-    bool const is_robust
+    MPI_Comm const mpi_comm
 ) {
     RBC::Comm comm;
     RBC::Create_Comm_from_MPI(mpi_comm, &comm);
@@ -504,21 +497,15 @@ Container<StringPtr> sort(
         std::move(data),
         tag,
         std::forward<Tracker>(tracker),
-        is_robust,
         std::move(comm)
     );
 }
 
 template <class StringPtr>
-Container<StringPtr> sort(
-    Data<StringPtr>&& data,
-    int const tag,
-    std::mt19937_64& async_gen,
-    MPI_Comm const mpi_comm,
-    bool const is_robust
-) {
+Container<StringPtr>
+sort(Data<StringPtr>&& data, int const tag, std::mt19937_64& async_gen, MPI_Comm const mpi_comm) {
     _internal::DummyTracker tracker;
-    return sort(tracker, std::move(data), tag, async_gen, mpi_comm, is_robust);
+    return sort(tracker, std::move(data), tag, async_gen, mpi_comm);
 }
 
 } // namespace RQuick2
