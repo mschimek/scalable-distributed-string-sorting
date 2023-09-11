@@ -454,7 +454,6 @@ Container<StringPtr> sort(
     local_data.read_into(local_strings.make_auto_ptr());
     std::swap(local_strings.raw_strings(), local_data.raw_strs);
 
-    // todo consider using reserve
     TemporaryBuffers<StringPtr> buffers;
     buffers.recv_data = std::move(local_data);
 

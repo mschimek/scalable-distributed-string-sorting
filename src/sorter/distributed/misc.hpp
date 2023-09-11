@@ -21,42 +21,11 @@
 
 #include "mpi/communicator.hpp"
 #include "mpi/environment.hpp"
-#include "sorter/RQuick/RQuick.hpp"
-#include "sorter/RQuick2/RQuick.hpp"
-#include "sorter/RQuick2/Util.hpp"
 #include "sorter/distributed/duplicate_sorting.hpp"
 #include "strings/stringcontainer.hpp"
 #include "strings/stringtools.hpp"
 
 namespace dss_schimek {
-
-struct StringComparator {
-    using String = dss_schimek::UCharLengthStringSet::String;
-    bool operator()(String lhs, String rhs) {
-        unsigned char const* lhsChars = lhs.string;
-        unsigned char const* rhsChars = rhs.string;
-        while (*lhsChars == *rhsChars && *lhsChars != 0) {
-            ++lhsChars;
-            ++rhsChars;
-        }
-        return *lhsChars < *rhsChars;
-    }
-};
-
-struct IndexStringComparator {
-    using String = dss_schimek::UCharLengthIndexStringSet::String;
-    bool operator()(String lhs, String rhs) {
-        unsigned char const* lhsChars = lhs.string;
-        unsigned char const* rhsChars = rhs.string;
-        while (*lhsChars == *rhsChars && *lhsChars != 0) {
-            ++lhsChars;
-            ++rhsChars;
-        }
-        if (*lhsChars == 0 && *rhsChars == 0)
-            return lhs.index < rhs.index;
-        return *lhsChars < *rhsChars;
-    }
-};
 
 template <typename StringSet>
 IndexStringLcpContainer<StringSet>
@@ -242,40 +211,6 @@ static inline int binarySearchIndexed(
     return left - ss.begin();
 }
 
-template <typename StringSet, typename SplitterSet>
-inline std::vector<size_t>
-compute_interval_binary(StringSet const& ss, SplitterSet const& splitters) {
-    using CharIt = typename StringSet::CharIterator;
-    std::vector<size_t> intervals;
-    intervals.reserve(splitters.size() + 1);
-
-    for (std::size_t i = 0; i < splitters.size(); ++i) {
-        CharIt splitter = splitters.get_chars(splitters[splitters.begin() + i], 0);
-        size_t pos = binarySearch(ss, splitter);
-        intervals.emplace_back(pos);
-    }
-    intervals.emplace_back(ss.size());
-    std::adjacent_difference(intervals.begin(), intervals.end(), intervals.begin());
-    return intervals;
-}
-
-template <typename StringSet, typename SplitterSet>
-inline std::vector<size_t> compute_interval_binary_index(
-    StringSet const& ss, SplitterSet const& splitters, const uint64_t localOffset
-) {
-    // using CharIt = typename StringSet::CharIterator;
-    std::vector<size_t> intervals;
-    intervals.reserve(splitters.size() + 1);
-
-    for (std::size_t i = 0; i < splitters.size(); ++i) {
-        size_t pos = binarySearchIndexed(ss, splitters, i, localOffset);
-        intervals.emplace_back(pos);
-    }
-    intervals.emplace_back(ss.size());
-    std::adjacent_difference(intervals.begin(), intervals.end(), intervals.begin());
-    return intervals;
-}
-
 } // namespace dss_schimek
 
 namespace dss_mehnert {
@@ -301,6 +236,7 @@ struct LocalSplitterInterval {
     size_t accumulate_lengths(StringSet const& ss) const {
         using std::begin;
 
+        // todo this is not great
         size_t splitter_size = 0;
         for (size_t i = 1; i <= num_splitters; ++i) {
             size_t const global_index = i * splitter_dist;
@@ -332,17 +268,14 @@ inline LocalSplitterInterval compute_splitter_interval(
 
 } // namespace _internal
 
-template <typename StringContainer>
-std::vector<unsigned char> get_splitters(
-    StringContainer& sorted_local_sample, size_t num_partitions, Communicator const& comm
-) {
+template <typename StringSet>
+std::vector<unsigned char>
+get_splitters(StringSet const& ss, size_t const num_partitions, Communicator const& comm) {
     using std::begin;
 
-    auto splitter_interval =
-        _internal::compute_splitter_interval(sorted_local_sample.size(), num_partitions, comm);
-
-    auto const ss = sorted_local_sample.make_string_set();
-    auto splitter_size = splitter_interval.accumulate_lengths(ss);
+    auto const splitter_interval =
+        _internal::compute_splitter_interval(ss.size(), num_partitions, comm);
+    auto const splitter_size = splitter_interval.accumulate_lengths(ss);
     std::vector<unsigned char> splitter_chars(splitter_size);
 
     auto dest = splitter_chars.begin();
@@ -361,26 +294,22 @@ std::vector<unsigned char> get_splitters(
     return result.extract_recv_buffer();
 }
 
-template <typename StringContainer>
-std::pair<std::vector<unsigned char>, std::vector<uint64_t>> get_splitters_indexed(
-    StringContainer& sorted_local_sample, size_t num_partitions, Communicator const& comm
-) {
+template <typename StringSet>
+std::pair<std::vector<unsigned char>, std::vector<uint64_t>>
+get_splitters_indexed(StringSet const& ss, size_t const num_partitions, Communicator const& comm) {
     using std::begin;
 
-    auto splitter_interval =
-        _internal::compute_splitter_interval(sorted_local_sample.size(), num_partitions, comm);
-
-    auto const ss = sorted_local_sample.make_string_set();
-    auto splitter_size = splitter_interval.accumulate_lengths(ss);
+    auto const interval = _internal::compute_splitter_interval(ss.size(), num_partitions, comm);
+    auto const splitter_size = interval.accumulate_lengths(ss);
     std::vector<unsigned char> splitter_chars(splitter_size);
     std::vector<uint64_t> splitter_idxs;
 
     auto dest = splitter_chars.begin();
-    for (size_t i = 1; i <= splitter_interval.num_splitters; ++i) {
-        size_t const global_idx = i * splitter_interval.splitter_dist;
+    for (size_t i = 1; i <= interval.num_splitters; ++i) {
+        size_t const global_idx = i * interval.splitter_dist;
 
-        if (splitter_interval.contains(global_idx)) {
-            auto const local_idx = splitter_interval.local_index(global_idx);
+        if (interval.contains(global_idx)) {
+            auto const local_idx = interval.local_index(global_idx);
             auto const str = ss[begin(ss) + local_idx];
             auto const length = ss.get_length(str) + 1;
             dest = std::copy_n(ss.get_chars(str, 0), length, dest);
@@ -414,22 +343,34 @@ size_t compute_global_lcp_average(LcpIt const first, LcpIt const last, Communica
     return global_result.lcp_sum / std::max(size_t{1}, global_result.num_strs);
 }
 
-template <typename Comparator, typename Data>
-typename Data::StringContainer
-splitter_sort(Data&& data, std::mt19937_64& gen, Comparator& comp, Communicator const& comm) {
-    bool const is_robust = true;
-    int const tag = 50352;
-    auto comm_mpi = comm.mpi_communicator();
-    return RQuick::sort(gen, std::forward<Data>(data), MPI_BYTE, tag, comm_mpi, comp, is_robust);
+template <typename StringSet, typename SplitterSet>
+inline std::vector<size_t>
+compute_interval_binary(StringSet const& ss, SplitterSet const& splitters) {
+    std::vector<size_t> intervals;
+    intervals.reserve(splitters.size() + 1);
+
+    for (std::size_t i = 0; i < splitters.size(); ++i) {
+        auto const splitter = splitters.get_chars(splitters[splitters.begin() + i], 0);
+        intervals.emplace_back(dss_schimek::binarySearch(ss, splitter));
+    }
+    intervals.emplace_back(ss.size());
+    std::adjacent_difference(intervals.begin(), intervals.end(), intervals.begin());
+    return intervals;
 }
 
-template <typename StringPtr>
-RQuick2::Container<StringPtr>
-splitter_sort_v2(RQuick2::Data<StringPtr>&& data, std::mt19937_64& gen, Communicator const& comm) {
-    bool const is_robust = !StringPtr::StringSet::is_indexed;
-    int const tag = 23560;
-    auto comm_mpi = comm.mpi_communicator();
-    return RQuick2::sort(std::move(data), tag, gen, comm_mpi, is_robust);
+template <typename StringSet, typename SplitterSet>
+inline std::vector<size_t> compute_interval_binary_index(
+    StringSet const& ss, SplitterSet const& splitters, uint64_t const local_offset
+) {
+    std::vector<size_t> intervals;
+    intervals.reserve(splitters.size() + 1);
+
+    for (std::size_t i = 0; i < splitters.size(); ++i) {
+        intervals.emplace_back(dss_schimek::binarySearchIndexed(ss, splitters, i, local_offset));
+    }
+    intervals.emplace_back(ss.size());
+    std::adjacent_difference(intervals.begin(), intervals.end(), intervals.begin());
+    return intervals;
 }
 
 } // namespace dss_mehnert

@@ -66,8 +66,7 @@ public:
 
     DataMembers() = default;
 
-    template <typename... Args>
-    DataMembers(Args&&... args) : Members<StringPtr>{std::forward<Args>(args)}... {}
+    DataMembers(std::vector<CharType> raw_strs) : RawStrings<StringPtr>{std::move(raw_strs)} {}
 
     size_t get_num_strings() const {
         if constexpr (has_index) {

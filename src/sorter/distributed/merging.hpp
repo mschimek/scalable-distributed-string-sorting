@@ -39,19 +39,19 @@ struct MergeResult<true, StringSet> {
 };
 
 template <bool is_compressed, size_t K, typename StringLcpPtr>
-static inline MergeResult<is_compressed, typename StringLcpPtr::StringSet> merge(
+static inline MergeResult<is_compressed, typename StringLcpPtr::StringSet> multiway_merge(
     StringLcpPtr const& input_string_ptr,
     std::vector<size_t>& interval_offsets,
     std::vector<size_t>& interval_sizes
 ) {
+    assert(K == pow2roundup(interval_sizes.size()));
     if (input_string_ptr.size() == 0) {
         return {};
     }
 
-    interval_offsets.resize(pow2roundup(interval_sizes.size()), 0);
-    interval_sizes.resize(pow2roundup(interval_sizes.size()), 0);
+    interval_offsets.resize(K, 0);
+    interval_sizes.resize(K, 0);
 
-    // todo is this using the right resize
     dss_schimek::StringLcpContainer<typename StringLcpPtr::StringSet> sorted_strings;
     sorted_strings.resize_strings(input_string_ptr.size());
 
@@ -81,7 +81,7 @@ static inline MergeResult<is_compressed, typename StringLcpPtr::StringSet> choos
 ) {
     assert(interval_sizes.size() == interval_offsets.size());
     auto merge_k = [&]<size_t K>() {
-        return merge<is_compressed, K>(recv_string_ptr, interval_offsets, interval_sizes);
+        return multiway_merge<is_compressed, K>(recv_string_ptr, interval_offsets, interval_sizes);
     };
     switch (pow2roundup(interval_sizes.size())) {
         case 1:

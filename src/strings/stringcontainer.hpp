@@ -416,6 +416,8 @@ public:
     explicit StringContainer(std::vector<Char>&& raw_strings, Args&&... args)
         : Base{std::move(raw_strings), std::forward<Args>(args)...} {}
 
+    using Base::update;
+
     template <typename Container_ = StringContainer<StringSet_>>
     std::enable_if_t<Container_::isIndexed>
     update(std::vector<Char>&& raw_strings, std::vector<uint64_t> const& indices) {
@@ -431,7 +433,7 @@ public:
     using Base = BaseStringLcpContainer<StringSet_, StringLcpContainer<StringSet_>>;
     using Char = Base::Char;
 
-    static constexpr bool isIndexed = false;
+    // static constexpr bool isIndexed = false;
 
     StringLcpContainer() = default;
 
@@ -478,7 +480,7 @@ public:
     using Base = BaseStringLcpContainer<StringSet_, IndexStringLcpContainer<StringSet_>>;
     using Char = Base::Char;
 
-    static constexpr bool isIndexed = true;
+    // static constexpr bool isIndexed = true;
 
     IndexStringLcpContainer() = default;
 

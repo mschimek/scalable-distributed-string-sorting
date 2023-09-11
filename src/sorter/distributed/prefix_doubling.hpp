@@ -40,9 +40,13 @@ template <
     typename Subcommunicators,
     typename AllToAllStringPolicy,
     typename SamplePolicy,
+    typename PartitionPolicy,
     typename BloomFilter>
-class PrefixDoublingMergeSort
-    : private BaseDistributedMergeSort<Subcommunicators, AllToAllStringPolicy, SamplePolicy> {
+class PrefixDoublingMergeSort : private BaseDistributedMergeSort<
+                                    Subcommunicators,
+                                    AllToAllStringPolicy,
+                                    SamplePolicy,
+                                    PartitionPolicy> {
 public:
     using StringLcpContainer = dss_schimek::StringLcpContainer<typename StringPtr::StringSet>;
 
