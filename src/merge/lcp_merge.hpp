@@ -35,14 +35,14 @@ public:
         return *this;
     }
 
-    typename StringSet::CharIterator first_chars(size_t const depth) const {
-        assert(!empty());
-        return active_.get_chars(first_string(), depth);
-    }
-
     typename StringSet::String first_string() const {
         assert(!empty());
         return active_[active_.begin()];
+    }
+
+    typename StringSet::CharIterator first_chars(size_t const depth) const {
+        assert(!empty());
+        return active_.get_chars(first_string(), depth);
     }
 
     LcpType first_lcp() const {
@@ -90,7 +90,8 @@ void lcp_merge(StringLcpPtr const& lhs, StringLcpPtr const& rhs, StringLcpPtr co
         if (defender_chars[curr_lcp] > contender_chars[curr_lcp]) {
             defender.swap(contender);
         }
-
+    }
+    if (!defender.empty()) {
         *d_str++ = defender.first_string();
         *d_lcp++ = 0;
         ++defender;
