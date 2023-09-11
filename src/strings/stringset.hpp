@@ -536,32 +536,21 @@ public:
     //! check equality of two strings a and b at char iterators ai and bi.
     bool is_equal(String const& a, CharIterator const& ai, String const& b, CharIterator const& bi)
         const {
-        if constexpr (has_member<String, Index>) {
-            return (*ai == *bi) && ((*ai != 0) || (a.index == b.index));
-        } else {
-            return (*ai == *bi) && (*ai != 0);
-        }
+        return (*ai == *bi) && (!is_end(a, ai));
     }
 
     //! check if string a is less or equal to string b at iterators ai and bi.
     bool is_less(String const& a, CharIterator const& ai, String const& b, CharIterator const& bi)
         const {
-        if constexpr (has_member<String, Index>) {
-            return (*ai == 0 && *bi == 0) ? (a.index < b.index) : (*ai < *bi);
-        } else {
-            return (*ai < *bi);
-        }
+        return (*ai < *bi);
+        // }
     }
 
     //! check if string a is less or equal to string b at iterators ai and bi.
     bool
     is_leq(String const& a, CharIterator const& ai, String const& b, CharIterator const& bi) const {
         // todo use is_end here
-        if constexpr (has_member<String, Index>) {
-            return (*ai == 0 && *bi == 0) ? (a.index <= b.index) : (*ai <= *bi);
-        } else {
-            return (*ai <= *bi);
-        }
+        return (*ai <= *bi);
     }
 
     //! Return up to 1 characters of string s at iterator i packed into a uint8
@@ -604,20 +593,19 @@ public:
         }
     }
 
+    // todo remove this
     //! This function is here for backwards compatibility
     template <typename S = String, typename = std::enable_if_t<has_member<S, StringIndex>>>
     size_t getIndex(String const& str) const {
         return str.stringIndex;
     }
 
+    // todo ditto
     //! This function is here for backwards compatibility
     template <typename S = String, typename = std::enable_if_t<has_member<S, PEIndex>>>
     size_t getPEIndex(String const& str) const {
         return str.PEIndex;
     }
-
-    // todo change to include contained data types
-    static std::string getName() { return "GenericStringSet"; }
 
 protected:
     //! array of string pointers
