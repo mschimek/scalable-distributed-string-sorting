@@ -387,11 +387,11 @@ public:
         auto ss = container.make_string_set();
 
         std::vector<size_t> send_buf_PE_idx(ss.size());
-        auto get_PE_idx = [&ss](auto const& str) { return ss.getPEIndex(str); };
+        auto get_PE_idx = [&ss](auto const& str) { return str.getPEIndex(); };
         std::transform(ss.begin(), ss.end(), send_buf_PE_idx.begin(), get_PE_idx);
 
         std::vector<size_t> send_buf_str_idx(ss.size());
-        auto get_str_idx = [&ss](auto const& str) { return ss.getIndex(str); };
+        auto get_str_idx = [&ss](auto const& str) { return str.getStringIndex(); };
         std::transform(ss.begin(), ss.end(), send_buf_str_idx.begin(), get_str_idx);
 
         measuring_tool.start("all_to_all_strings_mpi");

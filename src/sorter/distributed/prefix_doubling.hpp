@@ -50,7 +50,8 @@ class PrefixDoublingMergeSort : private BaseDistributedMergeSort<
 public:
     using StringLcpContainer = dss_schimek::StringLcpContainer<typename StringPtr::StringSet>;
 
-    using StringPEIndexSet = dss_schimek::UCharLengthIndexPEIndexStringSet;
+    using Char = typename StringPtr::StringSet::Char;
+    using StringPEIndexSet = dss_schimek::GenericCharLengthIndexPEIndexStringSet<Char>;
     using StringPEIndexPtr = tlx::sort_strings_detail::StringLcpPtr<StringPEIndexSet, size_t>;
     using StringPEIndexContainer = dss_schimek::StringLcpContainer<StringPEIndexSet>;
 
@@ -144,7 +145,7 @@ private:
         std::vector<StringIndexPEIndex> permutation(ss.size());
 
         std::transform(begin(ss), end(ss), permutation.begin(), [&ss](auto const& str) {
-            return StringIndexPEIndex{ss.getIndex(str), ss.getPEIndex(str)};
+            return StringIndexPEIndex{str.getStringIndex(), str.getPEIndex()};
         });
         this->measuring_tool_.stop("writeback_permutation");
 

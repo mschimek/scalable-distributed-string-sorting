@@ -439,6 +439,8 @@ std::ostream& operator<<(std::ostream& out, StringData<String, Args...> const& s
     return out << "}";
 }
 
+/******************************************************************************/
+
 /*!
  * Traits class implementing StringSet concept for char* and unsigned char*
  * strings with additional length attribute.
@@ -457,9 +459,6 @@ public:
 
     //! iterator of characters in a string
     typedef Char const* CharIterator;
-
-    //! exported alias for assumed string container
-    typedef std::pair<Iterator, size_t> Container;
 };
 
 /*!
@@ -478,7 +477,6 @@ public:
     typedef typename Traits::String String;
     typedef typename Traits::Iterator Iterator;
     typedef typename Traits::CharIterator CharIterator;
-    typedef typename Traits::Container Container;
 
     static constexpr bool is_indexed{has_member<String, Index>};
 
@@ -487,9 +485,6 @@ public:
 
     //! Construct from begin and end string pointers
     GenericStringSet(Iterator begin, Iterator end) : begin_(begin), end_(end) {}
-
-    //! Construct from a string container
-    explicit GenericStringSet(Container const& c) : begin_(c.first), end_(c.first + c.second) {}
 
     //! Return size of string array
     size_t size() const { return end_ - begin_; }
@@ -513,46 +508,13 @@ public:
     bool is_end(String const&, CharIterator const& i) const { return (*i == 0); }
 
     //! Return complete string (for debugging purposes)
-    std::string get_string(String const& s, size_t depth = 0) const {
-        return std::string(reinterpret_cast<char const*>(s.string) + depth);
+    std::string get_string(String const& s, size_t const depth = 0) const {
+        return {static_cast<char const*>(s.string) + depth};
     }
 
     // todo is this actually returning This?
     //! Subset this string set using iterator range.
-    GenericStringSet sub(Iterator begin, Iterator end) const {
-        return GenericStringSet(begin, end);
-    }
-
-    //! Allocate a new temporary string container with n empty Strings
-    static Container allocate(size_t n) { return std::make_pair(new String[n], n); }
-
-    //! Deallocate a temporary string container
-    static void deallocate(Container& c) {
-        delete[] c.first;
-        c.first = NULL;
-    }
-
-    //! check equality of two strings a and b at char iterators ai and bi.
-    // bool is_equal(String const& a, CharIterator const& ai, String const& b, CharIterator const&
-    // bi)
-    //     const {
-    //     return (!is_end(a, ai)) && (!is_end(b, bi)) && (*ai == *bi);
-    // }
-
-    //! check if string a is less or equal to string b at iterators ai and bi.
-    // bool is_less(String const& a, CharIterator const& ai, String const& b, CharIterator const&
-    // bi)
-    //     const {
-    //     return (*ai < *bi);
-    // }
-
-    //! check if string a is less or equal to string b at iterators ai and bi.
-    // bool
-    // is_leq(String const& a, CharIterator const& ai, String const& b, CharIterator const& bi)
-    // const {
-    //     // todo use is_end here
-    //     return (*ai <= *bi);
-    // }
+    GenericStringSet sub(Iterator const begin, Iterator const end) const { return {begin, end}; }
 
     //! Return up to 1 characters of string s at iterator i packed into a uint8
     //! (only works correctly for 8-bit characters)
@@ -562,7 +524,6 @@ public:
 
     void print(std::string_view prefix = "") const {
         size_t i = 0;
-        // todo begin() and end() should techinically use CRTP
         for (Iterator pi = begin(); pi != end(); ++pi) {
             LOG1 << prefix << "[" << i++ << "] = " << (*pi) << " = " << get_string(*pi, 0);
         }
@@ -574,6 +535,7 @@ public:
         return zero;
     }
 
+    // todo move
     size_t get_sum_length() const {
         return std::accumulate(begin_, end_, size_t{0}, [](auto const& n, auto const& str) {
             return n + str.getLength();
@@ -592,20 +554,6 @@ public:
             }
             return length;
         }
-    }
-
-    // todo remove this
-    //! This function is here for backwards compatibility
-    template <typename S = String, typename = std::enable_if_t<has_member<S, StringIndex>>>
-    size_t getIndex(String const& str) const {
-        return str.stringIndex;
-    }
-
-    // todo ditto
-    //! This function is here for backwards compatibility
-    template <typename S = String, typename = std::enable_if_t<has_member<S, PEIndex>>>
-    size_t getPEIndex(String const& str) const {
-        return str.PEIndex;
     }
 
 protected:
@@ -627,9 +575,6 @@ using UCharLengthIndexStringSet = GenericCharLengthIndexStringSet<unsigned char>
 
 template <typename Char>
 using GenericCharIndexPEIndexStringSet = GenericStringSet<Char, StringStringIndexPEIndex>;
-
-using CharIndexPEIndexStringSet = GenericCharIndexPEIndexStringSet<char>;
-using UCharIndexPEIndexStringSet = GenericCharIndexPEIndexStringSet<unsigned char>;
 
 template <typename Char>
 using GenericCharLengthIndexPEIndexStringSet =
