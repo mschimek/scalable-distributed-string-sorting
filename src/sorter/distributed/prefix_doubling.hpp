@@ -38,12 +38,14 @@ struct StringIndexPEIndex {
 template <
     typename StringPtr,
     typename Subcommunicators,
+    typename RedistributionPolicy,
     typename AllToAllStringPolicy,
     typename SamplePolicy,
     typename PartitionPolicy,
     typename BloomFilter>
 class PrefixDoublingMergeSort : private BaseDistributedMergeSort<
                                     Subcommunicators,
+                                    RedistributionPolicy,
                                     AllToAllStringPolicy,
                                     SamplePolicy,
                                     PartitionPolicy> {
@@ -251,7 +253,9 @@ std::vector<typename StringSet::String> reordered_strings(
     // using back_inserter here becuase String may not be default-insertable
     std::vector<typename StringSet::String> strings;
     strings.reserve(ss.size());
-    auto op = [&](auto const& x) { return ss[begin(ss) + offsets[x.PEIndex]++]; };
+    auto op = [&](auto const& x) {
+        return ss[begin(ss) + offsets[x.PEIndex]++];
+    };
     std::transform(permutation.begin(), permutation.end(), std::back_inserter(strings), op);
 
     return strings;

@@ -30,12 +30,54 @@
 #include "util/measuringTool.hpp"
 
 namespace dss_mehnert {
+namespace redistribution {
+
+template <typename Communicator>
+class GridwiseRedistribution {
+public:
+    using Level = multi_level::Level<Communicator>;
+
+    static std::vector<size_t>
+    compute_send_counts(std::vector<size_t> const& interval_sizes, Level const& level) {
+        // nothing to do here, intervals are same shape as column communicator
+        tlx_assert_equal(interval_sizes.size(), level.comm_exchange.size());
+        return interval_sizes;
+    }
+};
+
+template <typename Communicator>
+class NaiveRedistribution {
+    using Level = multi_level::Level<Communicator>;
+
+    static std::vector<size_t>
+    compute_send_counts(std::vector<size_t> const& interval_sizes, Level const& level) {
+        auto const& comm = level.comm_orig;
+        auto const group_size = level.group_size();
+        auto const num_groups = comm.size() / group_size;
+        auto const group_offset = comm.rank() / num_groups;
+
+        // PE `i` sends strings to the `i * p' / p`th member of each group on the next level
+        std::vector<size_t> send_counts(comm.size());
+        auto dst_iter = send_counts.begin() + group_offset;
+        for (auto const interval: interval_sizes) {
+            *dst_iter = interval;
+            dst_iter += group_size;
+        }
+
+        return send_counts;
+    }
+};
+
+} // namespace redistribution
+
+
 namespace sorter {
 
 // todo this could also be an _internal namespace
 // todo remove defaulted environments (dss_schimek::mpi::environment env;)
 template <
     typename Subcommunicators,
+    typename RedistributionPolicy,
     typename AllToAllStringPolicy,
     typename SamplePolicy,
     typename PartitionPolicy>
@@ -78,7 +120,7 @@ protected:
         measuring_tool_.stop("sort_globally", "compute_partition");
 
         measuring_tool_.start("sort_globally", "exchange_and_merge");
-        auto send_counts = Subcommunicators::send_counts(interval_sizes, level);
+        auto send_counts = RedistributionPolicy::compute_send_counts(interval_sizes, level);
         auto sorted_container = exchange_and_merge(
             std::move(container),
             send_counts,
@@ -157,7 +199,9 @@ protected:
 
         if (recv_string_cont.size() > 0) {
             auto& lcps = recv_string_cont.lcps();
-            auto set_lcp = [&lcps](auto const offset) { lcps[offset] = 0; };
+            auto set_lcp = [&lcps](auto const offset) {
+                lcps[offset] = 0;
+            };
             std::for_each(offsets.begin(), offsets.end(), set_lcp);
         }
         measuring_tool_.stop("compute_ranges");
@@ -190,11 +234,13 @@ protected:
 template <
     typename StringPtr,
     typename Subcommunicators,
+    typename RedistributionPolicy,
     typename AllToAllStringPolicy,
     typename SamplePolicy,
     typename PartitionPolicy>
 class DistributedMergeSort : private BaseDistributedMergeSort<
                                  Subcommunicators,
+                                 RedistributionPolicy,
                                  AllToAllStringPolicy,
                                  SamplePolicy,
                                  PartitionPolicy> {

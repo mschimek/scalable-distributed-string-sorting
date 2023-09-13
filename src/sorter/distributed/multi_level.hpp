@@ -138,11 +138,6 @@ public:
 
     Level<Communicator> level(size_t level) const { tlx_die("not implemented"); };
 
-    static std::vector<size_t>
-    send_counts(std::vector<size_t> const& interval_sizes, Level<Communicator> const& level) {
-        tlx_die("not implemented");
-    };
-
     Communicator const& comm_root() const { return comm_; }
     Communicator const& comm_final() const { return comm_; }
 
@@ -150,6 +145,7 @@ private:
     Communicator comm_;
 };
 
+// todo rename
 template <typename Communicator>
 class NaiveSplit {
 public:
@@ -169,24 +165,6 @@ public:
 
     Level<Communicator> level(size_t level) const {
         return {rows_.comms[level], rows_.comms[level], rows_.comms[level + 1]};
-    }
-
-    static std::vector<size_t>
-    send_counts(std::vector<size_t> const& interval_sizes, Level<Communicator> const& level) {
-        auto const& comm = level.comm_orig;
-        auto const group_size = level.group_size();
-        auto const num_groups = comm.size() / group_size;
-        auto const group_offset = comm.rank() / num_groups;
-
-        // PE `i` sends strings to the `i * p' / p`th member of each group on the next level
-        std::vector<size_t> send_counts(comm.size());
-        auto dst_iter = send_counts.begin() + group_offset;
-        for (auto const interval: interval_sizes) {
-            *dst_iter = interval;
-            dst_iter += group_size;
-        }
-
-        return send_counts;
     }
 
 private:
@@ -215,13 +193,6 @@ public:
 
     Level<Communicator> level(size_t level) const {
         return {rows_.comms[level], cols_.comms[level], rows_.comms[level + 1]};
-    }
-
-    static std::vector<size_t>
-    send_counts(std::vector<size_t> const& interval_sizes, Level<Communicator> const& level) {
-        // nothing to do here, intervals are same shape as column communicator
-        tlx_assert_equal(interval_sizes.size(), level.comm_exchange.size());
-        return interval_sizes;
     }
 
 private:

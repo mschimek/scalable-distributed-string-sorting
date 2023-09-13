@@ -80,6 +80,7 @@ template <
     typename PartitionPolicy,
     typename MPIAllToAllRoutine,
     typename Subcommunicators,
+    typename RedistributionPolicy,
     typename LcpCompression,
     typename PrefixCompression,
     typename BloomFilterPolicy>
@@ -108,7 +109,9 @@ void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicat
     }
 
     // skip unused levels for multi-level merge sort
-    auto pred = [&](auto const& group_size) { return group_size < comm.size(); };
+    auto pred = [&](auto const& group_size) {
+        return group_size < comm.size();
+    };
     auto first_level = std::find_if(args.levels.begin(), args.levels.end(), pred);
 
     measuring_tool.enableCommVolume();
@@ -124,6 +127,7 @@ void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicat
     DistributedMergeSort<
         StringLcpPtr,
         Subcommunicators,
+        RedistributionPolicy,
         AllToAllPolicy,
         SamplePolicy,
         PartitionPolicy>
@@ -164,6 +168,7 @@ template <
     typename PartitionPolicy,
     typename MPIAllToAllRoutine,
     typename Subcommunicators,
+    typename RedistributionPolicy,
     typename LcpCompression,
     typename PrefixCompression,
     typename BloomFilterPolicy>
@@ -198,7 +203,9 @@ void run_prefix_doubling(
     }
 
     // skip unused levels for multi-level merge sort
-    auto pred = [&](auto const& group_size) { return group_size < comm.size(); };
+    auto pred = [&](auto const& group_size) {
+        return group_size < comm.size();
+    };
     auto first_level = std::find_if(args.levels.begin(), args.levels.end(), pred);
 
     measuring_tool.enableCommVolume();
@@ -213,6 +220,7 @@ void run_prefix_doubling(
     dss_mehnert::sorter::PrefixDoublingMergeSort<
         StringLcpPtr,
         Subcommunicators,
+        RedistributionPolicy,
         AllToAllPolicy,
         SamplePolicy,
         PartitionPolicy,
@@ -287,6 +295,7 @@ template <
     typename PartitionPolicy,
     typename MPIAllToAllRoutine,
     typename Subcommunicators,
+    typename RedistributionPolicy,
     typename LcpCompression,
     typename PrefixCompression,
     typename BloomFilterPolicy>
@@ -299,6 +308,7 @@ void print_config(
     std::cout << prefix << " key=sampler name=" << SamplePolicy::getName() << "\n";
     std::cout << prefix << " key=alltoall_routine name=" << MPIAllToAllRoutine::getName() << "\n";
     std::cout << prefix << " key=subcomms name=" << Subcommunicators::get_name() << "\n";
+    // todo add redistribution policy
 }
 
 void die_with_feature(std::string_view feature) {
@@ -358,12 +368,16 @@ void arg5(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
 template <typename... Args>
 void arg4(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
     using namespace dss_mehnert::multi_level;
+    using namespace dss_mehnert::redistribution;
     using dss_mehnert::Communicator;
 
     switch (key.subcomms) {
         case PolicyEnums::Subcommunicators::none: {
             if constexpr (CliOptions::enable_split) {
-                arg5<Args..., NoSplit<Communicator>>(key, args);
+                using Split = NaiveSplit<Communicator>;
+                using Redistribution = NaiveRedistribution<Communicator>;
+                // todo this should use a null type of sth similar
+                arg5<Args..., Split, Redistribution>(key, args);
             } else {
                 die_with_feature("CLI_ENABLE_SPLIT");
             }
@@ -371,14 +385,18 @@ void arg4(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
         }
         case PolicyEnums::Subcommunicators::naive: {
             if constexpr (CliOptions::enable_split) {
-                arg5<Args..., NaiveSplit<Communicator>>(key, args);
+                using Split = NaiveSplit<Communicator>;
+                using Redistribution = NaiveRedistribution<Communicator>;
+                arg5<Args..., Split, Redistribution>(key, args);
             } else {
                 die_with_feature("CLI_ENABLE_SPLIT");
             }
             break;
         }
         case PolicyEnums::Subcommunicators::grid: {
-            arg5<Args..., GridwiseSplit<Communicator>>(key, args);
+            using Split = GridwiseSplit<Communicator>;
+            using Redistribution = GridwiseRedistribution<Communicator>;
+            arg5<Args..., Split, Redistribution>(key, args);
             break;
         }
     }
@@ -625,7 +643,9 @@ int main(int argc, char* argv[]) {
     };
 
     std::vector<size_t> levels(levels_param.size());
-    auto stoi = [](auto& str) { return std::stoi(str); };
+    auto stoi = [](auto& str) {
+        return std::stoi(str);
+    };
     std::transform(levels_param.begin(), levels_param.end(), levels.begin(), stoi);
 
     if (!std::is_sorted(levels.begin(), levels.end(), std::greater_equal<>{})) {
