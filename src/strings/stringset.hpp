@@ -137,6 +137,12 @@ public:
 
     //! \}
 
+    size_t get_sum_length() const {
+        StringSet const& ss = *static_cast<StringSet const*>(this);
+        auto acc = [](auto const& n, auto const& str) { return n + str.getLength(); };
+        return std::accumulate(ss.begin(), ss.end(), size_t{0}, acc);
+    }
+
     //! \name Character Extractors
     //! \{
 
@@ -509,7 +515,7 @@ public:
 
     //! Return complete string (for debugging purposes)
     std::string get_string(String const& s, size_t const depth = 0) const {
-        return {static_cast<char const*>(s.string) + depth};
+        return {reinterpret_cast<char const*>(s.string) + depth};
     }
 
     // todo is this actually returning This?
@@ -536,11 +542,6 @@ public:
     }
 
     // todo move
-    size_t get_sum_length() const {
-        return std::accumulate(begin_, end_, size_t{0}, [](auto const& n, auto const& str) {
-            return n + str.getLength();
-        });
-    }
 
     size_t get_length(String const& str) const {
         if constexpr (has_member<String, Length>) {
@@ -556,7 +557,7 @@ public:
         }
     }
 
-protected:
+private:
     //! array of string pointers
     Iterator begin_, end_;
 };
@@ -576,12 +577,117 @@ using UCharLengthIndexStringSet = GenericCharLengthIndexStringSet<unsigned char>
 template <typename Char>
 using GenericCharIndexPEIndexStringSet = GenericStringSet<Char, StringStringIndexPEIndex>;
 
+using CharIndexPEIndexStringSet = GenericCharIndexPEIndexStringSet<char>;
+using UCharIndexPEIndexStringSet = GenericCharIndexPEIndexStringSet<unsigned char>;
+
 template <typename Char>
 using GenericCharLengthIndexPEIndexStringSet =
     GenericStringSet<Char, StringLengthStringIndexPEIndex>;
 
-using CharLengthIndexPEIndexStringSet = GenericStringSet<char, StringLengthStringIndexPEIndex>;
-using UCharLengthIndexPEIndexStringSet =
-    GenericStringSet<unsigned char, StringLengthStringIndexPEIndex>;
+using CharLengthIndexPEIndexStringSet = GenericCharLengthIndexPEIndexStringSet<char>;
+using UCharLengthIndexPEIndexStringSet = GenericCharLengthIndexPEIndexStringSet<unsigned char>;
 
 } // namespace dss_schimek
+
+/******************************************************************************/
+
+namespace dss_mehnert {
+
+/*!
+ * Class implementing StringSet concept for compressed representations.
+ */
+template <typename CharType, template <typename> typename Data_>
+class GenericCompressedStringSet : public dss_schimek::GenericStringSetTraits<CharType, Data_>,
+                                   public dss_schimek::StringSetBase<
+                                       GenericCompressedStringSet<CharType, Data_>,
+                                       dss_schimek::GenericStringSetTraits<CharType, Data_>> {
+public:
+    typedef dss_schimek::GenericStringSetTraits<CharType, Data_> Traits;
+
+    typedef typename Traits::Char Char;
+    typedef typename Traits::String String;
+    typedef typename Traits::Iterator Iterator;
+    typedef typename Traits::CharIterator CharIterator;
+
+    static_assert(dss_schimek::has_member<String, dss_schimek::Length>);
+
+    static constexpr bool is_indexed{dss_schimek::has_member<String, dss_schimek::Index>};
+
+    //! Construct from begin and end string pointers
+    GenericCompressedStringSet() = default;
+
+    //! Construct from begin and end string pointers
+    GenericCompressedStringSet(Iterator const begin, Iterator const end)
+        : begin_(begin),
+          end_(end) {}
+
+    //! Return size of string array
+    size_t size() const { return end_ - begin_; }
+
+    //! Check if the set contains no elements
+    bool empty() const { return begin_ == end_; }
+
+    //! Iterator representing first String position
+    Iterator begin() const { return begin_; }
+
+    //! Iterator representing beyond last String position
+    Iterator end() const { return end_; }
+
+    //! Iterator-based array access (readable and writable) to String objects.
+    String& operator[](Iterator const i) const { return *i; }
+
+    //! Return length of the referenced string.
+    size_t get_length(String const& str) const { return str.getLength(); }
+
+    //! Return CharIterator for referenced string, which belong to this set.
+    CharIterator get_chars(String const& s, size_t depth) const { return s.string + depth; }
+
+    //! Returns true if CharIterator is at end of the given String
+    bool is_end(String const& s, CharIterator const& i) const {
+        return i - s.getChars() < s.length();
+    }
+
+    //! Return complete string (for debugging purposes)
+    std::string get_string(String const& s, size_t depth = 0) const {
+        return {reinterpret_cast<char const*>(s.string) + depth};
+    }
+
+    //! Subset this string set using iterator range.
+    GenericCompressedStringSet sub(Iterator const begin, Iterator const end) const {
+        return {begin, end};
+    }
+
+    //! Return up to 1 characters of string s at iterator i packed into a uint8
+    //! (only works correctly for 8-bit characters)
+    uint8_t get_char_uint8_simple(String const&, CharIterator i) const { return uint8_t(*i); }
+
+    //! \}
+
+    void print(std::string_view prefix = "") const {
+        size_t i = 0;
+        for (Iterator pi = begin(); pi != end(); ++pi) {
+            LOG1 << prefix << "[" << i++ << "] = " << (*pi) << " = " << get_string(*pi, 0);
+        }
+    }
+
+    static String empty_string() {
+        static String zero{nullptr, dss_schimek::Length{0}};
+        return zero;
+    }
+
+private:
+    //! array of string pointers
+    Iterator begin_, end_;
+};
+
+template <typename... Members>
+struct CompressedData {
+    template <typename String>
+    using type = dss_schimek::StringData<String, dss_schimek::Length, Members...>;
+};
+
+template <typename CharType, typename... Members>
+using CompressedStringSet =
+    dss_schimek::GenericStringSet<CharType, CompressedData<Members...>::template type>;
+
+} // namespace dss_mehnert
