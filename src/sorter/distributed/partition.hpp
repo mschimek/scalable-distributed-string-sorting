@@ -12,7 +12,8 @@
 #include <utility>
 #include <vector>
 
-#include "mpi/allgather.hpp"
+#include <kamping/collectives/allgather.hpp>
+
 #include "mpi/communicator.hpp"
 #include "sorter/RQuick/RQuick.hpp"
 #include "sorter/RQuick2/RQuick.hpp"
@@ -51,17 +52,7 @@ public:
 
         measuring_tool.start("choose_splitters");
         auto sample_set = sorted_sample.make_string_set();
-
-        using StringContainer = dss_schimek::StringContainer<typename Derived::StringSet>;
-        StringContainer chosen_splitters;
-        if constexpr (is_indexed) {
-            auto [splitter_chars, splitter_idxs] =
-                get_splitters_indexed(sample_set, num_partitions, comm);
-            chosen_splitters = StringContainer{std::move(splitter_chars), splitter_idxs};
-        } else {
-            auto splitter_chars = get_splitters(sample_set, num_partitions, comm);
-            chosen_splitters = StringContainer{std::move(splitter_chars)};
-        }
+        auto chosen_splitters = Derived::choose_splitters(sample_set, num_partitions, comm);
         measuring_tool.stop("choose_splitters");
 
         measuring_tool.start("compute_interval_sizes");
@@ -91,22 +82,31 @@ private:
     static constexpr bool is_robust = true;
 
     using StringSet = SorterStringSet<Char, is_indexed>;
-    using StringContainer = dss_schimek::StringContainer<StringSet>;
     using StringPtr = tlx::sort_strings_detail::StringPtr<StringSet>;
 
     template <typename Samples>
-    static StringContainer sort_samples(Samples&& samples, Communicator const& comm) {
+    static dss_schimek::StringContainer<StringSet>
+    sort_samples(Samples&& samples, Communicator const& comm) {
         RQuick2::Comparator<StringPtr> const comp;
         std::mt19937_64 gen{seed + comm.rank()};
         auto const comm_mpi = comm.mpi_communicator();
 
-        RQuick::Data<StringContainer, is_indexed> data;
+        RQuick::Data<dss_schimek::StringContainer<StringSet>, is_indexed> data;
         if constexpr (is_indexed) {
             data = {std::move(samples.sample), {samples.indices}};
         } else {
             data = {std::move(samples), {}};
         }
         return RQuick::sort(gen, std::move(data), MPI_BYTE, tag, comm_mpi, comp, is_robust);
+    }
+
+    static dss_schimek::StringContainer<StringSet>
+    choose_splitters(StringSet const& ss, size_t const num_partitions, Communicator const& comm) {
+        if constexpr (is_indexed) {
+            return distributed_choose_splitters_indexed(ss, num_partitions, comm);
+        } else {
+            return distributed_choose_splitters(ss, num_partitions, comm);
+        }
     }
 };
 
@@ -140,68 +140,54 @@ private:
         // LCP array initialization is done by RQuick
         return RQuick2::sort(std::move(data), tag, gen, comm_mpi);
     }
+
+    static dss_schimek::StringContainer<StringSet>
+    choose_splitters(StringSet const& ss, size_t const num_partitions, Communicator const& comm) {
+        if constexpr (is_indexed) {
+            return distributed_choose_splitters_indexed(ss, num_partitions, comm);
+        } else {
+            return distributed_choose_splitters(ss, num_partitions, comm);
+        }
+    }
 };
 
-// todo create a policy implementation for this
-template <typename Sampler, typename StringPtr, typename Params>
-typename std::enable_if_t<!Sampler::isIndexed, std::vector<size_t>>
-compute_partition_sequential(StringPtr string_ptr, Params const& params, Communicator const& comm) {
-    auto& measuring_tool = measurement::MeasuringTool::measuringTool();
-    auto ss = string_ptr.active();
+// todo consider adding a CLI option for this
+template <typename Char, bool is_indexed>
+class Sequential : public PartitionPolicy<is_indexed, Sequential<Char, is_indexed>> {
+    friend PartitionPolicy<is_indexed, Sequential<Char, is_indexed>>;
 
-    measuring_tool.start("sample_splitters");
-    auto samples = Sampler::sample_splitters(ss, params, comm);
-    measuring_tool.stop("sample_splitters");
+private:
+    using StringSet = SorterStringSet<Char, is_indexed>;
+    using StringContainer = dss_schimek::StringLcpContainer<StringSet>;
 
-    measuring_tool.add(samples.size(), "allgather_splitters_bytes_sent");
-    measuring_tool.start("allgather_splitters");
-    auto splitters = dss_schimek::mpi::allgather_strings(samples, comm);
-    measuring_tool.stop("allgather_splitters");
+    template <typename Samples>
+    static StringContainer sort_samples(Samples&& samples, Communicator const& comm) {
+        StringContainer global_samples;
+        if constexpr (is_indexed) {
+            auto recv_sample = comm.allgatherv(kamping::send_buf(samples.sample));
+            auto recv_indices = comm.allgatherv(kamping::send_buf(samples.indices));
+            // todo this constructor is not implemented right now
+            global_samples = StringContainer{
+                recv_sample.extract_recv_buffer(),
+                recv_indices.extract_recv_buffer()};
+        } else {
+            auto recv_sample = comm.allgatherv(kamping::send_buf(samples));
+            global_samples = StringContainer{recv_sample.extract_recv_buffer()};
+        }
 
-    measuring_tool.start("choose_splitters");
-    auto chosen_splitters_cont = choose_splitters(ss, splitters, comm);
-    measuring_tool.stop("choose_splitters");
+        tlx::sort_strings_detail::radixsort_CI3(global_samples.make_string_lcp_ptr(), 0, 0);
+        if constexpr (is_indexed) {
+            sort_duplicates(global_samples.make_string_lcp_ptr());
+        }
 
-    measuring_tool.start("compute_interval_sizes");
-    auto splitter_set = chosen_splitters_cont.make_string_set();
-    auto interval_sizes = compute_interval_binary(ss, splitter_set);
-    measuring_tool.stop("compute_interval_sizes");
+        return global_samples;
+    }
 
-    return interval_sizes;
-}
-
-template <typename Sampler, typename StringPtr, typename Params>
-typename std::enable_if_t<Sampler::isIndexed, std::vector<size_t>>
-compute_partition_sequential(StringPtr string_ptr, Params const& params, Communicator const& comm) {
-    using StringSet = dss_schimek::UCharLengthIndexStringSet;
-    using StringContainer = dss_schimek::IndexStringLcpContainer<StringSet>;
-
-    auto& measuring_tool = measurement::MeasuringTool::measuringTool();
-    auto ss = string_ptr.active();
-
-    measuring_tool.start("sample_splitters");
-    auto sample = Sampler::sample_splitters(ss, params, comm);
-    measuring_tool.stop("sample_splitters");
-
-    measuring_tool.add(sample.sample.size(), "allgather_splitters_bytes_sent");
-    measuring_tool.start("allgather_splitters");
-    auto recv_sample = dss_schimek::mpi::allgatherv(sample.sample, comm);
-    auto recv_idxs = dss_schimek::mpi::allgatherv(sample.indices, comm);
-    measuring_tool.stop("allgather_splitters");
-
-    measuring_tool.start("choose_splitters");
-    StringContainer indexContainer{std::move(recv_sample), recv_idxs};
-    indexContainer = choose_splitters(indexContainer, comm);
-    measuring_tool.stop("choose_splitters");
-
-    measuring_tool.start("compute_interval_sizes");
-    auto splitter_set = indexContainer.make_string_set();
-    auto local_offset = sample::get_local_offset(ss.size(), comm);
-    auto interval_sizes = compute_interval_binary_index(ss, splitter_set, local_offset);
-    measuring_tool.stop("compute_interval_sizes");
-
-    return interval_sizes;
-}
+    static dss_schimek::StringContainer<StringSet>
+    choose_splitters(StringSet const& ss, size_t const num_partitions, Communicator const&) {
+        return choose_splitters(ss, num_partitions);
+    }
+};
 
 } // namespace partition
 } // namespace dss_mehnert

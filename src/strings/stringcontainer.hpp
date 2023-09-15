@@ -473,21 +473,4 @@ public:
             std::move(str_indices)} {}
 };
 
-template <typename StringSet_>
-class IndexStringLcpContainer
-    : public BaseStringLcpContainer<StringSet_, IndexStringLcpContainer<StringSet_>> {
-public:
-    using Base = BaseStringLcpContainer<StringSet_, IndexStringLcpContainer<StringSet_>>;
-    using Char = Base::Char;
-
-    // static constexpr bool isIndexed = true;
-
-    IndexStringLcpContainer() = default;
-
-    explicit IndexStringLcpContainer(
-        std::vector<Char>&& raw_strings, std::vector<uint64_t> const& indices
-    )
-        : Base{std::move(raw_strings), std::vector(indices.size(), 0), indices} {}
-};
-
 } // namespace dss_schimek
