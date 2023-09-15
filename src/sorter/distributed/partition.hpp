@@ -26,18 +26,18 @@
 namespace dss_mehnert {
 namespace partition {
 
-using dss_mehnert::sample::SampleParams;
-
 template <typename Char, bool is_indexed>
 using SorterStringSet = std::conditional_t<
     is_indexed,
     dss_schimek::GenericCharLengthIndexStringSet<Char>,
     dss_schimek::GenericCharLengthStringSet<Char>>;
 
-template <bool is_indexed, typename Derived>
+template <typename Char, bool is_indexed, typename Derived>
 class PartitionPolicy {
 public:
-    template <typename StringPtr, typename Sample>
+    using Sample = sample::SampleResult<Char, is_indexed>;
+
+    template <typename StringPtr>
     static std::vector<size_t> compute_partition(
         StringPtr const& strptr,
         Sample&& sample,
@@ -73,8 +73,8 @@ public:
 };
 
 template <typename Char, bool is_indexed>
-class RQuickV1 : public PartitionPolicy<is_indexed, RQuickV1<Char, is_indexed>> {
-    friend PartitionPolicy<is_indexed, RQuickV1<Char, is_indexed>>;
+class RQuickV1 : public PartitionPolicy<Char, is_indexed, RQuickV1<Char, is_indexed>> {
+    friend PartitionPolicy<Char, is_indexed, RQuickV1<Char, is_indexed>>;
 
 private:
     static constexpr int tag = 50352;
@@ -83,19 +83,19 @@ private:
 
     using StringSet = SorterStringSet<Char, is_indexed>;
     using StringPtr = tlx::sort_strings_detail::StringPtr<StringSet>;
+    using Sample = sample::SampleResult<Char, is_indexed>;
 
-    template <typename Samples>
     static dss_schimek::StringContainer<StringSet>
-    sort_samples(Samples&& samples, Communicator const& comm) {
+    sort_samples(Sample&& sample, Communicator const& comm) {
         RQuick2::Comparator<StringPtr> const comp;
         std::mt19937_64 gen{seed + comm.rank()};
         auto const comm_mpi = comm.mpi_communicator();
 
         RQuick::Data<dss_schimek::StringContainer<StringSet>, is_indexed> data;
         if constexpr (is_indexed) {
-            data = {std::move(samples.sample), {samples.indices}};
+            data = {std::move(sample.sample), {sample.indices}};
         } else {
-            data = {std::move(samples), {}};
+            data = {std::move(sample.sample), {}};
         }
         return RQuick::sort(gen, std::move(data), MPI_BYTE, tag, comm_mpi, comp, is_robust);
     }
@@ -111,8 +111,8 @@ private:
 };
 
 template <typename Char, bool is_indexed, bool use_lcps>
-class RQuickV2 : public PartitionPolicy<is_indexed, RQuickV2<Char, is_indexed, use_lcps>> {
-    friend PartitionPolicy<is_indexed, RQuickV2<Char, is_indexed, use_lcps>>;
+class RQuickV2 : public PartitionPolicy<Char, is_indexed, RQuickV2<Char, is_indexed, use_lcps>> {
+    friend PartitionPolicy<Char, is_indexed, RQuickV2<Char, is_indexed, use_lcps>>;
 
 private:
     static constexpr int tag = 23560;
@@ -123,19 +123,15 @@ private:
         use_lcps,
         tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>,
         tlx::sort_strings_detail::StringPtr<StringSet>>;
+    using Sample = sample::SampleResult<Char, is_indexed>;
 
-    template <typename Samples>
-    static RQuick2::Container<StringPtr> sort_samples(Samples&& samples, Communicator const& comm) {
+    static RQuick2::Container<StringPtr> sort_samples(Sample&& sample, Communicator const& comm) {
         std::mt19937_64 gen{seed + comm.rank()};
         auto const comm_mpi = comm.mpi_communicator();
 
-        // todo not a huge fan of this
-        RQuick2::Data<StringPtr> data;
+        RQuick2::Data<StringPtr> data{std::move(sample.sample)};
         if constexpr (is_indexed) {
-            data.raw_strs = std::move(samples.sample);
-            data.indices = std::move(samples.indices);
-        } else {
-            data.raw_strs = std::move(samples);
+            data.indices = std::move(sample.indices);
         }
         // LCP array initialization is done by RQuick
         return RQuick2::sort(std::move(data), tag, gen, comm_mpi);
@@ -153,25 +149,25 @@ private:
 
 // todo consider adding a CLI option for this
 template <typename Char, bool is_indexed>
-class Sequential : public PartitionPolicy<is_indexed, Sequential<Char, is_indexed>> {
-    friend PartitionPolicy<is_indexed, Sequential<Char, is_indexed>>;
+class Sequential : public PartitionPolicy<Char, is_indexed, Sequential<Char, is_indexed>> {
+    friend PartitionPolicy<Char, is_indexed, Sequential<Char, is_indexed>>;
 
 private:
     using StringSet = SorterStringSet<Char, is_indexed>;
     using StringContainer = dss_schimek::StringLcpContainer<StringSet>;
+    using Sample = sample::SampleResult<Char, is_indexed>;
 
-    template <typename Samples>
-    static StringContainer sort_samples(Samples&& samples, Communicator const& comm) {
+    static StringContainer sort_samples(Sample&& sample, Communicator const& comm) {
+        auto recv_sample = comm.allgatherv(kamping::send_buf(sample.sample));
+
         StringContainer global_samples;
         if constexpr (is_indexed) {
-            auto recv_sample = comm.allgatherv(kamping::send_buf(samples.sample));
-            auto recv_indices = comm.allgatherv(kamping::send_buf(samples.indices));
+            auto recv_indices = comm.allgatherv(kamping::send_buf(sample.indices));
             // todo this constructor is not implemented right now
             global_samples = StringContainer{
                 recv_sample.extract_recv_buffer(),
                 recv_indices.extract_recv_buffer()};
         } else {
-            auto recv_sample = comm.allgatherv(kamping::send_buf(samples));
             global_samples = StringContainer{recv_sample.extract_recv_buffer()};
         }
 
