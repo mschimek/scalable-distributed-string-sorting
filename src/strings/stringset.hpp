@@ -402,13 +402,14 @@ struct StringIndex {
     inline size_t getStringIndex() const { return stringIndex; }
 };
 
-template <typename String, typename... Args>
-struct StringData : public Args... {
+template <typename String, typename... Members>
+struct StringData : public Members... {
     template <typename T>
-    static constexpr bool has_member{(std::is_same_v<T, Args> || ...)};
+    static constexpr bool has_member{(std::is_same_v<T, Members> || ...)};
 
     StringData() = default;
 
+    // todo this constructor is kind of questionable
     template <typename... Init>
     StringData(String string, Init... args) : Init{args}...,
                                               string{string} {}
@@ -418,6 +419,14 @@ struct StringData : public Args... {
     inline void setChars(String string_) { string = string_; }
 
     inline String getChars() const { return string; }
+
+    template <typename... NewMembers>
+    inline StringData<String, Members..., NewMembers...> with_members(NewMembers&&... args) const {
+        return {
+            this->string,
+            static_cast<Members const&>(*this)...,
+            std::forward<NewMembers>(args)...};
+    }
 };
 
 template <typename Data, typename T>
@@ -542,7 +551,6 @@ public:
     }
 
     // todo move
-
     size_t get_length(String const& str) const {
         if constexpr (has_member<String, Length>) {
             return str.length;

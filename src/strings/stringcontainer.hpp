@@ -25,8 +25,9 @@ template <typename OutIt, typename Char, typename Init>
 void init_str_len(OutIt out, std::vector<Char>& raw_strings, Init init) {
     for (auto it = raw_strings.begin(); it != raw_strings.end(); ++it, ++out) {
         auto begin = it;
-        while (*it != 0)
+        while (*it != 0) {
             ++it;
+        }
 
         *out = init(&(*begin), static_cast<size_t>(std::distance(begin, it)));
     }
@@ -103,18 +104,6 @@ class InitPolicy<GenericCharLengthIndexPEIndexStringSet<CharType>> {
     using String = typename StringSet::String;
 
 public:
-    // todo
-    template <typename String_>
-    std::vector<String>
-    init_strings(std::vector<Char>& raw_strings, std::vector<String_> const& ss, size_t rank) {
-        std::vector<String> strings(ss.size());
-        auto op = [=, idx = size_t{0}](auto const& str) mutable {
-            return String{str.string, Length{str.length}, StringIndex{idx++}, PEIndex{rank}};
-        };
-        std::transform(std::cbegin(ss), std::cend(ss), std::begin(strings), op);
-        return strings;
-    }
-
     std::vector<String> init_strings(
         std::vector<Char>& raw_strings,
         std::vector<size_t> const& intervals,
@@ -454,10 +443,6 @@ public:
         std::vector<size_t> const& offsets
     )
         : Base{std::move(raw_strings), std::move(lcps), interval_sizes, offsets} {}
-
-    template <typename StringSet>
-    explicit StringLcpContainer(StringLcpContainer<StringSet>&& cont, size_t rank)
-        : Base{cont.release_raw_strings(), cont.release_lcps(), cont.getStrings(), rank} {}
 
     // todo this overload is pretty horrendous
     explicit StringLcpContainer(
