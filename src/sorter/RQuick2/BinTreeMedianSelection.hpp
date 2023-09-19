@@ -152,7 +152,7 @@ StringT<StringPtr> select(
             std::copy_n(strptr.lcp(), strptr.size(), buffers.median_strings.lcp_array());
         }
 
-        buffers.median_strings.orderRawStrings(buffers.char_buffer);
+        buffers.median_strings.make_contiguous(buffers.char_buffer);
         strptr = buffers.median_strings.make_auto_ptr();
     }
 

@@ -29,12 +29,12 @@ inline size_t pow2roundup(size_t x) {
 
 template <bool is_compressed, typename StringSet>
 struct MergeResult {
-    dss_schimek::StringLcpContainer<StringSet> container;
+    StringLcpContainer<StringSet> container;
 };
 
 template <typename StringSet>
 struct MergeResult<true, StringSet> {
-    dss_schimek::StringLcpContainer<StringSet> container;
+    StringLcpContainer<StringSet> container;
     std::vector<size_t> saved_lcps;
 };
 
@@ -52,7 +52,7 @@ static inline MergeResult<is_compressed, typename StringLcpPtr::StringSet> multi
     interval_offsets.resize(K, 0);
     interval_sizes.resize(K, 0);
 
-    dss_schimek::StringLcpContainer<typename StringLcpPtr::StringSet> sorted_strings;
+    StringLcpContainer<typename StringLcpPtr::StringSet> sorted_strings;
     sorted_strings.resize_strings(input_string_ptr.size());
 
     using StringSet = typename StringLcpPtr::StringSet;

@@ -205,7 +205,7 @@ Data select(
         StringContainer container = data.moveToContainer();
         auto medianIndex = _internal::selectMedian(container.size(), async_gen, bit_gen);
 
-        auto requestedRawString = container.getRawString(medianIndex);
+        auto requestedRawString = container.get_raw_string(medianIndex);
         int32_t size = requestedRawString.size();
         measuringTool.addRawCommunication(sizeof(int), "");
         MPI_Bcast(&size, 1, MPI_INT, 0, comm);

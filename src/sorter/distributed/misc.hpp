@@ -78,14 +78,13 @@ inline LocalSplitterInterval compute_splitter_interval(
 } // namespace _internal
 
 template <typename StringSet>
-dss_schimek::StringContainer<StringSet>
-choose_splitters(StringSet const& samples, size_t const num_partitions) {
+StringContainer<StringSet> choose_splitters(StringSet const& samples, size_t const num_partitions) {
     assert(samples.check_order());
 
     size_t const num_splitters = std::min(num_partitions - 1, samples.size());
     size_t const splitter_dist = samples.size() / (num_splitters + 1);
 
-    dss_schimek::StringContainer<StringSet> container;
+    StringContainer<StringSet> container;
     container.strings().reserve(num_splitters);
 
     for (size_t i = 0; i < num_splitters; ++i) {
@@ -93,12 +92,12 @@ choose_splitters(StringSet const& samples, size_t const num_partitions) {
         container.strings().emplace_back(splitter);
     }
 
-    container.orderRawStrings();
+    container.make_contiguous();
     return container;
 }
 
 template <typename StringSet>
-dss_schimek::StringContainer<StringSet> distributed_choose_splitters(
+StringContainer<StringSet> distributed_choose_splitters(
     StringSet const& ss, size_t const num_partitions, Communicator const& comm
 ) {
     auto const splitter_interval =
@@ -119,11 +118,11 @@ dss_schimek::StringContainer<StringSet> distributed_choose_splitters(
     }
 
     auto result = comm.allgatherv(kamping::send_buf(splitter_chars));
-    return dss_schimek::StringContainer<StringSet>{result.extract_recv_buffer()};
+    return StringContainer<StringSet>{result.extract_recv_buffer()};
 }
 
 template <typename StringSet>
-dss_schimek::StringContainer<StringSet> distributed_choose_splitters_indexed(
+StringContainer<StringSet> distributed_choose_splitters_indexed(
     StringSet const& ss, size_t const num_partitions, Communicator const& comm
 ) {
     auto const interval = _internal::compute_splitter_interval(ss.size(), num_partitions, comm);
@@ -145,12 +144,9 @@ dss_schimek::StringContainer<StringSet> distributed_choose_splitters_indexed(
         }
     }
 
-    using dss_schimek::Index;
-    using dss_schimek::make_initializer;
-
     auto char_result = comm.allgatherv(kamping::send_buf(splitter_chars));
     auto idx_result = comm.allgatherv(kamping::send_buf(splitter_idxs));
-    return dss_schimek::StringContainer<StringSet>{
+    return StringContainer<StringSet>{
         char_result.extract_recv_buffer(),
         make_initializer<Index>(idx_result.extract_recv_buffer())};
 }
@@ -221,8 +217,10 @@ template <typename StringSet, typename SplitterSet>
 inline std::vector<size_t> compute_interval_sizes(
     StringSet const& ss, SplitterSet const& splitters, size_t const num_partitions
 ) {
+    using dss_schimek::leq;
+
     std::vector<size_t> intervals;
-    intervals.reserve(splitters.size());
+    intervals.reserve(splitters.size() + 1);
 
     size_t const num_splitters = std::min(num_partitions - 1, ss.size());
     size_t const splitter_dist = ss.size() / (num_splitters + 1);
@@ -232,10 +230,10 @@ inline std::vector<size_t> compute_interval_sizes(
 
         auto const splitter = splitters.get_chars(splitters.at(i), 0);
 
-        while (it != ss.begin() && !dss_schimek::leq(ss.get_chars(ss[it], 0), splitter)) {
+        while (it != ss.begin() && !leq(ss.get_chars(ss[it], 0), splitter)) {
             --it;
         }
-        while (it < ss.end() && dss_schimek::leq(ss.get_chars(ss[it], 0), splitter)) {
+        while (it < ss.end() && leq(ss.get_chars(ss[it], 0), splitter)) {
             ++it;
         }
         intervals.emplace_back(it - ss.begin());

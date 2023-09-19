@@ -608,7 +608,7 @@ StringContainer sortRec(
 
     mergedStrings.clear();
     mergedStrings.shrink_to_fit();
-    recvStrings.deleteAll();
+    recvStrings.delete_all();
 
     tracker.merge_t.stop();
 

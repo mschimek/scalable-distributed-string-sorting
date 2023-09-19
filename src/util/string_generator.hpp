@@ -126,7 +126,7 @@ public:
 
         auto& strings = this->getStrings();
         std::shuffle(strings.begin(), strings.end(), gen);
-        this->orderRawStrings();
+        this->make_contiguous();
     }
 
     static std::string getName() { return "DNRatioGenerator"; }
@@ -369,7 +369,7 @@ public:
         std::random_device rand;
         std::mt19937 gen(rand());
         std::shuffle(begin, begin + genStrings, gen);
-        this->orderRawStrings();
+        this->make_contiguous();
     }
 
     static std::string getName() { return "SkewedDNRatioGenerator"; }

@@ -85,13 +85,12 @@ private:
     using StringPtr = tlx::sort_strings_detail::StringPtr<StringSet>;
     using Sample = sample::SampleResult<Char, is_indexed>;
 
-    static dss_schimek::StringContainer<StringSet>
-    sort_samples(Sample&& sample, Communicator const& comm) {
+    static StringContainer<StringSet> sort_samples(Sample&& sample, Communicator const& comm) {
         RQuick2::Comparator<StringPtr> const comp;
         std::mt19937_64 gen{seed + comm.rank()};
         auto const comm_mpi = comm.mpi_communicator();
 
-        RQuick::Data<dss_schimek::StringContainer<StringSet>, is_indexed> data;
+        RQuick::Data<StringContainer<StringSet>, is_indexed> data;
         if constexpr (is_indexed) {
             data = {std::move(sample.sample), {sample.indices}};
         } else {
@@ -100,7 +99,7 @@ private:
         return RQuick::sort(gen, std::move(data), MPI_BYTE, tag, comm_mpi, comp, is_robust);
     }
 
-    static dss_schimek::StringContainer<StringSet>
+    static StringContainer<StringSet>
     choose_splitters(StringSet const& ss, size_t const num_partitions, Communicator const& comm) {
         if constexpr (is_indexed) {
             return distributed_choose_splitters_indexed(ss, num_partitions, comm);
@@ -137,7 +136,7 @@ private:
         return RQuick2::sort(std::move(data), tag, gen, comm_mpi);
     }
 
-    static dss_schimek::StringContainer<StringSet>
+    static StringContainer<StringSet>
     choose_splitters(StringSet const& ss, size_t const num_partitions, Communicator const& comm) {
         if constexpr (is_indexed) {
             return distributed_choose_splitters_indexed(ss, num_partitions, comm);
@@ -154,13 +153,12 @@ class Sequential : public PartitionPolicy<Char, is_indexed, Sequential<Char, is_
 
 private:
     using StringSet = SorterStringSet<Char, is_indexed>;
-    using StringContainer = dss_schimek::StringLcpContainer<StringSet>;
     using Sample = sample::SampleResult<Char, is_indexed>;
 
-    static StringContainer sort_samples(Sample&& sample, Communicator const& comm) {
+    static StringLcpContainer<StringSet> sort_samples(Sample&& sample, Communicator const& comm) {
         auto recv_sample = comm.allgatherv(kamping::send_buf(sample.sample));
 
-        StringContainer global_samples;
+        StringLcpContainer<StringSet> global_samples;
         if constexpr (is_indexed) {
             auto recv_indices = comm.allgatherv(kamping::send_buf(sample.indices));
             // todo this constructor is not implemented right now
@@ -168,7 +166,7 @@ private:
                 recv_sample.extract_recv_buffer(),
                 recv_indices.extract_recv_buffer()};
         } else {
-            global_samples = StringContainer{recv_sample.extract_recv_buffer()};
+            global_samples = StringLcpContainer{recv_sample.extract_recv_buffer()};
         }
 
         tlx::sort_strings_detail::radixsort_CI3(global_samples.make_string_lcp_ptr(), 0, 0);
@@ -179,7 +177,7 @@ private:
         return global_samples;
     }
 
-    static dss_schimek::StringContainer<StringSet>
+    static StringContainer<StringSet>
     choose_splitters(StringSet const& ss, size_t const num_partitions, Communicator const&) {
         return choose_splitters(ss, num_partitions);
     }

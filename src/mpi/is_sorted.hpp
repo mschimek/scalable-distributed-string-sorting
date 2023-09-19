@@ -90,7 +90,7 @@ private:
     }
 
     void sortInputAndMakeContiguous() {
-        dss_schimek::StringLcpContainer<StringSet> container(std::move(globalInputRawStrings_));
+        StringLcpContainer<StringSet> container(std::move(globalInputRawStrings_));
         auto stringPtr = container.make_string_lcp_ptr();
         tlx::sort_strings_detail::radixsort_CI3(stringPtr, 0, 0);
         globalInputRawStrings_ = makeContiguous(stringPtr);

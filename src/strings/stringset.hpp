@@ -428,8 +428,11 @@ struct StringData : public Members... {
 };
 
 
-static_assert(std::is_default_constructible_v<
-              StringData<char*, Length, StringIndex, Index, PEIndex>>);
+template <typename... Members>
+struct StringDataT {
+    template <typename String>
+    using type = StringData<String, Members...>;
+};
 
 template <typename Data, typename T>
 inline constexpr bool has_member = Data::template has_member<T>;
@@ -571,27 +574,29 @@ private:
     Iterator begin_, end_;
 };
 
+template <typename Char, typename... Members>
+using StringSetT = GenericStringSet<Char, StringDataT<Members...>::template type>;
+
 template <typename Char>
-using GenericCharLengthStringSet = GenericStringSet<Char, StringLength>;
+using GenericCharLengthStringSet = StringSetT<Char, Length>;
 
 using CharLengthStringSet = GenericCharLengthStringSet<char>;
 using UCharLengthStringSet = GenericCharLengthStringSet<unsigned char>;
 
 template <typename Char>
-using GenericCharLengthIndexStringSet = GenericStringSet<Char, StringLengthIndex>;
+using GenericCharLengthIndexStringSet = StringSetT<Char, Length, Index>;
 
 using CharLengthIndexStringSet = GenericCharLengthIndexStringSet<char>;
 using UCharLengthIndexStringSet = GenericCharLengthIndexStringSet<unsigned char>;
 
 template <typename Char>
-using GenericCharIndexPEIndexStringSet = GenericStringSet<Char, StringStringIndexPEIndex>;
+using GenericCharIndexPEIndexStringSet = StringSetT<Char, StringIndex, PEIndex>;
 
 using CharIndexPEIndexStringSet = GenericCharIndexPEIndexStringSet<char>;
 using UCharIndexPEIndexStringSet = GenericCharIndexPEIndexStringSet<unsigned char>;
 
 template <typename Char>
-using GenericCharLengthIndexPEIndexStringSet =
-    GenericStringSet<Char, StringLengthStringIndexPEIndex>;
+using GenericCharLengthIndexPEIndexStringSet = StringSetT<Char, Length, StringIndex, PEIndex>;
 
 using CharLengthIndexPEIndexStringSet = GenericCharLengthIndexPEIndexStringSet<char>;
 using UCharLengthIndexPEIndexStringSet = GenericCharLengthIndexPEIndexStringSet<unsigned char>;
@@ -601,6 +606,15 @@ using UCharLengthIndexPEIndexStringSet = GenericCharLengthIndexPEIndexStringSet<
 /******************************************************************************/
 
 namespace dss_mehnert {
+
+using dss_schimek::GenericStringSet;
+using dss_schimek::Index;
+using dss_schimek::Length;
+using dss_schimek::PEIndex;
+using dss_schimek::StringData;
+using dss_schimek::StringDataT;
+using dss_schimek::StringIndex;
+using dss_schimek::StringSetT;
 
 /*!
  * Class implementing StringSet concept for compressed representations.
@@ -618,9 +632,9 @@ public:
     typedef typename Traits::Iterator Iterator;
     typedef typename Traits::CharIterator CharIterator;
 
-    static_assert(dss_schimek::has_member<String, dss_schimek::Length>);
+    static_assert(dss_schimek::has_member<String, Length>);
 
-    static constexpr bool is_indexed{dss_schimek::has_member<String, dss_schimek::Index>};
+    static constexpr bool is_indexed{dss_schimek::has_member<String, Index>};
 
     //! Construct from begin and end string pointers
     GenericCompressedStringSet() = default;
@@ -680,7 +694,7 @@ public:
     }
 
     static String empty_string() {
-        static String zero{nullptr, dss_schimek::Length{0}};
+        static String zero{nullptr, Length{0}};
         return zero;
     }
 
@@ -689,14 +703,8 @@ private:
     Iterator begin_, end_;
 };
 
-template <typename... Members>
-struct CompressedData {
-    template <typename String>
-    using type = dss_schimek::StringData<String, dss_schimek::Length, Members...>;
-};
-
-template <typename CharType, typename... Members>
+template <typename Char, typename... Members>
 using CompressedStringSet =
-    dss_schimek::GenericStringSet<CharType, CompressedData<Members...>::template type>;
+    GenericCompressedStringSet<Char, StringDataT<Length, Members...>::template type>;
 
 } // namespace dss_mehnert

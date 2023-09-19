@@ -473,16 +473,14 @@ lower_upper_bound(StringPtr const& strptr, StringT<StringPtr> const& value) {
     auto const begin = strptr.active().begin();
     auto const end = strptr.active().end();
 
-    if constexpr (StringPtr::with_lcp) {
-        auto const [lower, lower_lcp] = lower_bound(strptr, value);
-        auto const strptr_geq = strptr.sub(lower - begin, end - lower);
-        auto const [upper, upper_lcp] = dss_mehnert::lcp_upper_bound(strptr_geq, value, lower_lcp);
-        return {lower, upper};
+    auto const [lower, lower_lcp] = lower_bound(strptr, value);
+    auto const strptr_geq = strptr.sub(lower - begin, end - lower);
 
+    if constexpr (StringPtr::with_lcp) {
+        auto const [upper, _] = dss_mehnert::lcp_upper_bound(strptr_geq, value, lower_lcp);
+        return {lower, upper};
     } else {
-        auto const [lower, llcp] = lower_bound(strptr, value);
-        auto const strptr_geq = strptr.sub(lower - begin, end - lower);
-        auto const [upper, ulcp] = upper_bound(strptr_geq, value);
+        auto const [upper, _] = upper_bound(strptr_geq, value);
         return {lower, upper};
     }
 }

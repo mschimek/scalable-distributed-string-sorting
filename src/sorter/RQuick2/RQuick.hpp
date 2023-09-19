@@ -323,7 +323,7 @@ void sortRec(
     // Merge received elements with own elements.
     tracker.merge_t.start(comm);
     merge(own_ptr, buffers.recv_strings.make_auto_ptr(), buffers.merge_strings);
-    buffers.merge_strings.orderRawStrings(buffers.char_buffer);
+    buffers.merge_strings.make_contiguous(buffers.char_buffer);
 
     using std::swap;
     swap(local_strings, buffers.merge_strings);

@@ -76,7 +76,7 @@ void init_strings(
     std::vector<typename StringSet::String>& strings,
     Initializer<Member, InputIt>... initializers_
 ) {
-    constexpr size_t string_length_guess = 128;
+    constexpr size_t string_length_guess = 256;
 
     auto size = [](auto const& initializer) -> size_t {
         return std::distance(initializer.begin, initializer.end);
@@ -84,6 +84,7 @@ void init_strings(
 
     std::tuple<Initializer<Member, InputIt>...> initializers{initializers_...};
     if constexpr (sizeof...(Member) == 0) {
+        strings.clear();
         strings.reserve(raw_strings.size() / string_length_guess);
         init_strings_impl<StringSet>(raw_strings, initializers, std::back_inserter(strings));
 
@@ -139,17 +140,18 @@ public:
 
     friend void swap(StringContainer<StringSet>& lhs, StringContainer<StringSet>& rhs) {
         std::swap(lhs.raw_strings_, rhs.raw_strings_);
-        std::swap(rhs.strings_, rhs.strings_);
+        std::swap(lhs.strings_, rhs.strings_);
     }
 
-    std::vector<unsigned char> getRawString(int64_t i) {
-        if (i < 0 || static_cast<uint64_t>(i) > size())
+    std::vector<unsigned char> get_raw_string(int64_t const i) {
+        if (0 <= i && i < std::ssize(this)) {
+            auto const& str = strings_[i];
+            std::vector<unsigned char> buf(str.getLength() + 1);
+            std::copy(str.string, str.string + str.getLength(), buf.begin());
+            return buf;
+        } else {
             return std::vector<unsigned char>(1, 0);
-
-        auto const length = strings_[i].length + 1;
-        std::vector<unsigned char> rawString(length);
-        std::copy(strings_[i].string, strings_[i].string + length, rawString.begin());
-        return rawString;
+        }
     }
 
     StringSet make_string_set() { return {strings(), strings() + size()}; }
@@ -158,19 +160,19 @@ public:
 
     void resize_strings(size_t const count) { strings_.resize(count, String{}); }
 
-    void deleteRawStrings() {
+    void delete_raw_strings() {
         raw_strings_->clear();
         raw_strings_->shrink_to_fit();
     }
 
-    void deleteStrings() {
+    void delete_strings() {
         strings_.clear();
         strings_.shrink_to_fit();
     }
 
-    void deleteAll() {
-        deleteRawStrings();
-        deleteStrings();
+    void delete_all() {
+        delete_raw_strings();
+        delete_strings();
     }
 
     void set(std::vector<Char>&& raw_strings) { *raw_strings_ = std::move(raw_strings); }
@@ -182,12 +184,12 @@ public:
         _internal::init_strings<StringSet>(*raw_strings_, strings_, initializers...);
     }
 
-    void orderRawStrings() {
+    void make_contiguous() {
         std::vector<Char> new_buffer;
-        orderRawStrings(new_buffer);
+        make_contiguous(new_buffer);
     }
 
-    void orderRawStrings(std::vector<Char>& char_buffer) {
+    void make_contiguous(std::vector<Char>& char_buffer) {
         char_buffer.resize(make_string_set().get_sum_length() + size());
 
         for (auto dest = char_buffer.begin(); auto& string: strings_) {
@@ -200,7 +202,7 @@ public:
         std::swap(*raw_strings_, char_buffer);
     }
 
-    bool isConsistent() {
+    bool is_consistent() const {
         auto const begin = &*raw_strings_->begin(), end = &*raw_strings_->end();
 
         auto const ss = make_string_set();
@@ -275,15 +277,15 @@ public:
         lcps_.resize(this->size(), 0);
     }
 
-    void deleteLcps() {
+    void delete_lcps() {
         lcps_.clear();
         lcps_.shrink_to_fit();
     }
 
-    void deleteAll() {
-        this->deleteRawStrings();
-        this->deleteStrings();
-        deleteLcps();
+    void delete_all() {
+        this->delete_raw_strings();
+        this->delete_strings();
+        delete_lcps();
     }
 
     template <typename StringSet, typename LcpIt>
@@ -327,3 +329,13 @@ private:
 };
 
 } // namespace dss_schimek
+
+
+namespace dss_mehnert {
+
+using dss_schimek::Initializer;
+using dss_schimek::make_initializer;
+using dss_schimek::StringContainer;
+using dss_schimek::StringLcpContainer;
+
+} // namespace dss_mehnert

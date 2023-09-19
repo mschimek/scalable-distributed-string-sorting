@@ -151,7 +151,7 @@ protected:
             return this->AllToAllStringPolicy::alltoallv(container, send_counts, args..., comm);
         };
         auto recv_string_cont = std::apply(alltoallv, extra_all_to_all_args);
-        container.deleteAll();
+        container.delete_all();
         measuring_tool_.stop("all_to_all_strings");
 
         auto size_strings = recv_string_cont.size();
@@ -169,9 +169,7 @@ protected:
 
         if (recv_string_cont.size() > 0) {
             auto& lcps = recv_string_cont.lcps();
-            auto set_lcp = [&lcps](auto const offset) {
-                lcps[offset] = 0;
-            };
+            auto set_lcp = [&lcps](auto const offset) { lcps[offset] = 0; };
             std::for_each(offsets.begin(), offsets.end(), set_lcp);
         }
         measuring_tool_.stop("compute_ranges");
@@ -183,7 +181,7 @@ protected:
             recv_counts
         );
         result.container.set(recv_string_cont.release_raw_strings());
-        recv_string_cont.deleteAll();
+        recv_string_cont.delete_all();
         measuring_tool_.stop("merge_ranges");
 
         measuring_tool_.start("prefix_decompression");
@@ -215,9 +213,10 @@ class DistributedMergeSort : private BaseDistributedMergeSort<
                                  SamplePolicy,
                                  PartitionPolicy> {
 public:
-    using StringLcpContainer = dss_schimek::StringLcpContainer<typename StringPtr::StringSet>;
+    using StringSet = StringPtr::StringSet;
 
-    StringLcpContainer sort(StringLcpContainer&& container, Subcommunicators const& comms) {
+    StringLcpContainer<StringSet>
+    sort(StringLcpContainer<StringSet>&& container, Subcommunicators const& comms) {
         using namespace kamping;
 
         // todo make phase names consistent
