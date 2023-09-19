@@ -362,43 +362,42 @@ Type get_key(StringSet const& ss, const typename StringSet::String& s, size_t de
 /******************************************************************************/
 
 struct Length {
+    using underlying_t = size_t;
+
     static constexpr std::string_view name{"length"};
 
     size_t length;
-
     size_t value() const { return length; }
-
     inline size_t getLength() const { return length; }
 };
 
 struct Index {
+    using underlying_t = uint64_t;
+
     static constexpr std::string_view name{"index"};
 
     uint64_t index;
-
-    size_t value() const { return index; }
-
+    uint64_t value() const { return index; }
     inline uint64_t getIndex() const { return index; }
 };
 
 struct PEIndex {
+    using underlying_t = size_t;
+
     static constexpr std::string_view name{"rank"};
 
     size_t PEIndex;
-
     size_t value() const { return PEIndex; }
-
     inline size_t getPEIndex() const { return PEIndex; }
 };
 
-// todo replace usages of StringIndex with Index
 struct StringIndex {
+    using underlying_t = size_t;
+
     static constexpr std::string_view name{"str_index"};
 
     size_t stringIndex;
-
     size_t value() const { return stringIndex; }
-
     inline size_t getStringIndex() const { return stringIndex; }
 };
 
@@ -409,7 +408,6 @@ struct StringData : public Members... {
 
     StringData() = default;
 
-    // todo this constructor is kind of questionable
     template <typename... Init>
     StringData(String string, Init... args) : Init{args}...,
                                               string{string} {}
@@ -428,6 +426,10 @@ struct StringData : public Members... {
             std::forward<NewMembers>(args)...};
     }
 };
+
+
+static_assert(std::is_default_constructible_v<
+              StringData<char*, Length, StringIndex, Index, PEIndex>>);
 
 template <typename Data, typename T>
 inline constexpr bool has_member = Data::template has_member<T>;
@@ -494,6 +496,7 @@ public:
     typedef typename Traits::CharIterator CharIterator;
 
     static constexpr bool is_indexed{has_member<String, Index>};
+    static constexpr bool has_length{has_member<String, Length>};
 
     //! Construct from begin and end string pointers
     GenericStringSet() = default;
@@ -555,13 +558,11 @@ public:
         if constexpr (has_member<String, Length>) {
             return str.length;
         } else {
-            size_t length = 0;
-            CharIterator it = get_chars(str, 0);
-            while (*it != 0) {
-                ++length;
-                ++it;
+            auto begin = get_chars(str, 0), end = begin;
+            while (!is_end(str, end)) {
+                ++end;
             }
-            return length;
+            return end - begin;
         }
     }
 

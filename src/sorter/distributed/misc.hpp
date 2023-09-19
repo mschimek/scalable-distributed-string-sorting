@@ -145,9 +145,14 @@ dss_schimek::StringContainer<StringSet> distributed_choose_splitters_indexed(
         }
     }
 
+    using dss_schimek::Index;
+    using dss_schimek::make_initializer;
+
+    auto char_result = comm.allgatherv(kamping::send_buf(splitter_chars));
+    auto idx_result = comm.allgatherv(kamping::send_buf(splitter_idxs));
     return dss_schimek::StringContainer<StringSet>{
-        comm.allgatherv(kamping::send_buf(splitter_chars)).extract_recv_buffer(),
-        comm.allgatherv(kamping::send_buf(splitter_idxs)).extract_recv_buffer()};
+        char_result.extract_recv_buffer(),
+        make_initializer<Index>(idx_result.extract_recv_buffer())};
 }
 
 template <typename LcpIt>

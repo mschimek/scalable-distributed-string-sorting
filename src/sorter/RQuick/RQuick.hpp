@@ -40,6 +40,7 @@
 #include "./BinTreeMedianSelection.hpp"
 #include "./RandomBitStore.hpp"
 #include "sorter/distributed/duplicate_sorting.hpp"
+#include "strings/stringcontainer.hpp"
 #include "strings/stringset.hpp"
 #include "util/measuringTool.hpp"
 
@@ -60,9 +61,11 @@ struct Data {
     }
     StringContainer moveToContainer() {
         if constexpr (isIndexed) {
-            return StringContainer(std::move(rawStrings), indices);
+            using dss_schimek::Index;
+            using dss_schimek::make_initializer;
+            return StringContainer{std::move(rawStrings), make_initializer<Index>(indices)};
         } else {
-            return StringContainer(std::move(rawStrings));
+            return StringContainer{std::move(rawStrings)};
         }
     }
 
@@ -589,8 +592,14 @@ StringContainer sortRec(
         if constexpr (StringContainer::isIndexed)
             mergedStringsIndices.push_back(str.index);
     }
+
     if constexpr (StringContainer::isIndexed) {
-        stringContainer.update(std::move(mergedRawStrings), mergedStringsIndices);
+        using dss_schimek::Index;
+        using dss_schimek::make_initializer;
+        stringContainer.update(
+            std::move(mergedRawStrings),
+            make_initializer<Index>(mergedStringsIndices)
+        );
         mergedStringsIndices.clear();
         mergedStringsIndices.shrink_to_fit();
     } else {

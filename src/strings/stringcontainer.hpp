@@ -19,135 +19,88 @@
 #include "strings/stringset.hpp"
 
 namespace dss_schimek {
+
+template <typename Member, typename InputIt>
+struct Initializer {
+    InputIt begin, end;
+};
+
+template <typename Member>
+auto make_initializer(std::vector<typename Member::underlying_t> const& data) {
+    using iterator = std::vector<typename Member::underlying_t>::const_iterator;
+    return Initializer<Member, iterator>{data.begin(), data.end()};
+}
+
 namespace _internal {
 
-template <typename OutIt, typename Char, typename Init>
-void init_str_len(OutIt out, std::vector<Char>& raw_strings, Init init) {
-    for (auto it = raw_strings.begin(); it != raw_strings.end(); ++it, ++out) {
-        auto begin = it;
-        while (*it != 0) {
-            ++it;
-        }
+template <typename StringSet, typename... Member, typename... InputIt, typename OutputIt>
+void init_strings_impl(
+    std::vector<typename StringSet::Char>& raw_strings,
+    std::tuple<Initializer<Member, InputIt>...> initializers,
+    OutputIt dest
+) {
+    using String = StringSet::String;
 
-        *out = init(&(*begin), static_cast<size_t>(std::distance(begin, it)));
+    auto const begin = raw_strings.begin(), end = raw_strings.end();
+
+    size_t i = 0;
+    for (auto char_it = begin; char_it != end; ++char_it, ++i, ++dest) {
+        auto const str_begin = char_it;
+        while (*char_it != 0) {
+            ++char_it;
+        }
+        auto const str_end = char_it;
+
+        if constexpr (StringSet::has_length) {
+            size_t const str_len = std::distance(str_begin, str_end);
+            *dest = std::apply(
+                [=](Initializer<Member, InputIt> const&... init) {
+                    return String{&*str_begin, Length{str_len}, Member{init.begin[i]}...};
+                },
+                initializers
+            );
+        } else {
+            *dest = std::apply(
+                [=](Initializer<Member, InputIt> const&... init) {
+                    return String{&*str_begin, Member{init.begin[i]}...};
+                },
+                initializers
+            );
+        }
     }
 }
 
-template <typename StringSet>
-class InitPolicy {
-    using Char = typename StringSet::Char;
-    using String = typename StringSet::String;
+template <typename StringSet, typename... Member, typename... InputIt>
+void init_strings(
+    std::vector<typename StringSet::Char>& raw_strings,
+    std::vector<typename StringSet::String>& strings,
+    Initializer<Member, InputIt>... initializers_
+) {
+    constexpr size_t string_length_guess = 128;
 
-public:
-    std::vector<String> init_strings(std::vector<Char>& raw_strings) {
-        std::vector<String> strings;
-        strings.reserve(raw_strings.size() / 100);
+    auto size = [](auto const& initializer) -> size_t {
+        return std::distance(initializer.begin, initializer.end);
+    };
 
-        auto init = [](auto str, auto) { return String{str}; };
-        init_str_len(std::back_inserter(strings), raw_strings, init);
-        return strings;
+    std::tuple<Initializer<Member, InputIt>...> initializers{initializers_...};
+    if constexpr (sizeof...(Member) == 0) {
+        strings.reserve(raw_strings.size() / string_length_guess);
+        init_strings_impl<StringSet>(raw_strings, initializers, std::back_inserter(strings));
+
+    } else {
+        assert(std::apply([size](auto const&... x) { return (size(x) == ...); }, initializers));
+        strings.resize(size(std::get<0>(initializers)));
+
+        assert_equal(std::ssize(strings), std::count(raw_strings.begin(), raw_strings.end(), 0));
+        init_strings_impl<StringSet>(raw_strings, initializers, strings.begin());
     }
-};
-
-template <typename CharType>
-class InitPolicy<GenericCharLengthStringSet<CharType>> {
-    using StringSet = GenericCharLengthStringSet<CharType>;
-    using Char = typename StringSet::Char;
-    using String = typename StringSet::String;
-
-public:
-    std::vector<String> init_strings(std::vector<Char>& raw_strings) {
-        std::vector<String> strings;
-        strings.reserve(raw_strings.size() / 100);
-
-        auto init = [](auto str, auto len) { return String{str, Length{len}}; };
-        init_str_len(std::back_inserter(strings), raw_strings, init);
-        return strings;
-    }
-};
-
-template <typename CharType>
-class InitPolicy<GenericCharLengthIndexStringSet<CharType>> {
-    using StringSet = GenericCharLengthIndexStringSet<CharType>;
-    using Char = typename StringSet::Char;
-    using String = typename StringSet::String;
-
-public:
-    std::vector<String> init_strings(std::vector<Char>& raw_strings) {
-        std::vector<String> strings;
-        strings.reserve(raw_strings.size() / 100);
-
-        auto init = [index = size_t{0}](auto str, auto len) mutable {
-            return String{str, Length{len}, Index{index++}};
-        };
-        init_str_len(std::back_inserter(strings), raw_strings, init);
-        return strings;
-    }
-
-    std::vector<String>
-    init_strings(std::vector<Char>& raw_strings, std::vector<uint64_t> const& indices) {
-        std::vector<String> strings;
-        strings.reserve(raw_strings.size() / 100);
-
-        auto init = [index_it = indices.cbegin()](auto str, auto len) mutable {
-            return String{str, Length{len}, Index{*(index_it++)}};
-        };
-        init_str_len(std::back_inserter(strings), raw_strings, init);
-        return strings;
-    }
-};
-
-template <typename CharType>
-class InitPolicy<GenericCharLengthIndexPEIndexStringSet<CharType>> {
-    using StringSet = GenericCharLengthIndexPEIndexStringSet<CharType>;
-    using Char = typename StringSet::Char;
-    using String = typename StringSet::String;
-
-public:
-    std::vector<String> init_strings(
-        std::vector<Char>& raw_strings,
-        std::vector<size_t> const& intervals,
-        std::vector<size_t> const& offsets
-    ) {
-        auto num_strs = std::accumulate(intervals.begin(), intervals.end(), size_t{0});
-        std::vector<String> strings(num_strs);
-
-        auto init = [](auto str, auto len) { return String{str, Length{len}}; };
-        init_str_len(strings.begin(), raw_strings, init);
-
-        auto str = strings.begin();
-        for (size_t PE_idx = 0; PE_idx < intervals.size(); ++PE_idx) {
-            for (size_t str_idx = 0; str_idx < intervals[PE_idx]; ++str_idx, ++str) {
-                str->stringIndex = offsets[PE_idx] + str_idx;
-                str->PEIndex = PE_idx;
-            }
-        }
-        return strings;
-    }
-
-    // todo this overload is still pretty poor
-    std::vector<String> init_strings(
-        std::vector<Char>& raw_strings,
-        std::vector<size_t>&& PE_indices,
-        std::vector<size_t>&& str_indices
-    ) {
-        std::vector<String> strings(PE_indices.size());
-
-        auto str_it = str_indices.cbegin();
-        auto PE_it = PE_indices.cbegin();
-        auto init = [&](auto str, auto len) -> String {
-            return {str, Length{len}, StringIndex{*str_it++}, PEIndex{*PE_it++}};
-        };
-        init_str_len(strings.begin(), raw_strings, init);
-        return strings;
-    }
-};
+}
 
 } // namespace _internal
 
 
-template <typename StringSet_, typename Container>
-class BaseStringContainer : private _internal::InitPolicy<StringSet_> {
+template <typename StringSet_>
+class StringContainer {
 public:
     using StringSet = StringSet_;
     using Char = StringSet::Char;
@@ -155,12 +108,20 @@ public:
     using String = StringSet::String;
 
     using StringPtr = tlx::sort_strings_detail::StringPtr<StringSet>;
-    using AutoStringPtr = StringPtr;
 
     static constexpr bool isIndexed = StringSet::is_indexed;
     static constexpr bool has_lcps = false;
 
-    BaseStringContainer() : raw_strings_{std::make_unique<std::vector<Char>>()} {}
+    // todo constructor with size
+    StringContainer() : raw_strings_{std::make_unique<std::vector<Char>>()} {}
+
+    template <typename... Member, typename... InputIt>
+    explicit StringContainer(
+        std::vector<Char>&& raw_strings, Initializer<Member, InputIt>... initalizers
+    )
+        : raw_strings_{std::make_unique<std::vector<Char>>(std::move(raw_strings))} {
+        _internal::init_strings<StringSet>(*raw_strings_, strings_, initalizers...);
+    }
 
     String operator[](size_t i) { return strings_[i]; }
     String front() { return strings_.front(); }
@@ -176,10 +137,7 @@ public:
     std::vector<Char>&& release_raw_strings() { return std::move(*raw_strings_); }
     std::vector<String>&& release_strings() { return std::move(strings_); }
 
-    friend void swap(
-        BaseStringContainer<StringSet, Container>& lhs,
-        BaseStringContainer<StringSet, Container>& rhs
-    ) {
+    friend void swap(StringContainer<StringSet>& lhs, StringContainer<StringSet>& rhs) {
         std::swap(lhs.raw_strings_, rhs.raw_strings_);
         std::swap(rhs.strings_, rhs.strings_);
     }
@@ -196,8 +154,7 @@ public:
 
     StringSet make_string_set() { return {strings(), strings() + size()}; }
     StringPtr make_string_ptr() { return {make_string_set()}; }
-
-    auto make_auto_ptr() { return static_cast<Container*>(this)->make_auto_ptr_(); }
+    StringPtr make_auto_ptr() { return make_string_ptr(); }
 
     void resize_strings(size_t const count) { strings_.resize(count, String{}); }
 
@@ -219,9 +176,10 @@ public:
     void set(std::vector<Char>&& raw_strings) { *raw_strings_ = std::move(raw_strings); }
     void set(std::vector<String>&& strings) { strings_ = std::move(strings); }
 
-    void update(std::vector<Char>&& raw_strings) {
+    template <typename... Member, typename... InputIt>
+    void update(std::vector<Char>&& raw_strings, Initializer<Member, InputIt>... initializers) {
         set(std::move(raw_strings));
-        update_strings();
+        _internal::init_strings<StringSet>(*raw_strings_, strings_, initializers...);
     }
 
     void orderRawStrings() {
@@ -243,87 +201,77 @@ public:
     }
 
     bool isConsistent() {
-        for (size_t i = 0; i < strings_.size(); ++i) {
-            auto const adressEndByteOfString = strings_[i].getChars() + strings_[i].getLength();
-            if (adressEndByteOfString < raw_strings_->data()
-                || adressEndByteOfString >= raw_strings_->data() + raw_strings_->size())
-                return false;
-            if (*adressEndByteOfString != 0)
-                return false;
-        }
-        return true;
+        auto const begin = &*raw_strings_->begin(), end = &*raw_strings_->end();
+
+        auto const ss = make_string_set();
+        return std::all_of(strings_.begin(), strings_.end(), [=](auto const& str) {
+            return begin <= str.getChars() && str.getChars() + ss.get_length(str) < end;
+        });
     }
 
 protected:
-    static constexpr size_t approx_string_length = 10;
-
     std::unique_ptr<std::vector<Char>> raw_strings_;
     std::vector<String> strings_;
-
-    template <typename... Args>
-    explicit BaseStringContainer(std::vector<Char>&& raw_strings, Args&&... args)
-        : raw_strings_(std::make_unique<std::vector<Char>>(std::move(raw_strings))),
-          strings_(_internal::InitPolicy<StringSet>::init_strings(
-              *raw_strings_, std::forward<Args>(args)...
-          )) {}
-
-    template <typename... Args>
-    void update_strings(Args&&... args) {
-        strings_ = _internal::InitPolicy<StringSet>::init_strings(
-            *raw_strings_,
-            std::forward<Args>(args)...
-        );
-    }
-
-private:
-    StringPtr make_auto_ptr_() { return make_string_ptr(); }
 };
 
-template <typename StringSet_, typename Container>
-class BaseStringLcpContainer : public BaseStringContainer<StringSet_, Container> {
-    friend BaseStringContainer<StringSet_, Container>;
-
+template <typename StringSet_>
+class StringLcpContainer : public StringContainer<StringSet_> {
 public:
-    using Base = BaseStringContainer<StringSet_, Container>;
+    using Base = StringContainer<StringSet_>;
     using Char = Base::Char;
     using String = Base::String;
 
     using StringLcpPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet_, size_t>;
-    using AutoStringPtr = StringLcpPtr;
 
     static constexpr bool has_lcps = true;
 
-    BaseStringLcpContainer() = default;
+    StringLcpContainer() = default;
+
+    template <typename... Member, typename... InputIt>
+    explicit StringLcpContainer(
+        std::vector<Char>&& raw_strings, Initializer<Member, InputIt>... initializer
+    )
+        : Base{std::move(raw_strings), initializer...},
+          lcps_(this->size(), 0) {}
+
+    template <typename... Member, typename... InputIt>
+    explicit StringLcpContainer(
+        std::vector<Char>&& raw_strings,
+        std::vector<size_t>&& lcps,
+        Initializer<Member, InputIt>... initializer
+    )
+        : Base{std::move(raw_strings), initializer...},
+          lcps_{std::move(lcps)} {
+        assert_equal(this->getStrings().size(), lcps_.size());
+    }
 
     size_t* lcp_array() { return lcps_.data(); }
     std::vector<size_t>& lcps() { return lcps_; }
     std::vector<size_t> const& lcps() const { return lcps_; }
     std::vector<size_t>&& release_lcps() { return std::move(lcps_); }
 
-    friend void swap(
-        BaseStringLcpContainer<StringSet_, Container>& lhs,
-        BaseStringLcpContainer<StringSet_, Container>& rhs
-    ) {
+    friend void swap(StringLcpContainer<StringSet_>& lhs, StringLcpContainer<StringSet_>& rhs) {
         std::swap(lhs.raw_strings_, rhs.raw_strings_);
         std::swap(lhs.strings_, rhs.strings_);
         std::swap(lhs.lcps_, rhs.lcps_);
     }
 
     StringLcpPtr make_string_lcp_ptr() { return {this->make_string_set(), this->lcp_array()}; }
+    StringLcpPtr make_auto_ptr() { return make_string_lcp_ptr(); }
 
     void resize_strings(size_t const count) {
+        // todo no idea why this gives produces a warning about potential null
+        // todo pointer dereference with the other overload
         this->strings_.resize(count, String{});
         this->lcps_.resize(count);
     }
 
-    // pull in `set` overlaods from `BaseStringcontainer`
     using Base::set;
-
     void set(std::vector<size_t>&& lcps) { lcps_ = std::move(lcps); }
 
-    void update(std::vector<Char>&& raw_strings) {
-        set(std::move(raw_strings));
-        this->update_strings();
+    template <typename... Member, typename... InputIt>
+    void update(std::vector<Char>&& raw_strings, Initializer<Member, InputIt>... initializers) {
+        Base::update(std::move(raw_strings), initializers...);
         lcps_.resize(this->size(), 0);
     }
 
@@ -374,88 +322,8 @@ public:
         *this->raw_strings_ = std::move(raw_strings);
     }
 
-    bool operator==(Container const& other) {
-        return this->raw_strings() == other.raw_strings() && lcps() == other.lcps();
-    }
-
-protected:
-    std::vector<size_t> lcps_;
-
-    template <typename... Args>
-    explicit BaseStringLcpContainer(
-        std::vector<Char>&& raw_strings, std::vector<size_t>&& lcps, Args&&... args
-    )
-        : Base{std::move(raw_strings), std::forward<Args>(args)...},
-          lcps_(std::move(lcps)) {}
-
 private:
-    StringLcpPtr make_auto_ptr_() { return make_string_lcp_ptr(); }
-};
-
-
-template <typename StringSet_>
-class StringContainer : public BaseStringContainer<StringSet_, StringContainer<StringSet_>> {
-public:
-    using Base = BaseStringContainer<StringSet_, StringContainer<StringSet_>>;
-    using Char = Base::Char;
-
-    StringContainer() = default;
-
-    template <typename... Args>
-    explicit StringContainer(std::vector<Char>&& raw_strings, Args&&... args)
-        : Base{std::move(raw_strings), std::forward<Args>(args)...} {}
-
-    using Base::update;
-
-    template <typename Container_ = StringContainer<StringSet_>>
-    std::enable_if_t<Container_::isIndexed>
-    update(std::vector<Char>&& raw_strings, std::vector<uint64_t> const& indices) {
-        this->set(std::move(raw_strings));
-        this->update_strings(indices);
-    }
-};
-
-template <typename StringSet_>
-class StringLcpContainer
-    : public BaseStringLcpContainer<StringSet_, StringLcpContainer<StringSet_>> {
-public:
-    using Base = BaseStringLcpContainer<StringSet_, StringLcpContainer<StringSet_>>;
-    using Char = Base::Char;
-
-    // static constexpr bool isIndexed = false;
-
-    StringLcpContainer() = default;
-
-    explicit StringLcpContainer(std::vector<Char>&& raw_strings)
-        : Base{std::move(raw_strings), {}} {
-        this->lcps_.resize(this->size(), 0);
-    }
-
-    explicit StringLcpContainer(std::vector<Char>&& raw_strings, std::vector<size_t>&& lcps)
-        : Base{std::move(raw_strings), std::move(lcps)} {}
-
-    // To be used with GenericCharIndexPEIndexStringSet
-    // todo maybe convert this to a named static method?
-    explicit StringLcpContainer(
-        std::vector<Char>&& raw_strings,
-        std::vector<size_t>&& lcps,
-        std::vector<size_t> const& interval_sizes,
-        std::vector<size_t> const& offsets
-    )
-        : Base{std::move(raw_strings), std::move(lcps), interval_sizes, offsets} {}
-
-    // todo this overload is pretty horrendous
-    explicit StringLcpContainer(
-        std::vector<Char>&& raw_strings,
-        std::vector<size_t>&& lcps,
-        std::vector<size_t>&& PE_indices,
-        std::vector<size_t>&& str_indices
-    )
-        : Base{
-            std::move(raw_strings),
-            std::move(lcps),
-            std::move(PE_indices),
-            std::move(str_indices)} {}
+    std::vector<size_t> lcps_;
 };
 
 } // namespace dss_schimek

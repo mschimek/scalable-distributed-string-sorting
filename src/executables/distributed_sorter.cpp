@@ -110,9 +110,7 @@ void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicat
     }
 
     // skip unused levels for multi-level merge sort
-    auto pred = [&](auto const& group_size) {
-        return group_size < comm.size();
-    };
+    auto pred = [&](auto const& group_size) { return group_size < comm.size(); };
     auto first_level = std::find_if(args.levels.begin(), args.levels.end(), pred);
 
     measuring_tool.enableCommVolume();
@@ -204,9 +202,7 @@ void run_prefix_doubling(
     }
 
     // skip unused levels for multi-level merge sort
-    auto pred = [&](auto const& group_size) {
-        return group_size < comm.size();
-    };
+    auto pred = [&](auto const& group_size) { return group_size < comm.size(); };
     auto first_level = std::find_if(args.levels.begin(), args.levels.end(), pred);
 
     measuring_tool.enableCommVolume();
@@ -674,9 +670,7 @@ int main(int argc, char* argv[]) {
     };
 
     std::vector<size_t> levels(levels_param.size());
-    auto stoi = [](auto& str) {
-        return std::stoi(str);
-    };
+    auto stoi = [](auto& str) { return std::stoi(str); };
     std::transform(levels_param.begin(), levels_param.end(), levels.begin(), stoi);
 
     if (!std::is_sorted(levels.begin(), levels.end(), std::greater_equal<>{})) {

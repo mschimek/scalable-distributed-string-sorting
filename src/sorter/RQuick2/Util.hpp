@@ -134,10 +134,14 @@ public:
         using dss_schimek::Index;
         using dss_schimek::Length;
 
-        auto str_begin = this->raw_strs.begin();
+        auto char_it = this->raw_strs.begin();
         auto const end = this->raw_strs.end();
         for (size_t i = 0; auto& str: strptr.active()) {
-            auto const str_end = std::find(str_begin, end, '\0');
+            auto const str_begin = char_it;
+            while (*char_it != 0) {
+                ++char_it;
+            }
+            auto const str_end = char_it;
             size_t const str_len = std::distance(str_begin, str_end);
 
             if constexpr (has_index) {
@@ -146,8 +150,8 @@ public:
                 str = {&*str_begin, Length{str_len}};
             }
 
-            assert(str_end != end);
-            str_begin = str_end + 1, ++i;
+            assert(char_it != end);
+            ++char_it, ++i;
         }
 
         if constexpr (has_lcp) {
@@ -514,8 +518,6 @@ void merge(StringPtr const& strptr1, StringPtr const& strptr2, Container<StringP
 template <typename StringPtr>
 struct Data : public _internal::Data_<StringPtr> {
     using _internal::Data_<StringPtr>::Data_;
-
-    static_assert(std::is_same_v<typename Container<StringPtr>::AutoStringPtr, StringPtr>);
 };
 
 template <typename StringPtr>
