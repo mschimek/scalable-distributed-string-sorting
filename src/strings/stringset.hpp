@@ -429,28 +429,13 @@ struct StringData : public Members... {
 
 
 template <typename... Members>
-struct StringDataT {
+struct StringDataWrapper {
     template <typename String>
     using type = StringData<String, Members...>;
 };
 
 template <typename Data, typename T>
 inline constexpr bool has_member = Data::template has_member<T>;
-
-template <typename String>
-using StringOnly = StringData<String>;
-
-template <typename String>
-using StringLength = StringData<String, Length>;
-
-template <typename String>
-using StringLengthIndex = StringData<String, Length, Index>;
-
-template <typename String>
-using StringStringIndexPEIndex = StringData<String, StringIndex, PEIndex>;
-
-template <typename String>
-using StringLengthStringIndexPEIndex = StringData<String, Length, StringIndex, PEIndex>;
 
 template <typename String, typename... Args>
 std::ostream& operator<<(std::ostream& out, StringData<String, Args...> const& str) {
@@ -575,31 +560,7 @@ private:
 };
 
 template <typename Char, typename... Members>
-using StringSetT = GenericStringSet<Char, StringDataT<Members...>::template type>;
-
-template <typename Char>
-using GenericCharLengthStringSet = StringSetT<Char, Length>;
-
-using CharLengthStringSet = GenericCharLengthStringSet<char>;
-using UCharLengthStringSet = GenericCharLengthStringSet<unsigned char>;
-
-template <typename Char>
-using GenericCharLengthIndexStringSet = StringSetT<Char, Length, Index>;
-
-using CharLengthIndexStringSet = GenericCharLengthIndexStringSet<char>;
-using UCharLengthIndexStringSet = GenericCharLengthIndexStringSet<unsigned char>;
-
-template <typename Char>
-using GenericCharIndexPEIndexStringSet = StringSetT<Char, StringIndex, PEIndex>;
-
-using CharIndexPEIndexStringSet = GenericCharIndexPEIndexStringSet<char>;
-using UCharIndexPEIndexStringSet = GenericCharIndexPEIndexStringSet<unsigned char>;
-
-template <typename Char>
-using GenericCharLengthIndexPEIndexStringSet = StringSetT<Char, Length, StringIndex, PEIndex>;
-
-using CharLengthIndexPEIndexStringSet = GenericCharLengthIndexPEIndexStringSet<char>;
-using UCharLengthIndexPEIndexStringSet = GenericCharLengthIndexPEIndexStringSet<unsigned char>;
+using StringSet = GenericStringSet<Char, StringDataWrapper<Members...>::template type>;
 
 } // namespace dss_schimek
 
@@ -612,9 +573,9 @@ using dss_schimek::Index;
 using dss_schimek::Length;
 using dss_schimek::PEIndex;
 using dss_schimek::StringData;
-using dss_schimek::StringDataT;
+using dss_schimek::StringDataWrapper;
 using dss_schimek::StringIndex;
-using dss_schimek::StringSetT;
+using dss_schimek::StringSet;
 
 /*!
  * Class implementing StringSet concept for compressed representations.
@@ -705,6 +666,6 @@ private:
 
 template <typename Char, typename... Members>
 using CompressedStringSet =
-    GenericCompressedStringSet<Char, StringDataT<Length, Members...>::template type>;
+    GenericCompressedStringSet<Char, StringDataWrapper<Length, Members...>::template type>;
 
 } // namespace dss_mehnert

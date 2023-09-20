@@ -357,7 +357,7 @@ public:
         measuring_tool.start("all_to_all_strings_send_idxs");
         measuring_tool.stop("all_to_all_strings_send_idxs");
 
-        container.deleteAll();
+        container.delete_all();
         measuring_tool.stop("all_to_all_strings_mpi");
 
         measuring_tool.start("container_construction");
@@ -370,8 +370,11 @@ public:
 };
 
 template <bool compress_lcps, typename AllToAllPolicy>
-class StringSetSendImpl<compress_lcps, UCharLengthIndexPEIndexStringSet, AllToAllPolicy> {
-    using StringSet = UCharLengthIndexPEIndexStringSet;
+class StringSetSendImpl<
+    compress_lcps,
+    dss_schimek::StringSet<unsigned char, Length, StringIndex, PEIndex>,
+    AllToAllPolicy> {
+    using StringSet = dss_schimek::StringSet<unsigned char, Length, StringIndex, PEIndex>;
 
 public:
     static StringLcpContainer<StringSet> alltoallv(
@@ -384,14 +387,22 @@ public:
         using dss_mehnert::measurement::MeasuringTool;
         auto& measuring_tool = MeasuringTool::measuringTool();
 
-        auto ss = container.make_string_set();
+        auto const ss = container.make_string_set();
+
+        // todo
+        // std::vector<size_t> send_buf_rank(ss.size()), send_buf_index(ss.size());
+        // auto d_rank = send_buf_rank.begin(), d_index = send_buf_index.begin();
+        // for (auto const& str: ss) {
+        //     *d_rank++ = str.getPEIndex();
+        //     *d_index++ = str.getStringIndex();
+        // }
 
         std::vector<size_t> send_buf_PE_idx(ss.size());
-        auto get_PE_idx = [&ss](auto const& str) { return str.getPEIndex(); };
+        auto get_PE_idx = [](auto const& str) { return str.getPEIndex(); };
         std::transform(ss.begin(), ss.end(), send_buf_PE_idx.begin(), get_PE_idx);
 
         std::vector<size_t> send_buf_str_idx(ss.size());
-        auto get_str_idx = [&ss](auto const& str) { return str.getStringIndex(); };
+        auto get_str_idx = [](auto const& str) { return str.getStringIndex(); };
         std::transform(ss.begin(), ss.end(), send_buf_str_idx.begin(), get_str_idx);
 
         measuring_tool.start("all_to_all_strings_mpi");
@@ -402,7 +413,7 @@ public:
         auto send_lcps = _internal::send_u64s<compress_lcps, AllToAllPolicy>;
         auto recv_buf_lcp = send_lcps(container.lcps(), send_counts, recv_counts, env);
         measuring_tool.stop("all_to_all_strings_send_lcps");
-        container.deleteAll();
+        container.delete_all();
 
         // todo does 7-bit compression make sense for PE and string indices
         // todo this is pretty wasteful in terms of memory
@@ -417,8 +428,8 @@ public:
         StringLcpContainer<StringSet> recv_container{
             std::move(recv_buf_char),
             std::move(recv_buf_lcp),
-            std::move(recv_buf_PE_idx),
-            std::move(recv_buf_str_idx)};
+            make_initializer<StringIndex>(std::move(recv_buf_str_idx)),
+            make_initializer<PEIndex>(std::move(recv_buf_PE_idx))};
         measuring_tool.stop("container_construction");
         return recv_container;
     }
@@ -444,7 +455,7 @@ public:
         measuring_tool.start("all_to_all_strings_intern_copy");
         auto [send_buf_char, send_counts_char] =
             _internal::write_send_buf<compress_prefixes>(container, send_counts);
-        container.deleteRawStrings();
+        container.delete_raw_strings();
         measuring_tool.stop("all_to_all_strings_intern_copy");
 
         using SendImpl = _internal::StringSetSendImpl<compress_lcps, StringSet, AllToAllPolicy>;
@@ -456,12 +467,13 @@ public:
 // Method for the All-To-All exchange of the reduced strings, i.e. only
 // distinguishing prefix - common prefix, in the prefix-doubling-algorithm
 template <bool compress_lcps, bool compress_prefixes, typename StringSet, typename AllToAllPolicy>
-struct AllToAllStringImplPrefixDoubling : private AllToAllStringImpl<
-                                              compress_lcps,
-                                              compress_prefixes,
-                                              UCharLengthIndexPEIndexStringSet,
-                                              AllToAllPolicy> {
-    using StringPEIndexSet = UCharLengthIndexPEIndexStringSet;
+struct AllToAllStringImplPrefixDoubling
+    : private AllToAllStringImpl<
+          compress_lcps,
+          compress_prefixes,
+          dss_schimek::StringSet<unsigned char, Length, StringIndex, PEIndex>,
+          AllToAllPolicy> {
+    using StringPEIndexSet = dss_schimek::StringSet<unsigned char, Length, StringIndex, PEIndex>;
     static constexpr bool Lcps = true;
     static constexpr bool PrefixCompression = compress_prefixes;
 
@@ -480,7 +492,7 @@ struct AllToAllStringImplPrefixDoubling : private AllToAllStringImpl<
         measuring_tool.start("all_to_all_strings_intern_copy");
         auto [send_buf_char, send_counts_char] =
             _internal::write_send_buf<compress_prefixes>(container, send_counts, prefixes);
-        container.deleteRawStrings();
+        container.delete_raw_strings();
         measuring_tool.stop("all_to_all_strings_intern_copy");
 
 
@@ -493,7 +505,7 @@ struct AllToAllStringImplPrefixDoubling : private AllToAllStringImpl<
         auto send_lcps = _internal::send_u64s<compress_lcps, AllToAllPolicy>;
         auto recv_buf_lcp = send_lcps(container.lcps(), send_counts, recv_counts, env);
         measuring_tool.stop("all_to_all_strings_send_lcps");
-        container.deleteAll();
+        container.delete_all();
 
         measuring_tool.start("all_to_all_strings_send_idxs");
         measuring_tool.stop("all_to_all_strings_send_idxs");
@@ -528,7 +540,7 @@ struct AllToAllStringImplPrefixDoubling : private AllToAllStringImpl<
         measuring_tool.start("all_to_all_strings_intern_copy");
         auto [send_buf_char, send_counts_char] =
             _internal::write_send_buf<compress_prefixes>(container, send_counts, prefixes);
-        container.deleteRawStrings();
+        container.delete_raw_strings();
         measuring_tool.stop("all_to_all_strings_intern_copy");
 
         using SendImpl =

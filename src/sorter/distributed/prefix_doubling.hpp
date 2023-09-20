@@ -51,15 +51,16 @@ class PrefixDoublingMergeSort : private BaseDistributedMergeSort<
                                     SamplePolicy,
                                     PartitionPolicy> {
 public:
-    using StringSet = StringPtr::StringSet;
-    using Char = StringSet::Char;
+    using Char = StringPtr::StringSet::Char;
 
-    using StringPEIndexSet = dss_schimek::GenericCharLengthIndexPEIndexStringSet<Char>;
+    using StringPEIndexSet = StringSet<Char, Length, StringIndex, PEIndex>;
     using StringPEIndexPtr = tlx::sort_strings_detail::StringLcpPtr<StringPEIndexSet, size_t>;
     using StringPEIndexContainer = StringLcpContainer<StringPEIndexSet>;
 
-    std::vector<StringIndexPEIndex>
-    sort(StringLcpContainer<StringSet>&& container_, Subcommunicators const& comms) {
+    std::vector<StringIndexPEIndex> sort(
+        StringLcpContainer<typename StringPtr::StringSet>&& container_,
+        Subcommunicators const& comms
+    ) {
         if (comms.comm_root().size() == 1) {
             this->measuring_tool_.start("writeback_permutation");
             std::vector<StringIndexPEIndex> result(container_.size());
@@ -217,8 +218,9 @@ private:
         return permutation;
     }
 
-    StringPEIndexContainer
-    add_rank_and_index(StringLcpContainer<StringSet>&& container, size_t const rank) {
+    StringPEIndexContainer add_rank_and_index(
+        StringLcpContainer<typename StringPtr::StringSet>&& container, size_t const rank
+    ) {
         StringPEIndexContainer result;
         result.resize_strings(container.size());
 

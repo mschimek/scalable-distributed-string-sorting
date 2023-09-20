@@ -697,7 +697,7 @@ int main(int argc, char* argv[]) {
             .strong_scaling = strong_scaling,
             .generator_args = generator_args,
             .levels = levels};
-        arg1<dss_schimek::UCharLengthStringSet>(key, args);
+        arg1<dss_mehnert::StringSet<unsigned char, Length>>(key, args);
     }
 
     return EXIT_SUCCESS;

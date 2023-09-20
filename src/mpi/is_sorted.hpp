@@ -123,7 +123,7 @@ bool is_sorted(StringPtr const& strptr, mpi::environment env) {
     std::vector<unsigned char> smaller_string;
     unsigned char* front;
     unsigned char* back;
-    if constexpr (std::is_same<StringSet, UCharLengthStringSet>::value) {
+    if constexpr (std::is_same_v<StringSet, dss_schimek::StringSet<unsigned char, Length>>) {
         front = has_strings ? (*ss.begin()).string : ss.empty_string().string;
         back = has_strings ? (*(ss.end() - 1)).string : ss.empty_string().string;
         greater_string = dss_schimek::mpi::shift_string<is_left_shift>(front, !has_strings, env);

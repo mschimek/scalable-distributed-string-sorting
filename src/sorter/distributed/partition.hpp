@@ -27,10 +27,8 @@ namespace dss_mehnert {
 namespace partition {
 
 template <typename Char, bool is_indexed>
-using SorterStringSet = std::conditional_t<
-    is_indexed,
-    dss_schimek::GenericCharLengthIndexStringSet<Char>,
-    dss_schimek::GenericCharLengthStringSet<Char>>;
+using SorterStringSet =
+    std::conditional_t<is_indexed, StringSet<Char, Length, Index>, StringSet<Char, Length>>;
 
 template <typename Char, bool is_indexed, typename Derived>
 class PartitionPolicy {
