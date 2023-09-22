@@ -48,8 +48,6 @@
 
 namespace dss_schimek {
 
-typedef uintptr_t lcp_t;
-
 /******************************************************************************/
 // CharIterator -> character group functions
 
@@ -404,7 +402,7 @@ struct StringIndex {
 template <typename String, typename... Members>
 struct StringData : public Members... {
     template <typename T>
-    static constexpr bool has_member{(std::is_same_v<T, Members> || ...)};
+    static constexpr bool has_member = (std::is_same_v<T, Members> || ...);
 
     StringData() = default;
 
@@ -460,10 +458,10 @@ public:
     using String = Data_<Char*>;
 
     //! Iterator over string references: pointer over pointers
-    typedef String* Iterator;
+    using Iterator = String*;
 
     //! iterator of characters in a string
-    typedef Char const* CharIterator;
+    using CharIterator = Char const*;
 };
 
 /*!
@@ -476,15 +474,15 @@ class GenericStringSet : public GenericStringSetTraits<CharType, Data_>,
                              GenericStringSet<CharType, Data_>,
                              GenericStringSetTraits<CharType, Data_>> {
 public:
-    typedef GenericStringSetTraits<CharType, Data_> Traits;
+    using Traits = GenericStringSetTraits<CharType, Data_>;
 
-    typedef typename Traits::Char Char;
-    typedef typename Traits::String String;
-    typedef typename Traits::Iterator Iterator;
-    typedef typename Traits::CharIterator CharIterator;
+    using Char = Traits::Char;
+    using String = Traits::String;
+    using Iterator = Traits::Iterator;
+    using CharIterator = Traits::CharIterator;
 
-    static constexpr bool is_indexed{has_member<String, Index>};
-    static constexpr bool has_length{has_member<String, Length>};
+    static constexpr bool is_indexed = has_member<String, Index>;
+    static constexpr bool has_length = has_member<String, Length>;
 
     //! Construct from begin and end string pointers
     GenericStringSet() = default;
@@ -569,6 +567,7 @@ using StringSet = GenericStringSet<Char, StringDataWrapper<Members...>::template
 namespace dss_mehnert {
 
 using dss_schimek::GenericStringSet;
+using dss_schimek::has_member;
 using dss_schimek::Index;
 using dss_schimek::Length;
 using dss_schimek::PEIndex;
@@ -586,16 +585,16 @@ class GenericCompressedStringSet : public dss_schimek::GenericStringSetTraits<Ch
                                        GenericCompressedStringSet<CharType, Data_>,
                                        dss_schimek::GenericStringSetTraits<CharType, Data_>> {
 public:
-    typedef dss_schimek::GenericStringSetTraits<CharType, Data_> Traits;
+    using Traits = dss_schimek::GenericStringSetTraits<CharType, Data_>;
 
-    typedef typename Traits::Char Char;
-    typedef typename Traits::String String;
-    typedef typename Traits::Iterator Iterator;
-    typedef typename Traits::CharIterator CharIterator;
+    using Char = Traits::Char;
+    using String = Traits::String;
+    using Iterator = Traits::Iterator;
+    using CharIterator = Traits::CharIterator;
 
-    static_assert(dss_schimek::has_member<String, Length>);
+    static_assert(has_member<String, Length>);
 
-    static constexpr bool is_indexed{dss_schimek::has_member<String, Index>};
+    static constexpr bool is_indexed = has_member<String, Index>;
 
     //! Construct from begin and end string pointers
     GenericCompressedStringSet() = default;

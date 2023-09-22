@@ -124,7 +124,7 @@ public:
         std::random_device rand;
         std::mt19937 gen{rand()};
 
-        auto& strings = this->getStrings();
+        auto& strings = this->get_strings();
         std::shuffle(strings.begin(), strings.end(), gen);
         this->make_contiguous();
     }

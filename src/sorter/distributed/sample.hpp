@@ -104,11 +104,11 @@ struct SampleResult<Char, true> {
 
 class NumStringsPolicy {
 public:
-    static constexpr bool isIndexed = false;
+    static constexpr bool is_indexed = false;
     static constexpr std::string_view getName() { return "NumStrings"; }
 
     template <typename StringSet>
-    using Result = SampleResult<typename StringSet::Char, isIndexed>;
+    using Result = SampleResult<typename StringSet::Char, is_indexed>;
 
     template <typename StringSet, typename Params>
     static Result<StringSet>
@@ -136,11 +136,11 @@ public:
 
 class IndexedNumStringsPolicy {
 public:
-    static constexpr bool isIndexed = true;
+    static constexpr bool is_indexed = true;
     static constexpr std::string_view getName() { return "IndexedNumStrings"; }
 
     template <typename StringSet>
-    using Result = SampleResult<typename StringSet::Char, isIndexed>;
+    using Result = SampleResult<typename StringSet::Char, is_indexed>;
 
     template <typename StringSet, typename Params>
     static Result<StringSet>
@@ -173,11 +173,11 @@ public:
 
 class NumCharsPolicy {
 public:
-    static constexpr bool isIndexed = false;
+    static constexpr bool is_indexed = false;
     static constexpr std::string_view getName() { return "NumChars"; }
 
     template <typename StringSet>
-    using Result = SampleResult<typename StringSet::Char, isIndexed>;
+    using Result = SampleResult<typename StringSet::Char, is_indexed>;
 
     template <typename StringSet, typename Params>
     static Result<StringSet>
@@ -212,11 +212,11 @@ public:
 
 class IndexedNumCharsPolicy {
 public:
-    static constexpr bool isIndexed = true;
+    static constexpr bool is_indexed = true;
     static constexpr std::string_view getName() { return "IndexedNumChars"; }
 
     template <typename StringSet>
-    using Result = SampleResult<typename StringSet::Char, isIndexed>;
+    using Result = SampleResult<typename StringSet::Char, is_indexed>;
 
     template <typename StringSet, typename Params>
     static Result<StringSet>

@@ -69,7 +69,7 @@ StringPtr selectMedians(
         local_ss.end(),
         recv_ss.begin(),
         recv_ss.end(),
-        merge_strings.getStrings().begin(),
+        merge_strings.get_strings().begin(),
         Comparator<StringPtr>{}
     );
 
@@ -146,7 +146,7 @@ StringT<StringPtr> select(
 
         auto const& ss = medians.active();
         buffers.median_strings.resize_strings(ss.size());
-        std::copy(ss.begin(), ss.end(), buffers.median_strings.getStrings().begin());
+        std::copy(ss.begin(), ss.end(), buffers.median_strings.get_strings().begin());
         // todo lcp values aren't really worth it here
         if constexpr (StringPtr::with_lcp) {
             std::copy_n(strptr.lcp(), strptr.size(), buffers.median_strings.lcp_array());

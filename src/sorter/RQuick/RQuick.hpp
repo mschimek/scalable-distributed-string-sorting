@@ -309,13 +309,13 @@ inline void split(Communicator& comm, Communicator* subcomm) {
  * number.
  */
 template <class StringContainer>
-Data<StringContainer, StringContainer::isIndexed> middleMostElements(
+Data<StringContainer, StringContainer::is_indexed> middleMostElements(
     StringContainer& cont, size_t k, std::mt19937_64& async_gen, RandomBitStore& bit_gen
 ) {
-    Data<StringContainer, StringContainer::isIndexed> data;
+    Data<StringContainer, StringContainer::is_indexed> data;
     if (cont.size() <= k) {
         data.rawStrings = cont.raw_strings();
-        if constexpr (StringContainer::isIndexed) {
+        if constexpr (StringContainer::is_indexed) {
             data.indices.reserve(cont.size());
             for (auto str: cont.make_string_set())
                 data.indices.push_back(str.index);
@@ -335,7 +335,7 @@ Data<StringContainer, StringContainer::isIndexed> middleMostElements(
         auto const length = ss.get_length(str) + 1;
         auto chars = ss.get_chars(str, 0);
         std::copy_n(chars, length, std::back_inserter(data.rawStrings));
-        if constexpr (StringContainer::isIndexed) {
+        if constexpr (StringContainer::is_indexed) {
             data.indices.push_back(str.index);
         }
     }
@@ -348,7 +348,7 @@ Data<StringContainer, StringContainer::isIndexed> middleMostElements(
  * @param v Local input. The input must be sorted.
  */
 template <class Comp, class StringContainer, class Communicator>
-Data<StringContainer, StringContainer::isIndexed> selectSplitter(
+Data<StringContainer, StringContainer::is_indexed> selectSplitter(
     std::mt19937_64& async_gen,
     RandomBitStore& bit_gen,
     StringContainer& stringContainer,
@@ -357,7 +357,7 @@ Data<StringContainer, StringContainer::isIndexed> selectSplitter(
     int tag,
     Communicator& comm
 ) {
-    Data<StringContainer, StringContainer::isIndexed> local_medians =
+    Data<StringContainer, StringContainer::is_indexed> local_medians =
         middleMostElements(stringContainer, 2, async_gen, bit_gen);
 
     auto res = BinTreeMedianSelection::select(
@@ -454,7 +454,7 @@ void merge(T const* begin1, T const* end1, T const* begin2, T const* end2, T* tb
     std::merge(begin1, end1, begin2, end2, tbegin, std::forward<Comp>(comp));
 }
 
-template <bool isIndexed, class Tracker, class Comp, class StringContainer, class Communicator>
+template <class Tracker, class Comp, class StringContainer, class Communicator>
 StringContainer sortRec(
     std::mt19937_64& gen,
     RandomBitStore& bit_store,
@@ -492,7 +492,7 @@ StringContainer sortRec(
     );
 
     if constexpr (debugQuicksort) {
-        if (StringContainer::isIndexed && pivot.indices.size() != 1) {
+        if (StringContainer::is_indexed && pivot.indices.size() != 1) {
             std::cout << "pivot does not contain exactly one string!";
             std::abort();
         }
@@ -500,7 +500,7 @@ StringContainer sortRec(
 
     String pivotString;
     dss_schimek::Length len{pivot.rawStrings.size() - 1};
-    if constexpr (StringContainer::isIndexed) {
+    if constexpr (StringContainer::is_indexed) {
         pivotString = {pivot.rawStrings.data(), len, dss_schimek::Index{pivot.indices.front()}};
     } else {
         pivotString = {pivot.rawStrings.data(), len};
@@ -512,7 +512,7 @@ StringContainer sortRec(
     tracker.partition_t.start(comm);
 
     auto const* separator = locateSplitter(
-        stringContainer.getStrings(),
+        stringContainer.get_strings(),
         std::forward<Comp>(comp),
         pivotString,
         gen,
@@ -520,10 +520,10 @@ StringContainer sortRec(
         is_robust
     );
 
-    String* send_begin = stringContainer.getStrings().data();
+    String* send_begin = stringContainer.get_strings().data();
     String* send_end = const_cast<String*>(separator);
     String* own_begin = const_cast<String*>(separator);
-    String* own_end = stringContainer.getStrings().data() + stringContainer.getStrings().size();
+    String* own_end = stringContainer.get_strings().data() + stringContainer.get_strings().size();
     if (is_left_group) {
         std::swap(send_begin, own_begin);
         std::swap(send_end, own_end);
@@ -533,9 +533,9 @@ StringContainer sortRec(
     for (auto i = send_begin; i < send_end; ++i) {
         sendCounts += i->getLength() + 1;
     }
-    Data<StringContainer, StringContainer::isIndexed> exchangeData;
+    Data<StringContainer, StringContainer::is_indexed> exchangeData;
     exchangeData.rawStrings.resize(sendCounts);
-    if constexpr (StringContainer::isIndexed)
+    if constexpr (StringContainer::is_indexed)
         exchangeData.indices.resize(send_end - send_begin);
     uint64_t curPos = 0;
     for (auto i = send_begin; i < send_end; ++i) {
@@ -543,7 +543,7 @@ StringContainer sortRec(
         auto chars = i->getChars();
         std::copy_n(chars, length, exchangeData.rawStrings.begin() + curPos);
         curPos += length;
-        if constexpr (StringContainer::isIndexed)
+        if constexpr (StringContainer::is_indexed)
             exchangeData.indices[i - send_begin] = i->index;
     }
     const uint64_t ownCharsSize = stringContainer.char_size() - exchangeData.rawStrings.size();
@@ -555,7 +555,7 @@ StringContainer sortRec(
 
     auto const partner = (myrank + (nprocs / 2)) % nprocs;
 
-    Data<StringContainer, StringContainer::isIndexed> recvData =
+    Data<StringContainer, StringContainer::is_indexed> recvData =
         exchangeData.exchange(comm, partner, tag);
     exchangeData.clear();
 
@@ -572,8 +572,8 @@ StringContainer sortRec(
     merge(
         own_begin,
         own_end,
-        recvStrings.getStrings().begin(),
-        recvStrings.getStrings().end(),
+        recvStrings.get_strings().begin(),
+        recvStrings.get_strings().end(),
         mergedStrings.begin(),
         std::forward<Comp>(comp)
     );
@@ -581,7 +581,7 @@ StringContainer sortRec(
 
     curPos = 0;
     std::vector<uint64_t> mergedStringsIndices;
-    if constexpr (StringContainer::isIndexed) {
+    if constexpr (StringContainer::is_indexed) {
         mergedStringsIndices.reserve(mergedStrings.size());
     }
     for (auto str: mergedStrings) {
@@ -589,11 +589,11 @@ StringContainer sortRec(
         auto chars = str.getChars();
         std::copy_n(chars, length, mergedRawStrings.begin() + curPos);
         curPos += length;
-        if constexpr (StringContainer::isIndexed)
+        if constexpr (StringContainer::is_indexed)
             mergedStringsIndices.push_back(str.index);
     }
 
-    if constexpr (StringContainer::isIndexed) {
+    if constexpr (StringContainer::is_indexed) {
         using dss_schimek::Index;
         using dss_schimek::make_initializer;
         stringContainer.update(
@@ -621,7 +621,7 @@ StringContainer sortRec(
 
         tracker.comm_split_t.stop();
 
-        return sortRec<StringContainer::isIndexed>(
+        return sortRec<StringContainer::is_indexed>(
             gen,
             bit_store,
             std::move(stringContainer),
@@ -639,7 +639,7 @@ StringContainer sortRec(
 
 template <typename StringContainer>
 void sortLocally(StringContainer& container) {
-    if constexpr (StringContainer::isIndexed) {
+    if constexpr (StringContainer::is_indexed) {
         std::vector<uint64_t> lcp(container.size(), 0);
         auto strptr =
             tlx::sort_strings_detail::StringLcpPtr(container.make_string_set(), lcp.data());

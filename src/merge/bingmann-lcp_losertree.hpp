@@ -167,6 +167,8 @@ public:
 
 namespace dss_schimek {
 
+typedef uintptr_t lcp_t;
+
 template <size_t K, typename StringSet>
 class LcpStringLoserTree_ {
     using Stream = dss_schimek::StringLcpPtrMergeAdapter<StringSet>;

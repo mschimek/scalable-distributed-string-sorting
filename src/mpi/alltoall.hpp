@@ -389,21 +389,12 @@ public:
 
         auto const ss = container.make_string_set();
 
-        // todo
-        // std::vector<size_t> send_buf_rank(ss.size()), send_buf_index(ss.size());
-        // auto d_rank = send_buf_rank.begin(), d_index = send_buf_index.begin();
-        // for (auto const& str: ss) {
-        //     *d_rank++ = str.getPEIndex();
-        //     *d_index++ = str.getStringIndex();
-        // }
-
-        std::vector<size_t> send_buf_PE_idx(ss.size());
-        auto get_PE_idx = [](auto const& str) { return str.getPEIndex(); };
-        std::transform(ss.begin(), ss.end(), send_buf_PE_idx.begin(), get_PE_idx);
-
-        std::vector<size_t> send_buf_str_idx(ss.size());
-        auto get_str_idx = [](auto const& str) { return str.getStringIndex(); };
-        std::transform(ss.begin(), ss.end(), send_buf_str_idx.begin(), get_str_idx);
+        std::vector<size_t> send_buf_rank(ss.size()), send_buf_index(ss.size());
+        auto d_rank = send_buf_rank.begin(), d_index = send_buf_index.begin();
+        for (auto const& str: ss) {
+            *d_rank++ = str.getPEIndex();
+            *d_index++ = str.getStringIndex();
+        }
 
         measuring_tool.start("all_to_all_strings_mpi");
         auto recv_buf_char = AllToAllPolicy::alltoallv(send_buf_char.data(), send_counts_char, env);
@@ -419,8 +410,8 @@ public:
         // todo this is pretty wasteful in terms of memory
         measuring_tool.start("all_to_all_strings_send_idxs");
         auto send_idxs = _internal::send_u64s<compress_lcps, AllToAllPolicy>;
-        auto recv_buf_PE_idx = send_idxs(send_buf_PE_idx, send_counts, recv_counts, env);
-        auto recv_buf_str_idx = send_idxs(send_buf_str_idx, send_counts, recv_counts, env);
+        auto recv_buf_rank = send_idxs(send_buf_rank, send_counts, recv_counts, env);
+        auto recv_buf_index = send_idxs(send_buf_index, send_counts, recv_counts, env);
         measuring_tool.stop("all_to_all_strings_send_idxs");
         measuring_tool.stop("all_to_all_strings_mpi");
 
@@ -428,8 +419,8 @@ public:
         StringLcpContainer<StringSet> recv_container{
             std::move(recv_buf_char),
             std::move(recv_buf_lcp),
-            make_initializer<StringIndex>(std::move(recv_buf_str_idx)),
-            make_initializer<PEIndex>(std::move(recv_buf_PE_idx))};
+            make_initializer<StringIndex>(std::move(recv_buf_index)),
+            make_initializer<PEIndex>(std::move(recv_buf_rank))};
         measuring_tool.stop("container_construction");
         return recv_container;
     }

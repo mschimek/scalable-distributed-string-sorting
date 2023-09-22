@@ -221,11 +221,10 @@ private:
     StringPEIndexContainer add_rank_and_index(
         StringLcpContainer<typename StringPtr::StringSet>&& container, size_t const rank
     ) {
-        StringPEIndexContainer result;
-        result.resize_strings(container.size());
+        StringPEIndexContainer result(container.size());
 
-        auto dst = result.getStrings().begin();
-        for (size_t index = 0; auto const& src: container.getStrings()) {
+        auto dst = result.get_strings().begin();
+        for (size_t index = 0; auto const& src: container.get_strings()) {
             *dst++ = src.with_members(StringIndex{index++}, PEIndex{rank});
         }
 

@@ -76,10 +76,10 @@ Data selectMedians(
     Data mergedData;
 
     std::merge(
-        dataContainer.getStrings().begin(),
-        dataContainer.getStrings().end(),
-        recvContainer.getStrings().begin(),
-        recvContainer.getStrings().end(),
+        dataContainer.get_strings().begin(),
+        dataContainer.get_strings().end(),
+        recvContainer.get_strings().begin(),
+        recvContainer.get_strings().end(),
         mergedStrings.begin(),
         std::forward<Comp>(comp)
     );
@@ -115,7 +115,7 @@ Data selectMedians(
                 auto const length = ss.get_length(str) + 1;
                 auto chars = ss.get_chars(str, 0);
                 std::copy_n(chars, length, std::back_inserter(returnData.rawStrings));
-                if constexpr (StringContainer::isIndexed) {
+                if constexpr (StringContainer::is_indexed) {
                     returnData.indices.push_back(str.index);
                 }
             }
@@ -133,7 +133,7 @@ Data selectMedians(
                 auto const length = ss.get_length(str) + 1;
                 auto chars = ss.get_chars(str, 0);
                 std::copy_n(chars, length, std::back_inserter(returnData.rawStrings));
-                if constexpr (StringContainer::isIndexed) {
+                if constexpr (StringContainer::is_indexed) {
                     returnData.indices.push_back(str.index);
                 }
             }
@@ -213,7 +213,7 @@ Data select(
         MPI_Bcast(requestedRawString.data(), size, MPI_BYTE, 0, comm);
         Data returnData{.rawStrings = requestedRawString, .indices = {}};
 
-        if constexpr (StringContainer::isIndexed) {
+        if constexpr (StringContainer::is_indexed) {
             auto stringIndex = medianIndex < 0 ? 0 : container.strings()[medianIndex].index;
 
             measuringTool.addRawCommunication(sizeof(stringIndex), "");
@@ -234,7 +234,7 @@ Data select(
         measuringTool.addRawCommunication(medianSize, "");
         MPI_Bcast(returnData.rawStrings.data(), medianSize, MPI_BYTE, 0, comm);
 
-        if constexpr (StringContainer::isIndexed) {
+        if constexpr (StringContainer::is_indexed) {
             returnData.indices.resize(1);
             measuringTool.addRawCommunication(sizeof(uint64_t), "");
             MPI_Bcast(returnData.indices.data(), sizeof(uint64_t), MPI_BYTE, 0, comm);

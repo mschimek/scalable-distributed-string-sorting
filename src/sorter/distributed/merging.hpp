@@ -52,8 +52,7 @@ static inline MergeResult<is_compressed, typename StringLcpPtr::StringSet> multi
     interval_offsets.resize(K, 0);
     interval_sizes.resize(K, 0);
 
-    StringLcpContainer<typename StringLcpPtr::StringSet> sorted_strings;
-    sorted_strings.resize_strings(input_string_ptr.size());
+    StringLcpContainer<typename StringLcpPtr::StringSet> sorted_strings(input_string_ptr.size());
 
     using StringSet = typename StringLcpPtr::StringSet;
     using MergeAdapter = dss_schimek::StringLcpPtrMergeAdapter<StringSet>;

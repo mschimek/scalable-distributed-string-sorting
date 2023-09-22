@@ -110,11 +110,14 @@ public:
 
     using StringPtr = tlx::sort_strings_detail::StringPtr<StringSet>;
 
-    static constexpr bool isIndexed = StringSet::is_indexed;
+    static constexpr bool is_indexed = StringSet::is_indexed;
     static constexpr bool has_lcps = false;
 
-    // todo constructor with size
     StringContainer() : raw_strings_{std::make_unique<std::vector<Char>>()} {}
+
+    explicit StringContainer(size_t const count)
+        : raw_strings_{std::make_unique<std::vector<Char>>()},
+          strings_(count) {}
 
     template <typename... Member, typename... InputIt>
     explicit StringContainer(
@@ -131,8 +134,8 @@ public:
     size_t size() const { return strings_.size(); }
     bool empty() const { return strings_.empty(); }
     size_t char_size() const { return raw_strings_->size(); }
-    std::vector<String>& getStrings() { return strings_; }
-    std::vector<String> const& getStrings() const { return strings_; }
+    std::vector<String>& get_strings() { return strings_; }
+    std::vector<String> const& get_strings() const { return strings_; }
     std::vector<Char>& raw_strings() { return *raw_strings_; }
     std::vector<Char> const& raw_strings() const { return *raw_strings_; }
     std::vector<Char>&& release_raw_strings() { return std::move(*raw_strings_); }
@@ -143,14 +146,14 @@ public:
         std::swap(lhs.strings_, rhs.strings_);
     }
 
-    std::vector<unsigned char> get_raw_string(int64_t const i) {
+    std::vector<Char> get_raw_string(int64_t const i) {
         if (0 <= i && i < std::ssize(this)) {
             auto const& str = strings_[i];
-            std::vector<unsigned char> buf(str.getLength() + 1);
-            std::copy(str.string, str.string + str.getLength(), buf.begin());
+            std::vector<Char> buf(str.length + 1, 0);
+            std::copy_n(str.string, str.length, buf.begin());
             return buf;
         } else {
-            return std::vector<unsigned char>(1, 0);
+            return std::vector<Char>(1, 0);
         }
     }
 
@@ -158,7 +161,13 @@ public:
     StringPtr make_string_ptr() { return {make_string_set()}; }
     StringPtr make_auto_ptr() { return make_string_ptr(); }
 
-    void resize_strings(size_t const count) { strings_.resize(count, String{}); }
+    void resize_strings(size_t const count) {
+        // for some reason GCC detects a potential null dereference here
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnull-dereference"
+        strings_.resize(count);
+#pragma GCC diagnostic pop
+    }
 
     void delete_raw_strings() {
         raw_strings_->clear();
@@ -192,10 +201,10 @@ public:
     void make_contiguous(std::vector<Char>& char_buffer) {
         char_buffer.resize(make_string_set().get_sum_length() + size());
 
-        for (auto dest = char_buffer.begin(); auto& string: strings_) {
-            auto const chars = string.getChars();
-            string.setChars(&*dest);
-            dest = std::copy_n(chars, string.getLength(), dest);
+        for (auto dest = char_buffer.begin(); auto& str: strings_) {
+            auto const chars = str.getChars();
+            str.setChars(&*dest);
+            dest = std::copy_n(chars, str.length, dest);
             *dest++ = 0;
         }
 
@@ -229,6 +238,8 @@ public:
 
     StringLcpContainer() = default;
 
+    explicit StringLcpContainer(size_t const count) : Base{count}, lcps_(count) {}
+
     template <typename... Member, typename... InputIt>
     explicit StringLcpContainer(
         std::vector<Char>&& raw_strings, Initializer<Member, InputIt>... initializer
@@ -244,7 +255,7 @@ public:
     )
         : Base{std::move(raw_strings), initializer...},
           lcps_{std::move(lcps)} {
-        assert_equal(this->getStrings().size(), lcps_.size());
+        assert_equal(this->strings_.size(), lcps_.size());
     }
 
     size_t* lcp_array() { return lcps_.data(); }
@@ -262,12 +273,11 @@ public:
     StringLcpPtr make_auto_ptr() { return make_string_lcp_ptr(); }
 
     void resize_strings(size_t const count) {
-        // todo no idea why this gives produces a warning about potential null
-        // todo pointer dereference with the other overload
-        this->strings_.resize(count, String{});
+        Base::resize_strings(count);
         this->lcps_.resize(count);
     }
 
+    // todo rename to set_lcps, set_strings, ...
     using Base::set;
     void set(std::vector<size_t>&& lcps) { lcps_ = std::move(lcps); }
 

@@ -448,7 +448,7 @@ void arg2b(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
     using namespace dss_mehnert::partition;
     using Char = typename StringSet::Char;
 
-    constexpr bool is_indexed = Sampler::isIndexed;
+    constexpr bool is_indexed = Sampler::is_indexed;
 
     tlx_die_verbose_if(
         key.rquick_v1 && key.rquick_lcp,
@@ -463,7 +463,7 @@ void arg2b(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
         }
     } else {
         if (key.rquick_lcp) {
-            if constexpr (CliOptions::enable_rquick_v1) {
+            if constexpr (CliOptions::enable_rquick_lcp) {
                 arg3<StringSet, Generator, Sampler, RQuickV2<Char, is_indexed, true>>(key, args);
             } else {
                 die_with_feature("CLI_ENABLE_RQUICK_LCP");
