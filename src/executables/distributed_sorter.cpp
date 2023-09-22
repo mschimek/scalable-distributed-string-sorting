@@ -480,19 +480,19 @@ void arg2(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
 
     switch (key.sample_policy) {
         case PolicyEnums::SampleString::numStrings: {
-            arg2b<Args..., NumStringsPolicy>(key, args);
+            arg2b<Args..., StringBasedSampling<false>>(key, args);
             break;
         }
         case PolicyEnums::SampleString::numChars: {
-            arg2b<Args..., NumCharsPolicy>(key, args);
+            arg2b<Args..., CharBasedSampling<false>>(key, args);
             break;
         }
         case PolicyEnums::SampleString::indexedNumStrings: {
-            arg2b<Args..., IndexedNumStringsPolicy>(key, args);
+            arg2b<Args..., StringBasedSampling<true>>(key, args);
             break;
         }
         case PolicyEnums::SampleString::indexedNumChars: {
-            arg2b<Args..., IndexedNumCharsPolicy>(key, args);
+            arg2b<Args..., CharBasedSampling<true>>(key, args);
             break;
         }
     };

@@ -1,6 +1,7 @@
 build/
 .cache/
 target/
+gauntlet.sh
 
 # Gitignore for the following technologies: C++, CMake
 
