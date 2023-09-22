@@ -57,7 +57,7 @@ public:
         auto splitter_set = chosen_splitters.make_string_set();
         std::vector<size_t> interval_sizes;
         if constexpr (is_indexed) {
-            // tood this is being computed redundantly multiple times
+            // todo this is being computed redundantly multiple times
             auto local_offset = sample::get_local_offset(strptr.size(), comm);
             interval_sizes =
                 compute_interval_binary_index(strptr.active(), splitter_set, local_offset);
@@ -99,11 +99,7 @@ private:
 
     static StringContainer<StringSet>
     choose_splitters(StringSet const& ss, size_t const num_partitions, Communicator const& comm) {
-        if constexpr (is_indexed) {
-            return distributed_choose_splitters_indexed(ss, num_partitions, comm);
-        } else {
-            return distributed_choose_splitters(ss, num_partitions, comm);
-        }
+        return choose_splitters_distributed(ss, num_partitions, comm);
     }
 };
 
@@ -136,11 +132,7 @@ private:
 
     static StringContainer<StringSet>
     choose_splitters(StringSet const& ss, size_t const num_partitions, Communicator const& comm) {
-        if constexpr (is_indexed) {
-            return distributed_choose_splitters_indexed(ss, num_partitions, comm);
-        } else {
-            return distributed_choose_splitters(ss, num_partitions, comm);
-        }
+        return choose_splitters_distributed(ss, num_partitions, comm);
     }
 };
 
@@ -159,10 +151,9 @@ private:
         StringLcpContainer<StringSet> global_samples;
         if constexpr (is_indexed) {
             auto recv_indices = comm.allgatherv(kamping::send_buf(sample.indices));
-            // todo this constructor is not implemented right now
             global_samples = StringContainer{
                 recv_sample.extract_recv_buffer(),
-                recv_indices.extract_recv_buffer()};
+                make_initializer<Index>(recv_indices.extract_recv_buffer())};
         } else {
             global_samples = StringLcpContainer{recv_sample.extract_recv_buffer()};
         }

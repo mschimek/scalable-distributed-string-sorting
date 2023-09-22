@@ -17,6 +17,7 @@
 #include <kamping/collectives/exscan.hpp>
 #include <kamping/mpi_ops.hpp>
 #include <kamping/named_parameters.hpp>
+#include <tlx/math/div_ceil.hpp>
 #include <tlx/sort/strings/radix_sort.hpp>
 
 #include "mpi/communicator.hpp"
@@ -32,29 +33,18 @@ struct LocalSplitterInterval {
     size_t num_splitters;
     size_t splitter_dist;
 
-    bool contains(size_t const global_index) const {
-        return minimum() <= global_index && global_index < maximum();
-    }
+    size_t size() const { return end() - begin(); }
+
+    size_t begin() const { return std::max<size_t>(1, tlx::div_ceil(minimum(), splitter_dist)); }
+    size_t end() const { return std::max<size_t>(1, tlx::div_ceil(maximum(), splitter_dist)); }
 
     size_t minimum() const { return global_prefix; }
     size_t maximum() const { return global_prefix + local_sample_size; }
 
     size_t local_index(size_t const global_index) const { return global_index - global_prefix; }
 
-    template <typename StringSet>
-    size_t accumulate_lengths(StringSet const& ss) const {
-        using std::begin;
-
-        // todo this is not great
-        size_t splitter_size = 0;
-        for (size_t i = 1; i <= num_splitters; ++i) {
-            size_t const global_index = i * splitter_dist;
-            if (contains(global_index)) {
-                auto const str = ss[begin(ss) + local_index(global_index)];
-                splitter_size += ss.get_length(str) + 1;
-            }
-        }
-        return splitter_size;
+    bool contains(size_t const global_index) const {
+        return minimum() <= global_index && global_index < maximum();
     }
 };
 
@@ -97,58 +87,48 @@ StringContainer<StringSet> choose_splitters(StringSet const& samples, size_t con
 }
 
 template <typename StringSet>
-StringContainer<StringSet> distributed_choose_splitters(
+StringContainer<StringSet> choose_splitters_distributed(
     StringSet const& ss, size_t const num_partitions, Communicator const& comm
 ) {
+    constexpr size_t length_guess = 256;
+
     auto const splitter_interval =
         _internal::compute_splitter_interval(ss.size(), num_partitions, comm);
-    auto const splitter_size = splitter_interval.accumulate_lengths(ss);
-    std::vector<unsigned char> splitter_chars(splitter_size);
+    std::vector<typename StringSet::Char> splitter_chars;
+    splitter_chars.reserve(splitter_interval.size() * length_guess);
 
-    auto dest = splitter_chars.begin();
-    for (size_t i = 1; i <= splitter_interval.num_splitters; ++i) {
-        size_t const global_idx = i * splitter_interval.splitter_dist;
-
-        if (splitter_interval.contains(global_idx)) {
-            auto const local_idx = splitter_interval.local_index(global_idx);
-            auto const& str = ss.at(local_idx);
-            auto const length = ss.get_length(str) + 1;
-            dest = std::copy_n(ss.get_chars(str, 0), length, dest);
-        }
+    std::vector<uint64_t> splitter_idxs;
+    if constexpr (StringSet::is_indexed) {
+        splitter_idxs.reserve(splitter_interval.size());
     }
 
-    auto result = comm.allgatherv(kamping::send_buf(splitter_chars));
-    return StringContainer<StringSet>{result.extract_recv_buffer()};
-}
+    for (size_t i = splitter_interval.begin(); i < splitter_interval.end(); ++i) {
+        size_t const global_idx = i * splitter_interval.splitter_dist;
+        size_t const local_idx = splitter_interval.local_index(global_idx);
+        assert(splitter_interval.contains(global_idx));
+        assert(local_idx < ss.size());
 
-template <typename StringSet>
-StringContainer<StringSet> distributed_choose_splitters_indexed(
-    StringSet const& ss, size_t const num_partitions, Communicator const& comm
-) {
-    auto const interval = _internal::compute_splitter_interval(ss.size(), num_partitions, comm);
-    auto const splitter_size = interval.accumulate_lengths(ss);
-    std::vector<unsigned char> splitter_chars(splitter_size);
-    std::vector<uint64_t> splitter_idxs;
+        auto const& str = ss.at(local_idx);
+        auto const length = ss.get_length(str);
+        auto const chars = ss.get_chars(str, 0);
+        std::copy_n(chars, length, std::back_inserter(splitter_chars));
+        splitter_chars.emplace_back(0);
 
-    auto dest = splitter_chars.begin();
-    for (size_t i = 1; i <= interval.num_splitters; ++i) {
-        size_t const global_idx = i * interval.splitter_dist;
-
-        // todo don't assume null termination
-        if (interval.contains(global_idx)) {
-            auto const local_idx = interval.local_index(global_idx);
-            auto const& str = ss.at(local_idx);
-            auto const length = ss.get_length(str) + 1;
-            dest = std::copy_n(ss.get_chars(str, 0), length, dest);
-            splitter_idxs.push_back(str.index);
+        if constexpr (StringSet::is_indexed) {
+            splitter_idxs.emplace_back(str.index);
         }
     }
 
     auto char_result = comm.allgatherv(kamping::send_buf(splitter_chars));
-    auto idx_result = comm.allgatherv(kamping::send_buf(splitter_idxs));
-    return StringContainer<StringSet>{
-        char_result.extract_recv_buffer(),
-        make_initializer<Index>(idx_result.extract_recv_buffer())};
+
+    if constexpr (StringSet::is_indexed) {
+        auto idx_result = comm.allgatherv(kamping::send_buf(splitter_idxs));
+        return StringContainer<StringSet>{
+            char_result.extract_recv_buffer(),
+            make_initializer<Index>(idx_result.extract_recv_buffer())};
+    } else {
+        return StringContainer<StringSet>{char_result.extract_recv_buffer()};
+    }
 }
 
 template <typename LcpIt>
