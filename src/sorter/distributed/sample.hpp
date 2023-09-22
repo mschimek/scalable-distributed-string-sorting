@@ -21,6 +21,7 @@
 #include <kamping/named_parameters.hpp>
 #include <tlx/die.hpp>
 
+#include "ips4o/ips4o.hpp"
 #include "mpi/communicator.hpp"
 
 namespace dss_mehnert {
@@ -53,17 +54,18 @@ struct SampleParams : public Args... {
     uint64_t num_partitions;
     uint64_t sampling_factor;
 
-    constexpr uint64_t get_num_splitters(uint64_t local_size) const noexcept {
+    // todo rename get_sample_size
+    constexpr uint64_t get_num_samples(uint64_t const local_size) const noexcept {
         return std::min(sampling_factor * (num_partitions - 1), local_size);
     }
 };
 
-inline size_t get_local_offset(size_t local_size, Communicator const& comm) {
+inline size_t get_local_offset(size_t const local_size, Communicator const& comm) {
     return comm.exscan_single(kamping::send_buf(local_size), kamping::op(std::plus<>{}));
 }
 
 template <typename StringSet, typename Params>
-static size_t get_num_chars(StringSet const& ss, Params const& params) {
+static size_t accumulate_chars(StringSet const& ss, Params const& params) {
     if constexpr (Params::has_dist_prefixes) {
         return std::accumulate(std::begin(params.prefixes), std::end(params.prefixes), size_t{0});
     } else {
@@ -73,20 +75,20 @@ static size_t get_num_chars(StringSet const& ss, Params const& params) {
 }
 
 template <typename StringSet, typename Params>
-static size_t get_splitter_len(
+static size_t get_string_len(
     StringSet const& ss, typename StringSet::String const& str, size_t index, Params const& params
 ) {
-    size_t splitter_len;
+    size_t string_len;
     if constexpr (Params::has_dist_prefixes) {
-        splitter_len = params.prefixes[index];
+        string_len = params.prefixes[index];
     } else {
-        splitter_len = ss.get_length(str);
+        string_len = ss.get_length(str);
     }
 
     if constexpr (Params::has_max_length) {
-        return std::min(params.max_length, splitter_len);
+        return std::min(params.max_length, string_len);
     } else {
-        return splitter_len;
+        return string_len;
     }
 }
 
@@ -107,38 +109,80 @@ struct SampleResult<Char, true> {
 namespace _internal {
 
 template <bool is_random>
-class StringIndexSample;
+class StringIndexSampler;
 
 template <>
-class StringIndexSample<false> {
+class StringIndexSampler<false> {
 public:
-    StringIndexSample() = delete;
+    StringIndexSampler() = delete;
 
-    StringIndexSample(size_t strings, size_t splitters)
-        : splitter_dist_{static_cast<double>(strings) / static_cast<double>(splitters + 1)} {}
+    StringIndexSampler(size_t const strings, size_t const samples)
+        : sample_dist_{static_cast<double>(strings) / static_cast<double>(samples + 1)} {}
 
-    size_t get_splitter(size_t splitter) {
-        return static_cast<size_t>(static_cast<double>(splitter) * splitter_dist_);
+    size_t get_sample(size_t const index) {
+        return static_cast<size_t>(static_cast<double>(index) * sample_dist_);
     }
 
 private:
-    double splitter_dist_;
+    double sample_dist_;
 };
 
 template <>
-class StringIndexSample<true> {
+class StringIndexSampler<true> {
 public:
-    StringIndexSample() = delete;
+    StringIndexSampler() = delete;
 
-    StringIndexSample(size_t strings, size_t)
+    StringIndexSampler(size_t const strings, size_t)
         : gen_{}, // todo what to do about seed here?
-          dist_{0, strings == 0 ? 0 : strings - 1} {}
+          dist_{0, std::max<size_t>(1, strings) - 1} {}
 
-    size_t get_splitter(size_t) { return dist_(gen_); }
+    size_t get_sample(size_t) { return dist_(gen_); }
 
 private:
     std::mt19937_64 gen_;
     std::uniform_int_distribution<size_t> dist_;
+};
+
+template <bool is_random>
+class CharIndexSampler;
+
+template <>
+class CharIndexSampler<false> {
+public:
+    CharIndexSampler() = delete;
+
+    CharIndexSampler(size_t const num_chars, size_t const num_samples)
+        : sample_dist_{num_chars / (num_samples + 1)},
+          current_boundary_{0} {}
+
+    size_t next() { return current_boundary_ += sample_dist_; }
+
+private:
+    // todo this could also use double instead of size_t
+    size_t sample_dist_;
+    size_t current_boundary_;
+};
+
+template <>
+class CharIndexSampler<true> {
+public:
+    CharIndexSampler() = delete;
+
+    CharIndexSampler(size_t const num_chars, size_t const num_samples)
+        : sample_(num_samples),
+          current_{0} {
+        // todo again, what about seed here
+        std::mt19937_64 gen;
+        std::uniform_int_distribution<size_t> dist{0, std::max<size_t>(1, num_chars) - 1};
+        std::generate(sample_.begin(), sample_.end(), [&] { return dist(gen); });
+        ips4o::sort(sample_.begin(), sample_.end());
+    }
+
+    size_t next() { return sample_[current_++]; }
+
+private:
+    std::vector<size_t> sample_;
+    size_t current_;
 };
 
 } // namespace _internal
@@ -157,28 +201,28 @@ public:
     template <typename StringSet, typename Params>
     static Result<StringSet>
     sample_splitters(StringSet const& ss, Params const& params, Communicator const& comm) {
-        size_t const num_splitters = params.get_num_splitters(ss.size());
+        size_t const num_samples = params.get_num_samples(ss.size());
         size_t const local_offset = is_indexed ? get_local_offset(ss.size(), comm) : 0;
 
-        _internal::StringIndexSample<is_random> sample{ss.size(), num_splitters};
+        _internal::StringIndexSampler<is_random> sampler{ss.size(), num_samples};
 
         Result<StringSet> result;
-        result.sample.reserve(num_splitters * (100 + 1u)); // todo
+        result.sample.reserve(num_samples * (100 + 1u)); // todo
         if constexpr (is_indexed) {
-            result.indices.resize(num_splitters);
+            result.indices.resize(num_samples);
         }
 
-        for (size_t i = 0; i < num_splitters; ++i) {
-            auto const splitter_index = sample.get_splitter(i + 1);
-            auto const splitter = ss[ss.begin() + splitter_index];
-            auto const splitter_len = get_splitter_len(ss, splitter, splitter_index, params);
-            auto const splitter_chars = ss.get_chars(splitter, 0);
+        for (size_t i = 0; i < num_samples; ++i) {
+            auto const sample_index = sampler.get_sample(i + 1); // todo ????
+            auto const sample = ss[ss.begin() + sample_index];
+            auto const sample_len = get_string_len(ss, sample, sample_index, params);
+            auto const sample_chars = ss.get_chars(sample, 0);
 
-            std::copy_n(splitter_chars, splitter_len, std::back_inserter(result.sample));
+            std::copy_n(sample_chars, sample_len, std::back_inserter(result.sample));
             result.sample.push_back(0);
 
             if constexpr (is_indexed) {
-                result.indices[i] = local_offset + splitter_index;
+                result.indices[i] = local_offset + sample_index;
             }
         }
         return result;
@@ -199,38 +243,39 @@ public:
     template <typename StringSet, typename Params>
     static Result<StringSet>
     sample_splitters(StringSet const& ss, Params const& params, Communicator const& comm) {
-        size_t const num_chars = get_num_chars(ss, params);
-        size_t const num_splitters = params.get_num_splitters(ss.size());
-        size_t const splitter_dist = num_chars / (num_splitters + 1);
+        size_t const num_chars = accumulate_chars(ss, params);
+        size_t const num_samples = params.get_num_samples(ss.size());
         size_t const local_offset = is_indexed ? get_local_offset(ss.size(), comm) : 0;
 
+        _internal::CharIndexSampler<is_random> sampler{num_chars, num_samples};
+
         Result<StringSet> result;
-        // todo better estimate for length of splitters
-        result.sample.reserve(num_splitters * (100 + 1));
+        // todo better estimate for length of strings
+        result.sample.reserve(num_samples * (100 + 1));
         if constexpr (is_indexed) {
-            result.indices.reserve(num_splitters);
+            result.indices.reserve(num_samples);
         }
 
         auto string = ss.begin(), index = 0;
-        size_t next_boundary = splitter_dist, current_chars = 0;
-        for (size_t i = 0; i < num_splitters && string != ss.end(); ++i) {
+        size_t current_chars = 0;
+        for (size_t i = 0; i < num_samples && string != ss.end(); ++i) {
+            auto const next_boundary = sampler.next();
             for (; current_chars < next_boundary && string != ss.end(); ++string, ++index) {
-                current_chars += get_splitter_len(ss, ss[string], index, params);
+                current_chars += get_string_len(ss, ss[string], index, params);
             }
-            next_boundary += splitter_dist;
 
             assert_unequal(string, ss.begin());
 
-            auto const splitter = ss[string - 1];
-            auto const splitter_index = index - 1;
-            auto const splitter_len = get_splitter_len(ss, splitter, splitter_index, params);
-            auto const splitter_chars = ss.get_chars(splitter, 0);
+            auto const sample = ss[string - 1];
+            auto const sample_index = index - 1;
+            auto const sample_len = get_string_len(ss, sample, sample_index, params);
+            auto const sample_chars = ss.get_chars(sample, 0);
 
-            std::copy_n(splitter_chars, splitter_len, std::back_inserter(result.sample));
+            std::copy_n(sample_chars, sample_len, std::back_inserter(result.sample));
             result.sample.push_back(0);
 
             if constexpr (is_indexed) {
-                result.indices.emplace_back(local_offset + splitter_index);
+                result.indices.emplace_back(local_offset + sample_index);
             }
         }
         return result;
