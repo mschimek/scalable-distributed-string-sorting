@@ -119,6 +119,10 @@ public:
         : raw_strings_{std::make_unique<std::vector<Char>>()},
           strings_(count) {}
 
+    StringContainer(std::vector<Char>&& raw_strings, std::vector<String>&& strings)
+        : raw_strings_{std::make_unique<std::vector<Char>>(std::move(raw_strings))},
+          strings_{std::move(strings)} {}
+
     template <typename... Member, typename... InputIt>
     explicit StringContainer(
         std::vector<Char>&& raw_strings, Initializer<Member, InputIt>... initalizers
@@ -239,6 +243,12 @@ public:
     StringLcpContainer() = default;
 
     explicit StringLcpContainer(size_t const count) : Base{count}, lcps_(count) {}
+
+    StringLcpContainer(
+        std::vector<Char>&& raw_strings, std::vector<String>&& strings, std::vector<size_t>&& lcps
+    )
+        : Base{std::move(raw_strings), std::move(strings)},
+          lcps_{std::move(lcps)} {}
 
     template <typename... Member, typename... InputIt>
     explicit StringLcpContainer(

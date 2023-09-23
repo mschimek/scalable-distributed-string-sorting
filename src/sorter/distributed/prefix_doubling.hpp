@@ -58,48 +58,34 @@ public:
     using StringPEIndexContainer = StringLcpContainer<StringPEIndexSet>;
 
     std::vector<StringIndexPEIndex> sort(
-        StringLcpContainer<typename StringPtr::StringSet>&& container_,
-        Subcommunicators const& comms
+        StringLcpContainer<typename StringPtr::StringSet>&& container, Subcommunicators const& comms
     ) {
-        if (comms.comm_root().size() == 1) {
-            this->measuring_tool_.start("writeback_permutation");
-            std::vector<StringIndexPEIndex> result(container_.size());
-            for (size_t idx = 0; auto& elem: result) {
-                elem.stringIndex = idx++;
-            }
-            this->measuring_tool_.stop("writeback_permutation");
-            return result;
-        } else {
-            this->measuring_tool_.start("init_container");
-            // create a new container with additional rank and string index data members
-            auto container = add_rank_and_index(std::move(container_), comms.comm_root().rank());
-            this->measuring_tool_.stop("init_container");
+        this->measuring_tool_.start("init_container");
+        // create a new container with additional rank and string index data members
+        auto const rank = comms.comm_root().rank();
+        auto index_container = add_rank_and_index(std::move(container), rank);
+        this->measuring_tool_.stop("init_container");
 
-            return sort(std::move(container), comms);
-        }
+        return sort(std::move(index_container), comms);
     }
 
 
     std::vector<StringIndexPEIndex>
     sort(StringPEIndexContainer&& container, Subcommunicators const& comms) {
+        this->measuring_tool_.setPhase("local_sorting");
+
+        auto strptr = container.make_string_lcp_ptr();
+        this->measuring_tool_.add(container.char_size(), "chars_in_set");
+
+        this->measuring_tool_.start("local_sorting", "sort_locally");
+        tlx::sort_strings_detail::radixsort_CI3(strptr, 0, 0);
+        this->measuring_tool_.stop("local_sorting", "sort_locally", comms.comm_root());
+
         if (comms.comm_root().size() == 1) {
-            std::vector<StringIndexPEIndex> result(container.size());
-            for (size_t idx = 0; auto& elem: result) {
-                elem.stringIndex = idx++;
-            }
-            return result;
+            return write_permutation(strptr.active());
         } else {
-            this->measuring_tool_.setPhase("local_sorting");
-
-            auto string_ptr = container.make_string_lcp_ptr();
-            this->measuring_tool_.add(container.char_size(), "chars_in_set");
-
-            this->measuring_tool_.start("local_sorting", "sort_locally");
-            tlx::sort_strings_detail::radixsort_CI3(string_ptr, 0, 0);
-            this->measuring_tool_.stop("local_sorting", "sort_locally", comms.comm_root());
-
             this->measuring_tool_.start("bloomfilter", "bloomfilter_overall");
-            auto prefixes = compute_distinguishing_prefixes(string_ptr, comms);
+            auto prefixes = compute_distinguishing_prefixes(strptr, comms);
             this->measuring_tool_.stop("bloomfilter", "bloomfilter_overall", comms.comm_root());
 
             auto sorted_container = sort_impl_(
@@ -110,12 +96,11 @@ public:
             );
 
             this->measuring_tool_.setRound(0);
-            return writeback_permutation(sorted_container);
+            return write_permutation(sorted_container.make_string_set());
         }
     }
 
 private:
-    static constexpr bool debug = false;
     static constexpr uint64_t start_depth = 8;
 
     template <
@@ -148,10 +133,7 @@ private:
         auto&& extra_sample_args,
         auto&& extra_all_to_all_args
     ) {
-        using std::begin;
-        using std::end;
-
-        if (begin(comms) == end(comms)) {
+        if (comms.begin() == comms.end()) {
             // special case for single level sort
             this->measuring_tool_.start("sort_globally", "final_sorting");
             auto sorted_container = this->sort_exhaustive(
@@ -166,7 +148,7 @@ private:
         }
 
         size_t round = 0;
-        auto level = begin(comms);
+        auto level = comms.begin();
         {
             // first level of multi-level sort, consider distinguishing prefixes
             this->measuring_tool_.start("sort_globally", "partial_sorting");
@@ -180,7 +162,7 @@ private:
             this->measuring_tool_.setRound(++round);
         }
 
-        for (; level != end(comms); ++level) {
+        for (; level != comms.end(); ++level) {
             // intermediate level of multi-level sort, don't consider distinguishing prefixes
             this->measuring_tool_.start("sort_globally", "partial_sorting");
             container = this->sort_partial(std::move(container), *level, {}, {});
@@ -201,15 +183,11 @@ private:
         return sorted_container;
     }
 
-    std::vector<StringIndexPEIndex> writeback_permutation(auto& sorted_container) {
-        using std::begin;
-        using std::end;
-
+    std::vector<StringIndexPEIndex> write_permutation(StringPEIndexSet const& ss) {
         this->measuring_tool_.start("writeback_permutation");
-        auto ss = sorted_container.make_string_set();
         std::vector<StringIndexPEIndex> permutation(ss.size());
 
-        std::transform(begin(ss), end(ss), permutation.begin(), [&ss](auto const& str) {
+        std::transform(ss.begin(), ss.end(), permutation.begin(), [&ss](auto const& str) {
             return StringIndexPEIndex{str.getStringIndex(), str.getPEIndex()};
         });
         this->measuring_tool_.stop("writeback_permutation");
@@ -221,34 +199,31 @@ private:
     StringPEIndexContainer add_rank_and_index(
         StringLcpContainer<typename StringPtr::StringSet>&& container, size_t const rank
     ) {
-        StringPEIndexContainer result(container.size());
-
-        auto dst = result.get_strings().begin();
+        std::vector<typename StringPEIndexSet::String> strings(container.size());
+        auto d_string = strings.begin();
         for (size_t index = 0; auto const& src: container.get_strings()) {
-            *dst++ = src.with_members(StringIndex{index++}, PEIndex{rank});
+            *d_string++ = src.with_members(StringIndex{index++}, PEIndex{rank});
         }
 
-        result.set(container.release_raw_strings());
-        result.set(container.release_lcps());
-        return result;
+        return {container.release_raw_strings(), std::move(strings), container.release_lcps()};
     }
 
     std::vector<size_t>
-    compute_distinguishing_prefixes(StringPEIndexPtr str_ptr, Subcommunicators const& comms) {
+    compute_distinguishing_prefixes(StringPEIndexPtr strptr, Subcommunicators const& comms) {
         this->measuring_tool_.start("bloomfilter_init");
-        auto const& ss = str_ptr.active();
+        auto const& ss = strptr.active();
         BloomFilter bloom_filter{comms, ss.size()};
         std::vector<size_t> results(ss.size());
         this->measuring_tool_.stop("bloomfilter_init");
 
         size_t round = 0;
         this->measuring_tool_.setRound(round);
-        std::vector<size_t> candidates = bloom_filter.filter(str_ptr, start_depth, results);
+        std::vector<size_t> candidates = bloom_filter.filter(strptr, start_depth, results);
 
         for (size_t i = start_depth * 2; i < std::numeric_limits<size_t>::max(); i *= 2) {
             this->measuring_tool_.add(candidates.size(), "bloomfilter_numberCandidates");
             this->measuring_tool_.start("bloomfilter_allreduce");
-            auto all_empty = comms.comm_root().allreduce_single(
+            auto const all_empty = comms.comm_root().allreduce_single(
                 kamping::send_buf({candidates.empty()}),
                 kamping::op(std::logical_and<>{})
             );
@@ -259,7 +234,7 @@ private:
             }
 
             this->measuring_tool_.setRound(++round);
-            candidates = bloom_filter.filter(str_ptr, i, results, candidates);
+            candidates = bloom_filter.filter(strptr, i, results, candidates);
         }
 
         this->measuring_tool_.setRound(0);

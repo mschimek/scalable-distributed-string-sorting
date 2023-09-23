@@ -134,9 +134,9 @@ protected:
         return sorted_container;
     }
 
-    template <typename... AllToAllArgs>
+    template <typename Container, typename... AllToAllArgs>
     auto exchange_and_merge(
-        auto&& container,
+        Container&& container,
         std::vector<size_t>& send_counts,
         Communicator const& comm,
         std::tuple<AllToAllArgs...> extra_all_to_all_args
