@@ -18,11 +18,14 @@ namespace measurement {
 class MeasuringTool {
 public:
     using NonTimerRecord = PhaseCounterRoundDescription;
-    using TimerKey = PhaseRoundDescription;
+    using TimerKey = PhaseRoundQuantileDescription;
     using TimerValue = CounterPerPhase;
 
     template <typename Communicator>
     MeasuringTool(Communicator const& comm) : is_root_(comm.is_root()) {}
+
+    // todo
+    // explicit MeasuringTool(MeasuringTool const& measuring_tool):
 
     static MeasuringTool& measuringTool() {
         static MeasuringTool measuringTool{kamping::comm_world()};
@@ -54,7 +57,10 @@ public:
             if (state.verbose && is_root_) {
                 std::cout << description << std::endl;
             }
-            state.timer.start({state.phase, state.round, std::string{description}}, {});
+            state.timer.start(
+                {state.phase, state.round, state.quantile, std::string{description}},
+                {}
+            );
         }
     }
 
@@ -68,7 +74,7 @@ public:
             if (state.verbose && is_root_) {
                 std::cout << description << std::endl;
             }
-            state.timer.stop({state.phase, state.round, std::string{description}});
+            state.timer.stop({state.phase, state.round, state.quantile, std::string{description}});
         }
     }
 
@@ -84,7 +90,7 @@ public:
             if (state.verbose && is_root_) {
                 std::cout << desc << std::endl;
             }
-            state.timer.stop({state.phase, state.round, std::string{desc}}, comm);
+            state.timer.stop({state.phase, state.round, state.quantile, std::string{desc}}, comm);
         }
     }
 
@@ -117,6 +123,7 @@ public:
     std::string getPrefix() const { return state.prefix; }
     void setPhase(std::string_view phase) { state.phase = phase; }
     void setRound(size_t round) { state.round = round; }
+    void setQuantile(size_t quantile) { state.quantile = quantile; }
 
 private:
     struct State {
@@ -126,6 +133,7 @@ private:
         std::string prefix = "";
         std::string phase = "none";
         size_t round = 0;
+        size_t quantile = 0;
         NonTimer<NonTimerRecord, SimpleValue> non_timer;
         LeanNonTimer<PhaseValue> comm_volume = {"comm_volume"};
         Timer<TimerKey, TimerValue> timer;

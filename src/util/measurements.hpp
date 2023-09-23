@@ -31,6 +31,7 @@ inline Summary<T> describe(InputIt begin, InputIt end) {
     return {*min, *max, avg, sum};
 }
 
+// todo this code could use tlx functions
 template <typename T, typename InputIt>
 inline T get_median(InputIt begin, InputIt end) {
     auto size = static_cast<size_t>(std::distance(begin, end));
@@ -69,26 +70,31 @@ struct PhaseValue {
     }
 };
 
-struct PhaseRoundDescription {
+struct PhaseRoundQuantileDescription {
     using PseudoKey = std::string;
 
     std::string phase;
     std::size_t round;
+    std::size_t quantile;
     std::string description;
 
     std::string const& pseudoKey() const { return phase; }
 
-    friend auto operator<=>(PhaseRoundDescription const& lhs, PhaseRoundDescription const& rhs) {
-        return std::tie(lhs.phase, lhs.round, lhs.description)
-               <=> std::tie(rhs.phase, rhs.round, rhs.description);
+    friend auto operator<=>(
+        PhaseRoundQuantileDescription const& lhs, PhaseRoundQuantileDescription const& rhs
+    ) {
+        return std::tie(lhs.phase, lhs.round, lhs.quantile, lhs.description)
+               <=> std::tie(rhs.phase, rhs.round, rhs.quantile, rhs.description);
     }
 
-    friend std::ostream& operator<<(ostream_wrapper out, PhaseRoundDescription const& data) {
+    friend std::ostream&
+    operator<<(ostream_wrapper out, PhaseRoundQuantileDescription const& data) {
         return out.stream << "phase=" << data.phase << " round=" << data.round
-                          << " key=" << data.description;
+                          << " quantile=" << data.quantile << " key=" << data.description;
     }
 
-    friend std::ostream& operator<<(std::ostream& stream, PhaseRoundDescription const& record) {
+    friend std::ostream&
+    operator<<(std::ostream& stream, PhaseRoundQuantileDescription const& record) {
         return stream << "{" << Result << record << "}";
     }
 };
