@@ -66,28 +66,6 @@ inline StringGenerator getStringGenerator(size_t i) {
     }
 }
 
-enum class SampleString {
-    numStrings = 0,
-    numChars = 1,
-    indexedNumStrings = 2,
-    indexedNumChars = 3
-};
-
-inline SampleString getSampleString(size_t i) {
-    switch (i) {
-        case 0:
-            return SampleString::numStrings;
-        case 1:
-            return SampleString::numChars;
-        case 2:
-            return SampleString::indexedNumStrings;
-        case 3:
-            return SampleString::indexedNumChars;
-        default:
-            std::abort();
-    }
-}
-
 enum class MPIRoutineAllToAll { small = 0, directMessages = 1, combined = 2 };
 
 inline MPIRoutineAllToAll getMPIRoutineAllToAll(size_t i) {
@@ -136,7 +114,9 @@ inline Redistribution getRedistribution(size_t i) {
 
 struct CombinationKey {
     StringGenerator string_generator;
-    SampleString sample_policy;
+    bool sample_chars;
+    bool sample_indexed;
+    bool sample_random;
     MPIRoutineAllToAll alltoall_routine;
     Subcommunicators subcomms;
     bool rquick_v1;

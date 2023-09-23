@@ -269,19 +269,22 @@ std::string get_result_prefix(
     // clang-format off
     return std::string("RESULT")
            + (args.experiment.empty() ? "" : (" experiment=" + args.experiment))
-           + " num_procs=" + std::to_string(comm.size())
-           + " num_strings=" + std::to_string(args.num_strings)
-           + " len_strings=" + std::to_string(args.generator_args.len_strings)
-           + " num_levels=" + std::to_string(args.levels.size())
-           + " iteration=" + std::to_string(args.iteration)
-           + " strong_scaling=" + std::to_string(args.strong_scaling)
-           + " rquick_v1=" + std::to_string(key.rquick_v1)
-           + " rquick_lcp=" + std::to_string(key.rquick_lcp)
-           + " lcp_compression=" + std::to_string(key.lcp_compression)
+           + " num_procs="          + std::to_string(comm.size())
+           + " num_strings="        + std::to_string(args.num_strings)
+           + " len_strings="        + std::to_string(args.generator_args.len_strings)
+           + " num_levels="         + std::to_string(args.levels.size())
+           + " iteration="          + std::to_string(args.iteration)
+           + " strong_scaling="     + std::to_string(args.strong_scaling)
+           + " sample_chars="       + std::to_string(key.sample_chars)
+           + " sample_indexed="     + std::to_string(key.sample_indexed)
+           + " sample_random="      + std::to_string(key.sample_random)
+           + " rquick_v1="          + std::to_string(key.rquick_v1)
+           + " rquick_lcp="         + std::to_string(key.rquick_lcp)
+           + " lcp_compression="    + std::to_string(key.lcp_compression)
            + " prefix_compression=" + std::to_string(key.prefix_compression)
-           + " prefix_doubling=" + std::to_string(key.prefix_doubling)
-           + " grid_bloomfilter=" + std::to_string(key.grid_bloomfilter)
-           + " dn_ratio=" + std::to_string(args.generator_args.DN_ratio);
+           + " prefix_doubling="    + std::to_string(key.prefix_doubling)
+           + " grid_bloomfilter="   + std::to_string(key.grid_bloomfilter)
+           + " dn_ratio="           + std::to_string(args.generator_args.DN_ratio);
     // clang-format on
 }
 
@@ -302,7 +305,6 @@ void print_config(
     // todo print string generator arguments
     // todo partition policy
     std::cout << prefix << " key=string_generator name=" << StringGenerator::getName() << "\n";
-    std::cout << prefix << " key=sampler name=" << SamplePolicy::getName() << "\n";
     std::cout << prefix << " key=alltoall_routine name=" << MPIAllToAllRoutine::getName() << "\n";
     std::cout << prefix << " key=subcomms name=" << Subcommunicators::get_name() << "\n";
     std::cout << prefix << " key=redistribution name=" << RedistributionPolicy::get_name() << "\n";
@@ -478,24 +480,27 @@ template <typename... Args>
 void arg2(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
     using namespace dss_mehnert::sample;
 
-    switch (key.sample_policy) {
-        case PolicyEnums::SampleString::numStrings: {
-            arg2b<Args..., StringBasedSampling<false>>(key, args);
-            break;
-        }
-        case PolicyEnums::SampleString::numChars: {
-            arg2b<Args..., CharBasedSampling<false>>(key, args);
-            break;
-        }
-        case PolicyEnums::SampleString::indexedNumStrings: {
-            arg2b<Args..., StringBasedSampling<true>>(key, args);
-            break;
-        }
-        case PolicyEnums::SampleString::indexedNumChars: {
-            arg2b<Args..., CharBasedSampling<true>>(key, args);
-            break;
+    auto with_random = [=]<bool indexed, bool random> {
+        if (key.sample_chars) {
+            arg2b<Args..., CharBasedSampling<indexed, random>>(key, args);
+        } else {
+            arg2b<Args..., StringBasedSampling<indexed, random>>(key, args);
         }
     };
+
+    auto with_indexed = [=]<bool indexed> {
+        if (key.sample_random) {
+            with_random.template operator()<indexed, true>();
+        } else {
+            with_random.template operator()<indexed, false>();
+        }
+    };
+
+    if (key.sample_chars) {
+        with_indexed.template operator()<true>();
+    } else {
+        with_indexed.template operator()<false>();
+    }
 }
 
 template <typename StringSet>
@@ -535,6 +540,9 @@ int main(int argc, char* argv[]) {
     bool check = false;
     bool check_exhaustive = false;
     bool strong_scaling = false;
+    bool sample_chars = false;
+    bool sample_indexed = false;
+    bool sample_random = false;
     bool rquick_v1 = false;
     bool rquick_lcp = false;
     bool prefix_compression = false;
@@ -542,7 +550,6 @@ int main(int argc, char* argv[]) {
     bool prefix_doubling = false;
     bool grid_bloomfilter = false;
     unsigned int generator = static_cast<int>(PolicyEnums::StringGenerator::DNRatioGenerator);
-    unsigned int sample_policy = static_cast<int>(PolicyEnums::SampleString::numStrings);
     unsigned int alltoall_routine = static_cast<int>(PolicyEnums::MPIRoutineAllToAll::combined);
     unsigned int comm_split = static_cast<int>(PolicyEnums::Subcommunicators::grid);
     unsigned int redistribution = static_cast<int>(PolicyEnums::Redistribution::naive);
@@ -575,13 +582,9 @@ int main(int argc, char* argv[]) {
     cp.add_size_t('B', "max-len-strings", len_strings_max, "maximum length of generated strings");
     cp.add_size_t('i', "num-iterations", num_iterations, "number of sorting iterations to run");
     cp.add_flag('x', "strong-scaling", strong_scaling, "perform a strong scaling experiment");
-    cp.add_unsigned(
-        's',
-        "sample-policy",
-        sample_policy,
-        "strategy to use for splitter sampling "
-        "([0]=strings, 1=chars, 2=indexedStrings, 3=indexedChars)"
-    );
+    cp.add_flag('C', "sample-chars", sample_chars, "use character based sampling");
+    cp.add_flag('I', "sample-indexed", sample_indexed, "use indexed sampling");
+    cp.add_flag('R', "sample-random", sample_random, "use random sampling");
     cp.add_flag('Q', "rquick-v1", rquick_v1, "use version 1 of RQuick (defaults to v2)");
     cp.add_flag('L', "rquick-lcp", rquick_lcp, "use LCP values in RQuick (only with v2)");
     cp.add_flag(
@@ -625,14 +628,14 @@ int main(int argc, char* argv[]) {
         "([0]=naive, 1=simple-strings, 2=simple-chars)"
     );
     cp.add_flag(
-        'c',
-        "check",
+        'v',
+        "verify",
         check,
         "check if strings/chars were lost and that the result is sorted"
     );
     cp.add_flag(
-        'C',
-        "check-exhaustive",
+        'V',
+        "verify-full",
         check_exhaustive,
         "check that the the output exactly matches the input"
     );
@@ -648,7 +651,9 @@ int main(int argc, char* argv[]) {
 
     PolicyEnums::CombinationKey key{
         .string_generator = PolicyEnums::getStringGenerator(generator),
-        .sample_policy = PolicyEnums::getSampleString(sample_policy),
+        .sample_chars = sample_chars,
+        .sample_indexed = sample_indexed,
+        .sample_random = sample_random,
         .alltoall_routine = PolicyEnums::getMPIRoutineAllToAll(alltoall_routine),
         .subcomms = PolicyEnums::getSubcommunicators(comm_split),
         .rquick_v1 = rquick_v1,

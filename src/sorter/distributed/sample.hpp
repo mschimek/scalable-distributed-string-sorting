@@ -193,8 +193,6 @@ public:
     static constexpr bool is_indexed = is_indexed_;
     static constexpr bool is_random = is_random_;
 
-    static constexpr std::string_view getName() { return "NumStrings"; }
-
     template <typename StringSet>
     using Result = SampleResult<typename StringSet::Char, is_indexed>;
 
@@ -234,8 +232,6 @@ class CharBasedSampling {
 public:
     static constexpr bool is_indexed = is_indexed_;
     static constexpr bool is_random = is_random_;
-
-    static constexpr std::string_view getName() { return "NumChars"; }
 
     template <typename StringSet>
     using Result = SampleResult<typename StringSet::Char, is_indexed>;
