@@ -77,17 +77,21 @@ void lcp_merge(StringLcpPtr const& lhs, StringLcpPtr const& rhs, StringLcpPtr co
     _internal::MergeAdapter<StringSet, LcpType> defender{lhs.active(), lhs.lcp()};
     _internal::MergeAdapter<StringSet, LcpType> contender{rhs.active(), rhs.lcp()};
 
-    auto d_str = dest.active().begin();
+    auto d_ss = dest.active();
+    auto d_str = d_ss.begin();
     auto d_lcp = dest.lcp();
 
     LcpType curr_lcp = 0;
 
     if (!defender.empty() && !contender.empty()) {
-        auto defender_chars = defender.first_chars(0);
-        auto contender_chars = contender.first_chars(0);
+        auto const& defender_str = defender.first_string();
+        auto const& contender_str = contender.first_string();
 
-        curr_lcp = calc_lcp(defender_chars, contender_chars);
-        if (defender_chars[curr_lcp] > contender_chars[curr_lcp]) {
+        curr_lcp = calc_lcp(d_ss, defender_str, contender_str);
+
+        auto const defender_char = defender.first_chars(curr_lcp);
+        auto const contender_char = contender.first_chars(curr_lcp);
+        if (d_ss.is_less(contender_str, contender_char, defender_str, defender_char)) {
             defender.swap(contender);
         }
     }
@@ -111,15 +115,17 @@ void lcp_merge(StringLcpPtr const& lhs, StringLcpPtr const& rhs, StringLcpPtr co
             *d_lcp++ = defender.first_lcp();
 
         } else {
+            auto const& defender_str = defender.first_string();
+            auto const& contender_str = contender.first_string();
             auto defender_chars = defender.first_chars(curr_lcp);
             auto contender_chars = contender.first_chars(curr_lcp);
 
             auto const old_lcp = curr_lcp;
-            while (*defender_chars != 0 && *defender_chars == *contender_chars) {
+            while (d_ss.is_equal(defender_str, defender_chars, contender_str, contender_chars)) {
                 ++defender_chars, ++contender_chars, ++curr_lcp;
             }
 
-            if (*defender_chars < *contender_chars) {
+            if (d_ss.is_less(defender_str, defender_chars, contender_str, contender_chars)) {
                 *d_str++ = defender.first_string();
                 *d_lcp++ = defender.first_lcp();
             } else {
@@ -129,13 +135,7 @@ void lcp_merge(StringLcpPtr const& lhs, StringLcpPtr const& rhs, StringLcpPtr co
             }
         }
 
-        assert_equal(
-            calc_lcp(
-                dest.active().get_chars(dest.active()[d_str - 2], 0),
-                dest.active().get_chars(dest.active()[d_str - 1], 0)
-            ),
-            *(d_lcp - 1)
-        );
+        assert_equal(calc_lcp(d_ss, d_ss[d_str - 2], d_ss[d_str - 1]), *(d_lcp - 1));
     }
 
     // copy remaining strings and LCP values
@@ -145,14 +145,14 @@ void lcp_merge(StringLcpPtr const& lhs, StringLcpPtr const& rhs, StringLcpPtr co
     } else if (!contender.empty()) {
         d_str = std::copy(contender.active().begin(), contender.active().end(), d_str);
 
-        // special case for first contender string (a nasty bug layeth burried here)
+        // special case for first contender string
         *d_lcp++ = curr_lcp;
         d_lcp = std::copy_n(contender.lcp() + 1, contender.size() - 1, d_lcp);
     }
 
     assert_equal(d_str, dest.active().end());
     assert_equal(std::distance(dest.lcp(), d_lcp), std::ssize(dest));
-    assert(dest.active().check_order());
+    assert(d_ss.check_order());
 }
 
 } // namespace merge
