@@ -27,10 +27,17 @@
 namespace dss_mehnert {
 namespace sample {
 
-template <typename T, typename... Args>
-struct is_present {
-    static constexpr bool value{(std::is_same_v<T, Args> || ...)};
-};
+inline size_t get_sample_size(
+    size_t const local_size, size_t const num_partitions, size_t const sampling_factor
+) {
+    return std::min(sampling_factor * (num_partitions - 1), local_size);
+}
+
+inline size_t get_local_offset(size_t const local_size, Communicator const& comm) {
+    return comm.exscan_single(kamping::send_buf(local_size), kamping::op(std::plus<>{}));
+}
+
+struct NoExtraArg {};
 
 struct MaxLength {
     size_t max_length;
@@ -40,56 +47,45 @@ struct DistPrefixes {
     std::vector<size_t> const& prefixes;
 };
 
-template <typename... Args>
-struct SampleParams : public Args... {
-    static constexpr bool has_max_length{is_present<MaxLength, Args...>::value};
-    static constexpr bool has_dist_prefixes{is_present<DistPrefixes, Args...>::value};
-
-    // todo is this constructor really necessary
-    SampleParams(uint64_t num_partitions_, uint64_t sampling_factor_, Args... args)
-        : Args(args)...,
-          num_partitions(num_partitions_),
-          sampling_factor(sampling_factor_) {}
-
-    uint64_t num_partitions;
-    uint64_t sampling_factor;
-
-    // todo rename get_sample_size
-    constexpr uint64_t get_num_samples(uint64_t const local_size) const noexcept {
-        return std::min(sampling_factor * (num_partitions - 1), local_size);
-    }
-};
-
-inline size_t get_local_offset(size_t const local_size, Communicator const& comm) {
-    return comm.exscan_single(kamping::send_buf(local_size), kamping::op(std::plus<>{}));
-}
-
-template <typename StringSet, typename Params>
-static size_t accumulate_chars(StringSet const& ss, Params const& params) {
-    if constexpr (Params::has_dist_prefixes) {
-        return std::accumulate(std::begin(params.prefixes), std::end(params.prefixes), size_t{0});
-    } else {
-        auto op = [&ss](auto sum, auto const& str) { return sum + ss.get_length(str); };
-        return std::accumulate(std::begin(ss), std::end(ss), size_t{0}, op);
-    }
-}
-
-template <typename StringSet, typename Params>
-static size_t get_string_len(
-    StringSet const& ss, typename StringSet::String const& str, size_t index, Params const& params
+template <typename StringSet>
+size_t get_string_len(
+    StringSet const& ss,
+    typename StringSet::String const& str,
+    size_t const index,
+    NoExtraArg const arg
 ) {
-    size_t string_len;
-    if constexpr (Params::has_dist_prefixes) {
-        string_len = params.prefixes[index];
-    } else {
-        string_len = ss.get_length(str);
-    }
+    return ss.get_length(str);
+}
 
-    if constexpr (Params::has_max_length) {
-        return std::min(params.max_length, string_len);
-    } else {
-        return string_len;
-    }
+template <typename StringSet>
+size_t get_string_len(
+    StringSet const& ss,
+    typename StringSet::String const& str,
+    size_t const index,
+    MaxLength const arg
+) {
+    return std::min(arg.max_length, ss.get_length(str));
+}
+
+template <typename StringSet>
+size_t get_string_len(
+    StringSet const& ss,
+    typename StringSet::String const& str,
+    size_t const index,
+    DistPrefixes const arg
+) {
+    return arg.prefixes[index];
+}
+
+template <typename StringSet, typename ExtraArg>
+size_t accumulate_chars(StringSet const& ss, ExtraArg const arg) {
+    auto op = [&ss, arg](auto const sum, auto const& str) { return sum + ss.get_length(str); };
+    return std::accumulate(ss.begin(), ss.end(), size_t{0}, op);
+}
+
+template <typename StringSet>
+size_t accumulate_chars(StringSet const& ss, DistPrefixes const arg) {
+    return std::accumulate(arg.prefixes.begin(), arg.prefixes.end(), size_t{0});
 }
 
 template <typename Char, bool is_indexed>
@@ -155,6 +151,7 @@ public:
         : sample_dist_{num_chars / (num_samples + 1)},
           current_boundary_{0} {}
 
+    // todo make stateless
     size_t next() { return current_boundary_ += sample_dist_; }
 
 private:
@@ -196,24 +193,31 @@ public:
     template <typename StringSet>
     using Result = SampleResult<typename StringSet::Char, is_indexed>;
 
-    template <typename StringSet, typename Params>
-    static Result<StringSet>
-    sample_splitters(StringSet const& ss, Params const& params, Communicator const& comm) {
-        size_t const num_samples = params.get_num_samples(ss.size());
+    explicit StringBasedSampling(size_t const sampling_factor)
+        : sampling_factor_{sampling_factor} {}
+
+    template <typename StringSet, typename ExtraArg>
+    Result<StringSet> sample_splitters(
+        StringSet const& ss,
+        size_t const num_partitions,
+        ExtraArg const arg,
+        Communicator const& comm
+    ) const {
+        size_t const sample_size = get_sample_size(ss.size(), num_partitions, sampling_factor_);
         size_t const local_offset = is_indexed ? get_local_offset(ss.size(), comm) : 0;
 
-        _internal::StringIndexSampler<is_random> sampler{ss.size(), num_samples};
+        _internal::StringIndexSampler<is_random> sampler{ss.size(), sample_size};
 
         Result<StringSet> result;
-        result.sample.reserve(num_samples * (100 + 1u)); // todo
+        result.sample.reserve(sample_size * (100 + 1u)); // todo
         if constexpr (is_indexed) {
-            result.indices.resize(num_samples);
+            result.indices.resize(sample_size);
         }
 
-        for (size_t i = 0; i < num_samples; ++i) {
-            auto const sample_index = sampler.get_sample(i + 1); // todo ????
+        for (size_t i = 0; i < sample_size; ++i) {
+            auto const sample_index = sampler.get_sample(i + 1); // todo ???? convert to next
             auto const sample = ss[ss.begin() + sample_index];
-            auto const sample_len = get_string_len(ss, sample, sample_index, params);
+            auto const sample_len = get_string_len(ss, sample, sample_index, arg);
             auto const sample_chars = ss.get_chars(sample, 0);
 
             std::copy_n(sample_chars, sample_len, std::back_inserter(result.sample));
@@ -225,6 +229,9 @@ public:
         }
         return result;
     }
+
+private:
+    size_t sampling_factor_;
 };
 
 template <bool is_indexed_ = false, bool is_random_ = false>
@@ -236,35 +243,40 @@ public:
     template <typename StringSet>
     using Result = SampleResult<typename StringSet::Char, is_indexed>;
 
-    template <typename StringSet, typename Params>
-    static Result<StringSet>
-    sample_splitters(StringSet const& ss, Params const& params, Communicator const& comm) {
-        size_t const num_chars = accumulate_chars(ss, params);
-        size_t const num_samples = params.get_num_samples(ss.size());
+    explicit CharBasedSampling(size_t const sampling_factor) : sampling_factor_{sampling_factor} {}
+
+    template <typename StringSet, typename ExtraArg>
+    Result<StringSet> sample_splitters(
+        StringSet const& ss,
+        size_t const num_partitions,
+        ExtraArg const arg,
+        Communicator const& comm
+    ) const {
+        size_t const num_chars = accumulate_chars(ss, arg);
+        size_t const sample_size = get_sample_size(ss.size(), num_partitions, sampling_factor_);
         size_t const local_offset = is_indexed ? get_local_offset(ss.size(), comm) : 0;
 
-        _internal::CharIndexSampler<is_random> sampler{num_chars, num_samples};
+        _internal::CharIndexSampler<is_random> sampler{num_chars, sample_size};
 
         Result<StringSet> result;
-        // todo better estimate for length of strings
-        result.sample.reserve(num_samples * (100 + 1));
+        result.sample.reserve((num_chars / std::max<size_t>(1, ss.size()) + 1) * sample_size);
         if constexpr (is_indexed) {
-            result.indices.reserve(num_samples);
+            result.indices.reserve(sample_size);
         }
 
         auto string = ss.begin(), index = 0;
         size_t current_chars = 0;
-        for (size_t i = 0; i < num_samples && string != ss.end(); ++i) {
+        for (size_t i = 0; i < sample_size && string != ss.end(); ++i) {
             auto const next_boundary = sampler.next();
             for (; current_chars < next_boundary && string != ss.end(); ++string, ++index) {
-                current_chars += get_string_len(ss, ss[string], index, params);
+                current_chars += get_string_len(ss, ss[string], index, arg);
             }
 
             assert_unequal(string, ss.begin());
 
             auto const sample = ss[string - 1];
             auto const sample_index = index - 1;
-            auto const sample_len = get_string_len(ss, sample, sample_index, params);
+            auto const sample_len = get_string_len(ss, sample, sample_index, arg);
             auto const sample_chars = ss.get_chars(sample, 0);
 
             std::copy_n(sample_chars, sample_len, std::back_inserter(result.sample));
@@ -276,6 +288,9 @@ public:
         }
         return result;
     }
+
+private:
+    size_t sampling_factor_;
 };
 
 } // namespace sample

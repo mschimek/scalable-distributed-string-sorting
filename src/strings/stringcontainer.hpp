@@ -310,9 +310,6 @@ public:
 
     template <typename StringSet, typename LcpIt>
     void extend_prefix(StringSet const& ss, const LcpIt first_lcp, LcpIt const last_lcp) {
-        using std::begin;
-        using std::end;
-
         assert_equal(std::distance(first_lcp, last_lcp), std::ssize(ss));
         assert(first_lcp == last_lcp || *first_lcp == 0);
         if (ss.empty()) {
@@ -325,7 +322,7 @@ public:
         auto curr_chars = raw_strings.begin();
 
         auto lcp_it = first_lcp;
-        for (auto it = begin(ss); it != end(ss); ++it, ++lcp_it) {
+        for (auto it = ss.begin(); it != ss.end(); ++it, ++lcp_it) {
             auto& curr_str = ss[it];
             auto curr_str_begin = ss.get_chars(curr_str, 0);
             auto curr_str_len = ss.get_length(curr_str) + 1;

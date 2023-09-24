@@ -51,6 +51,15 @@ class PrefixDoublingMergeSort : private BaseDistributedMergeSort<
                                     SamplePolicy,
                                     PartitionPolicy> {
 public:
+    using Base = BaseDistributedMergeSort<
+        Subcommunicators,
+        RedistributionPolicy,
+        AllToAllStringPolicy,
+        SamplePolicy,
+        PartitionPolicy>;
+
+    using Base::Base;
+
     using Char = StringPtr::StringSet::Char;
 
     using StringPEIndexSet = StringSet<Char, Length, StringIndex, PEIndex>;
@@ -88,12 +97,7 @@ public:
             auto prefixes = compute_distinguishing_prefixes(strptr, comms);
             this->measuring_tool_.stop("bloomfilter", "bloomfilter_overall", comms.comm_root());
 
-            auto sorted_container = sort_impl_(
-                std::move(container),
-                comms,
-                std::tuple<sample::DistPrefixes>{{prefixes}},
-                std::tuple<std::vector<size_t> const&>{prefixes}
-            );
+            auto sorted_container = sort_impl_(std::move(container), comms, prefixes);
 
             this->measuring_tool_.setRound(0);
             return write_permutation(sorted_container.make_string_set());
@@ -109,15 +113,14 @@ private:
     auto sort_impl_(
         StringPEIndexContainer&& container,
         Subcommunicators const& comms,
-        auto&& extra_sample_args,
-        auto&& extra_all_to_all_args
+        std::vector<size_t> const& dist_prefixes
     ) {
         this->measuring_tool_.start("sort_globally", "final_sorting");
         auto sorted_container = this->sort_exhaustive(
             std::move(container),
             comms.comm_final(),
-            extra_sample_args,
-            extra_all_to_all_args
+            sample::DistPrefixes{dist_prefixes},
+            dist_prefixes
         );
         this->measuring_tool_.stop("sort_globally", "final_sorting");
 
@@ -130,8 +133,7 @@ private:
     auto sort_impl_(
         StringPEIndexContainer&& container,
         Subcommunicators const& comms,
-        auto&& extra_sample_args,
-        auto&& extra_all_to_all_args
+        std::vector<size_t> const& dist_prefixes
     ) {
         if (comms.begin() == comms.end()) {
             // special case for single level sort
@@ -139,8 +141,8 @@ private:
             auto sorted_container = this->sort_exhaustive(
                 std::move(container),
                 comms.comm_final(),
-                extra_sample_args,
-                extra_all_to_all_args
+                sample::DistPrefixes{dist_prefixes},
+                dist_prefixes
             );
             this->measuring_tool_.stop("sort_globally", "final_sorting");
 
@@ -155,8 +157,8 @@ private:
             container = this->sort_partial(
                 std::move(container),
                 *level++,
-                extra_sample_args,
-                extra_all_to_all_args
+                sample::DistPrefixes{dist_prefixes},
+                dist_prefixes
             );
             this->measuring_tool_.stop("sort_globally", "partial_sorting", comms.comm_root());
             this->measuring_tool_.setRound(++round);
@@ -165,19 +167,15 @@ private:
         for (; level != comms.end(); ++level) {
             // intermediate level of multi-level sort, don't consider distinguishing prefixes
             this->measuring_tool_.start("sort_globally", "partial_sorting");
-            container = this->sort_partial(std::move(container), *level, {}, {});
+            container = this->sort_partial(std::move(container), *level, sample::NoExtraArg{});
             this->measuring_tool_.stop("sort_globally", "partial_sorting", comms.comm_root());
             this->measuring_tool_.setRound(++round);
         }
 
         this->measuring_tool_.start("sort_globally", "final_sorting");
         // final level of multi-level sort
-        auto sorted_container = this->sort_exhaustive(
-            std::move(container),
-            comms.comm_final(),
-            std::tuple<>{},
-            std::tuple<>{}
-        );
+        auto sorted_container =
+            this->sort_exhaustive(std::move(container), comms.comm_final(), sample::NoExtraArg{});
         this->measuring_tool_.stop("sort_globally", "final_sorting");
 
         return sorted_container;
@@ -204,7 +202,6 @@ private:
         for (size_t index = 0; auto const& src: container.get_strings()) {
             *d_string++ = src.with_members(StringIndex{index++}, PEIndex{rank});
         }
-
         return {container.release_raw_strings(), std::move(strings), container.release_lcps()};
     }
 
@@ -253,7 +250,6 @@ StringLcpContainer<StringSet> receive_strings(
 ) {
     using namespace dss_schimek;
     using MPIRoutine = mpi::AllToAllvCombined<mpi::AllToAllvSmall>;
-    using std::begin;
 
     std::vector<int> req_sizes(comm.size());
     for (auto const& elem: permutation) {
@@ -277,7 +273,7 @@ StringLcpContainer<StringSet> receive_strings(
     std::vector<size_t> raw_str_sizes(comm.size());
     for (size_t rank = 0, offset = 0; rank < comm.size(); ++rank) {
         for (size_t i = 0; i < static_cast<size_t>(recv_req_sizes[rank]); ++i, ++offset) {
-            auto const& str = ss[begin(ss) + recv_requests[offset]];
+            auto const& str = ss[ss.begin() + recv_requests[offset]];
             auto str_len = ss.get_length(str) + 1;
             auto str_chars = ss.get_chars(str, 0);
             std::copy_n(str_chars, str_len, std::back_inserter(raw_strs));
@@ -295,8 +291,6 @@ std::vector<typename StringSet::String> reordered_strings(
     std::vector<StringIndexPEIndex> const& permutation,
     Communicator const& comm
 ) {
-    using std::begin;
-
     std::vector<size_t> offsets(comm.size());
     for (auto const& elem: permutation) {
         ++offsets[elem.PEIndex];
@@ -306,7 +300,7 @@ std::vector<typename StringSet::String> reordered_strings(
     // using back_inserter here becuase String may not be default-insertable
     std::vector<typename StringSet::String> strings;
     strings.reserve(ss.size());
-    auto op = [&](auto const& x) { return ss[begin(ss) + offsets[x.PEIndex]++]; };
+    auto op = [&](auto const& x) { return ss[ss.begin() + offsets[x.PEIndex]++]; };
     std::transform(permutation.begin(), permutation.end(), std::back_inserter(strings), op);
 
     return strings;

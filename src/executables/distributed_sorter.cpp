@@ -30,12 +30,14 @@
 #include "sorter/distributed/partition.hpp"
 #include "sorter/distributed/prefix_doubling.hpp"
 #include "sorter/distributed/redistribution.hpp"
+#include "sorter/distributed/sample.hpp"
 #include "util/measuringTool.hpp"
 #include "variant_selection.hpp"
 
 struct SorterArgs {
     std::string experiment;
     size_t num_strings;
+    size_t sampling_factor;
     bool check;
     bool check_exhaustive;
     size_t iteration;
@@ -94,6 +96,14 @@ void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicat
     using AllToAllPolicy =
         mpi::AllToAllStringImpl<lcp_compression, prefix_compression, StringSet, MPIAllToAllRoutine>;
 
+    using MergeSort = dss_mehnert::sorter::DistributedMergeSort<
+        StringLcpPtr,
+        Subcommunicators,
+        RedistributionPolicy,
+        AllToAllPolicy,
+        SamplePolicy,
+        PartitionPolicy>;
+
     using dss_mehnert::measurement::MeasuringTool;
     auto& measuring_tool = MeasuringTool::measuringTool();
     measuring_tool.setPrefix(prefix);
@@ -122,15 +132,7 @@ void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicat
     Subcommunicators comms{first_level, args.levels.end(), comm};
     measuring_tool.stop("none", "create_communicators", comm);
 
-    using dss_mehnert::sorter::DistributedMergeSort;
-    DistributedMergeSort<
-        StringLcpPtr,
-        Subcommunicators,
-        RedistributionPolicy,
-        AllToAllPolicy,
-        SamplePolicy,
-        PartitionPolicy>
-        merge_sort;
+    MergeSort merge_sort{SamplePolicy{args.sampling_factor}};
     auto sorted_container = merge_sort.sort(std::move(input_container), comms);
 
     measuring_tool.stop("none", "sorting_overall", comm);
@@ -185,6 +187,15 @@ void run_prefix_doubling(
         StringSet,
         MPIAllToAllRoutine>;
 
+    using MergeSort = dss_mehnert::sorter::PrefixDoublingMergeSort<
+        StringLcpPtr,
+        Subcommunicators,
+        RedistributionPolicy,
+        AllToAllPolicy,
+        SamplePolicy,
+        PartitionPolicy,
+        BloomFilterPolicy>;
+
     using dss_mehnert::measurement::MeasuringTool;
     auto& measuring_tool = MeasuringTool::measuringTool();
     measuring_tool.setPrefix(prefix);
@@ -214,15 +225,7 @@ void run_prefix_doubling(
     Subcommunicators comms{first_level, args.levels.end(), comm};
     measuring_tool.stop("none", "create_communicators", comm);
 
-    dss_mehnert::sorter::PrefixDoublingMergeSort<
-        StringLcpPtr,
-        Subcommunicators,
-        RedistributionPolicy,
-        AllToAllPolicy,
-        SamplePolicy,
-        PartitionPolicy,
-        BloomFilterPolicy>
-        merge_sort;
+    MergeSort merge_sort{SamplePolicy{args.sampling_factor}};
     auto permutation = merge_sort.sort(std::move(input_container), comms);
 
     measuring_tool.stop("none", "sorting_overall", comm);
@@ -278,6 +281,7 @@ std::string get_result_prefix(
            + " sample_chars="       + std::to_string(key.sample_chars)
            + " sample_indexed="     + std::to_string(key.sample_indexed)
            + " sample_random="      + std::to_string(key.sample_random)
+           + " sampling_factor="    + std::to_string(args.sampling_factor)
            + " rquick_v1="          + std::to_string(key.rquick_v1)
            + " rquick_lcp="         + std::to_string(key.rquick_lcp)
            + " lcp_compression="    + std::to_string(key.lcp_compression)
@@ -338,7 +342,6 @@ void arg7(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
     using namespace dss_mehnert::bloomfilter;
 
     if (key.grid_bloomfilter) {
-        tlx_die_verbose_unless(key.prefix_doubling, "did you forget to pass -d/--prefix-doubling");
         arg8<Args..., MultiLevel<XXHasher>>(key, args);
     } else {
         arg8<Args..., SingleLevel<XXHasher>>(key, args);
@@ -480,6 +483,8 @@ template <typename... Args>
 void arg2(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
     using namespace dss_mehnert::sample;
 
+    // todo this could/should use type erasure
+
     auto with_random = [=]<bool indexed, bool random> {
         if (key.sample_chars) {
             arg2b<Args..., CharBasedSampling<indexed, random>>(key, args);
@@ -543,12 +548,13 @@ int main(int argc, char* argv[]) {
     bool sample_chars = false;
     bool sample_indexed = false;
     bool sample_random = false;
+    size_t sampling_factor = 2;
     bool rquick_v1 = false;
     bool rquick_lcp = false;
     bool prefix_compression = false;
     bool lcp_compression = false;
     bool prefix_doubling = false;
-    bool grid_bloomfilter = false;
+    bool grid_bloomfilter = true;
     unsigned int generator = static_cast<int>(PolicyEnums::StringGenerator::DNRatioGenerator);
     unsigned int alltoall_routine = static_cast<int>(PolicyEnums::MPIRoutineAllToAll::combined);
     unsigned int comm_split = static_cast<int>(PolicyEnums::Subcommunicators::grid);
@@ -585,6 +591,7 @@ int main(int argc, char* argv[]) {
     cp.add_flag('C', "sample-chars", sample_chars, "use character based sampling");
     cp.add_flag('I', "sample-indexed", sample_indexed, "use indexed sampling");
     cp.add_flag('R', "sample-random", sample_random, "use random sampling");
+    cp.add_size_t('S', "sampling-factor", sampling_factor, "use the given oversampling factor");
     cp.add_flag('Q', "rquick-v1", rquick_v1, "use version 1 of RQuick (defaults to v2)");
     cp.add_flag('L', "rquick-lcp", rquick_lcp, "use LCP values in RQuick (only with v2)");
     cp.add_flag(
@@ -604,7 +611,7 @@ int main(int argc, char* argv[]) {
         'g',
         "grid-bloomfilter",
         grid_bloomfilter,
-        "use gridwise bloom filter (requires prefix doubling)"
+        "use gridwise bloom filter (requires prefix doubling) [default]"
     );
     cp.add_unsigned(
         'a',
@@ -696,6 +703,7 @@ int main(int argc, char* argv[]) {
         SorterArgs args{
             .experiment = experiment,
             .num_strings = num_strings,
+            .sampling_factor = sampling_factor,
             .check = check,
             .check_exhaustive = check_exhaustive,
             .iteration = i,

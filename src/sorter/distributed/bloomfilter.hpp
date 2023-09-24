@@ -179,9 +179,7 @@ template <typename T>
 inline std::vector<hash_t> extract_hash_values(std::vector<T> const& values) {
     std::vector<hash_t> hash_values(values.size());
 
-    auto get_hash = [](auto const& x) {
-        return x.hash_value;
-    };
+    auto get_hash = [](auto const& x) { return x.hash_value; };
     std::transform(values.begin(), values.end(), hash_values.begin(), get_hash);
 
     return hash_values;
@@ -365,8 +363,6 @@ private:
         size_t const depth,
         LcpIter const lcps
     ) {
-        using std::begin;
-
         if (candidates.empty()) {
             return {};
         }
@@ -379,7 +375,7 @@ private:
         lcp_dups.reserve(candidates.size());
 
         for (auto prev = candidates.front(); auto const& curr: candidates) {
-            auto const& curr_str = ss[begin(ss) + curr];
+            auto const& curr_str = ss[ss.begin() + curr];
 
             if (depth > ss.get_length(curr_str)) {
                 eos_candidates.push_back(curr);
@@ -403,8 +399,6 @@ private:
     template <typename StringSet, typename LcpIter>
     GeneratedHashPairs
     generate_hash_pairs(StringSet const& ss, size_t const depth, LcpIter const lcps) {
-        using std::begin;
-
         if (ss.empty()) {
             return {};
         }
@@ -419,7 +413,7 @@ private:
         lcp_dups.reserve(ss.size());
 
         for (size_t candidate = 0; candidate != ss.size(); ++candidate) {
-            auto const& str = ss[begin(ss) + candidate];
+            auto const& str = ss[ss.begin() + candidate];
 
             if (depth > ss.get_length(str)) {
                 eos_candidates.push_back(candidate);
@@ -528,12 +522,10 @@ private:
         std::vector<size_t> const& eos_candidates,
         std::vector<size_t>& results
     ) {
-        using std::begin;
-
         std::fill(results.begin(), results.end(), depth);
 
         for (auto const& candidate: eos_candidates) {
-            results[candidate] = ss.get_length(ss[begin(ss) + candidate]);
+            results[candidate] = ss.get_length(ss[ss.begin() + candidate]);
         }
     }
 
@@ -552,7 +544,7 @@ private:
         }
 
         for (auto const& candidate: eos_candidates) {
-            results[candidate] = ss.get_length(ss[begin(ss) + candidate]);
+            results[candidate] = ss.get_length(ss[ss.begin() + candidate]);
         }
     }
 

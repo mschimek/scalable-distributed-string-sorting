@@ -159,15 +159,13 @@ public:
         StringSet const& ss, std::vector<size_t> const& interval_sizes, Level const& level
     ) {
         // todo maybe static assert has length member
-        using std::begin;
-
         auto char_interval_sizes = compute_char_sizes(ss, interval_sizes);
         auto [global_prefixes, global_sizes] =
             _internal::exscan_and_bcast(char_interval_sizes, level.comm_orig);
 
         std::vector<size_t> send_counts(level.comm_orig.size());
 
-        auto str = begin(ss);
+        auto str = ss.begin();
         for (size_t group = 0; group < interval_sizes.size(); ++group) {
             auto const prefix = global_prefixes[group];
             auto const strs_per_rank = tlx::div_ceil(global_sizes[group], level.group_size());
@@ -192,12 +190,10 @@ public:
 private:
     static std::vector<size_t>
     compute_char_sizes(auto const& ss, std::vector<size_t> const& interval_sizes) {
-        using std::begin;
-
         std::vector<size_t> char_interval_sizes(interval_sizes);
         auto dest = char_interval_sizes.begin();
 
-        for (auto strs = begin(ss); auto const& interval: interval_sizes) {
+        for (auto strs = ss.begin(); auto const& interval: interval_sizes) {
             auto get_length = [&ss](auto const& acc, auto const& str) {
                 return acc + ss.get_length(str) + 1;
             };
