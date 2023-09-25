@@ -189,8 +189,8 @@ protected:
         if constexpr (AllToAllStringPolicy::PrefixCompression) {
             result.container.extend_prefix(
                 result.container.make_string_set(),
-                result.saved_lcps.cbegin(),
-                result.saved_lcps.cend()
+                result.saved_lcps.begin(),
+                result.saved_lcps.end()
             );
         }
         measuring_tool_.stop("prefix_decompression");

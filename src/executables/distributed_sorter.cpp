@@ -31,8 +31,19 @@
 #include "sorter/distributed/prefix_doubling.hpp"
 #include "sorter/distributed/redistribution.hpp"
 #include "sorter/distributed/sample.hpp"
+#include "strings/stringset.hpp"
 #include "util/measuringTool.hpp"
+#include "util/string_generator.hpp"
 #include "variant_selection.hpp"
+
+struct GeneratedStringsArgs {
+    size_t num_strings;
+    size_t len_strings;
+    size_t len_strings_min;
+    size_t len_strings_max;
+    double DN_ratio;
+    std::string path;
+};
 
 struct SorterArgs {
     std::string experiment;
@@ -46,39 +57,73 @@ struct SorterArgs {
     std::vector<size_t> levels;
 };
 
-template <typename StringGenerator, typename StringSet>
-auto generate_strings(SorterArgs& args, dss_mehnert::Communicator const& comm) {
+template <typename StringSet>
+auto generate_strings(
+    PolicyEnums::CombinationKey const& key,
+    SorterArgs const& args,
+    dss_mehnert::Communicator const& comm
+) {
     using dss_mehnert::measurement::MeasuringTool;
     auto& measuring_tool = MeasuringTool::measuringTool();
 
-    if (!args.strong_scaling)
-        args.generator_args.num_strings *= comm.size();
-
-    if (comm.is_root())
+    if (comm.is_root()) {
         std::cout << "string generation started " << std::endl;
-
+    }
 
     comm.barrier();
     measuring_tool.start("generate_strings");
-    auto rand_container =
-        getGeneratedStringContainer<StringGenerator, StringSet>(args.generator_args);
+
+    auto check_path_exists = [](std::string const& path) {
+        tlx_die_verbose_unless(std::filesystem::exists(path), "file not found: " << path);
+    };
+
+    auto input_container = [=]() -> dss_mehnert::StringLcpContainer<StringSet> {
+        using namespace dss_schimek;
+
+        auto const& gen_args = args.generator_args;
+        auto const num_strings = (args.strong_scaling ? 1 : comm.size()) * gen_args.num_strings;
+        auto const len_strings = gen_args.len_strings;
+        auto const DN_ratio = gen_args.DN_ratio;
+        auto const& path = gen_args.path;
+
+        switch (key.string_generator) {
+            case PolicyEnums::StringGenerator::skewedRandomStringLcpContainer: {
+                tlx_die("not implemented");
+            }
+            case PolicyEnums::StringGenerator::DNRatioGenerator: {
+                return DNRatioGenerator<StringSet>{num_strings, len_strings, DN_ratio};
+            }
+            case PolicyEnums::StringGenerator::File: {
+                check_path_exists(path);
+                return FileDistributer<StringSet>{path};
+            }
+            case PolicyEnums::StringGenerator::SkewedDNRatioGenerator: {
+                return SkewedDNRatioGenerator<StringSet>{num_strings, len_strings, DN_ratio};
+            }
+            case PolicyEnums::StringGenerator::SuffixGenerator: {
+                check_path_exists(path);
+                return SuffixGenerator<StringSet>{path};
+            }
+        };
+        tlx_die("invalid string generator");
+    }();
     measuring_tool.stop("generate_strings");
 
     comm.barrier();
-    if (comm.is_root())
+    if (comm.is_root()) {
         std::cout << "string generation completed " << std::endl;
+    }
 
-    size_t num_gen_chars = rand_container.char_size();
-    size_t num_gen_strs = rand_container.size();
+    auto const num_gen_chars = input_container.char_size();
+    auto const num_gen_strs = input_container.size();
     measuring_tool.add(num_gen_chars - num_gen_strs, "input_chars");
     measuring_tool.add(num_gen_strs, "input_strings");
 
-    return rand_container;
+    return input_container;
 }
 
 template <
-    typename StringSet,
-    typename StringGenerator,
+    typename CharType,
     typename SamplePolicy,
     typename PartitionPolicy,
     typename MPIAllToAllRoutine,
@@ -87,11 +132,18 @@ template <
     typename LcpCompression,
     typename PrefixCompression,
     typename BloomFilterPolicy>
-void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicator const& comm) {
+void run_merge_sort(
+    PolicyEnums::CombinationKey const& key,
+    SorterArgs const& args,
+    std::string prefix,
+    dss_mehnert::Communicator const& comm
+) {
     using namespace dss_schimek;
 
     constexpr bool lcp_compression = LcpCompression();
     constexpr bool prefix_compression = PrefixCompression();
+
+    using StringSet = dss_mehnert::StringSet<CharType, dss_mehnert::Length>;
     using StringLcpPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
     using AllToAllPolicy =
         mpi::AllToAllStringImpl<lcp_compression, prefix_compression, StringSet, MPIAllToAllRoutine>;
@@ -110,7 +162,7 @@ void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicat
     measuring_tool.setVerbose(false);
     measuring_tool.disableCommVolume();
 
-    auto input_container = generate_strings<StringGenerator, StringSet>(args, comm);
+    auto input_container = generate_strings<StringSet>(key, args, comm);
     auto num_input_chars = input_container.char_size();
     auto num_input_strs = input_container.size();
 
@@ -163,8 +215,7 @@ void run_merge_sort(SorterArgs args, std::string prefix, dss_mehnert::Communicat
 }
 
 template <
-    typename StringSet,
-    typename StringGenerator,
+    typename CharType,
     typename SamplePolicy,
     typename PartitionPolicy,
     typename MPIAllToAllRoutine,
@@ -174,12 +225,17 @@ template <
     typename PrefixCompression,
     typename BloomFilterPolicy>
 void run_prefix_doubling(
-    SorterArgs args, std::string prefix, dss_mehnert::Communicator const& comm
+    PolicyEnums::CombinationKey const& key,
+    SorterArgs const& args,
+    std::string prefix,
+    dss_mehnert::Communicator const& comm
 ) {
     using namespace dss_schimek;
 
     constexpr bool lcp_compression = LcpCompression();
     constexpr bool prefix_compression = PrefixCompression();
+
+    using StringSet = dss_mehnert::StringSet<CharType, dss_mehnert::Length>;
     using StringLcpPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
     using AllToAllPolicy = mpi::AllToAllStringImplPrefixDoubling<
         lcp_compression,
@@ -203,7 +259,7 @@ void run_prefix_doubling(
 
     measuring_tool.disableCommVolume();
 
-    auto input_container = generate_strings<StringGenerator, StringSet>(args, comm);
+    auto input_container = generate_strings<StringSet>(key, args, comm);
     auto num_input_chars = input_container.char_size();
     auto num_input_strs = input_container.size();
 
@@ -293,8 +349,7 @@ std::string get_result_prefix(
 }
 
 template <
-    typename StringSet,
-    typename StringGenerator,
+    typename CharType,
     typename SamplePolicy,
     typename PartitionPolicy,
     typename MPIAllToAllRoutine,
@@ -308,7 +363,7 @@ void print_config(
 ) {
     // todo print string generator arguments
     // todo partition policy
-    std::cout << prefix << " key=string_generator name=" << StringGenerator::getName() << "\n";
+    // std::cout << prefix << " key=string_generator name=" << StringGenerator::getName() << "\n";
     std::cout << prefix << " key=alltoall_routine name=" << MPIAllToAllRoutine::getName() << "\n";
     std::cout << prefix << " key=subcomms name=" << Subcommunicators::get_name() << "\n";
     std::cout << prefix << " key=redistribution name=" << RedistributionPolicy::get_name() << "\n";
@@ -328,12 +383,12 @@ void arg8(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
 
     if (key.prefix_doubling) {
         if constexpr (CliOptions::enable_prefix_doubling) {
-            run_prefix_doubling<Args...>(args, prefix, comm);
+            run_prefix_doubling<Args...>(key, args, prefix, comm);
         } else {
             die_with_feature("CLI_ENABLE_PREFIX_DOUBLING");
         }
     } else {
-        run_merge_sort<Args...>(args, prefix, comm);
+        run_merge_sort<Args...>(key, args, prefix, comm);
     }
 }
 
@@ -448,10 +503,9 @@ void arg3(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
     }
 }
 
-template <typename StringSet, typename Generator, typename Sampler>
-void arg2b(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
+template <typename CharType, typename Sampler>
+void arg2(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
     using namespace dss_mehnert::partition;
-    using Char = typename StringSet::Char;
 
     constexpr bool is_indexed = Sampler::is_indexed;
 
@@ -462,34 +516,34 @@ void arg2b(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
 
     if (key.rquick_v1) {
         if constexpr (CliOptions::enable_rquick_v1) {
-            arg3<StringSet, Generator, Sampler, RQuickV1<Char, is_indexed>>(key, args);
+            arg3<CharType, Sampler, RQuickV1<CharType, is_indexed>>(key, args);
         } else {
             die_with_feature("CLI_ENABLE_RQUICK_V1");
         }
     } else {
         if (key.rquick_lcp) {
             if constexpr (CliOptions::enable_rquick_lcp) {
-                arg3<StringSet, Generator, Sampler, RQuickV2<Char, is_indexed, true>>(key, args);
+                arg3<CharType, Sampler, RQuickV2<CharType, is_indexed, true>>(key, args);
             } else {
                 die_with_feature("CLI_ENABLE_RQUICK_LCP");
             }
         } else {
-            arg3<StringSet, Generator, Sampler, RQuickV2<Char, is_indexed, false>>(key, args);
+            arg3<CharType, Sampler, RQuickV2<CharType, is_indexed, false>>(key, args);
         }
     }
 }
 
 template <typename... Args>
-void arg2(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
+void arg1(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
     using namespace dss_mehnert::sample;
 
     // todo this could/should use type erasure
 
     auto with_random = [=]<bool indexed, bool random> {
         if (key.sample_chars) {
-            arg2b<Args..., CharBasedSampling<indexed, random>>(key, args);
+            arg2<Args..., CharBasedSampling<indexed, random>>(key, args);
         } else {
-            arg2b<Args..., StringBasedSampling<indexed, random>>(key, args);
+            arg2<Args..., StringBasedSampling<indexed, random>>(key, args);
         }
     };
 
@@ -506,35 +560,6 @@ void arg2(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
     } else {
         with_indexed.template operator()<false>();
     }
-}
-
-template <typename StringSet>
-void arg1(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
-    using namespace dss_schimek;
-
-    switch (key.string_generator) {
-        case PolicyEnums::StringGenerator::skewedRandomStringLcpContainer: {
-            // arg2<SkewedRandomStringLcpContainer<StringSet>();
-            tlx_die("not implemented");
-            break;
-        }
-        case PolicyEnums::StringGenerator::DNRatioGenerator: {
-            arg2<StringSet, DNRatioGenerator<StringSet>>(key, args);
-            break;
-        }
-        case PolicyEnums::StringGenerator::File: {
-            arg2<StringSet, FileDistributer<StringSet>>(key, args);
-            break;
-        }
-        case PolicyEnums::StringGenerator::SkewedDNRatioGenerator: {
-            arg2<StringSet, SkewedDNRatioGenerator<StringSet>>(key, args);
-            break;
-        }
-        case PolicyEnums::StringGenerator::SuffixGenerator: {
-            arg2<StringSet, SuffixGenerator<StringSet>>(key, args);
-            break;
-        }
-    };
 }
 
 int main(int argc, char* argv[]) {
@@ -710,7 +735,7 @@ int main(int argc, char* argv[]) {
             .strong_scaling = strong_scaling,
             .generator_args = generator_args,
             .levels = levels};
-        arg1<dss_mehnert::StringSet<unsigned char, Length>>(key, args);
+        arg1<unsigned char>(key, args);
     }
 
     return EXIT_SUCCESS;

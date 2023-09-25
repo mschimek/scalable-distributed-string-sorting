@@ -5,40 +5,6 @@
 
 #include <tlx/die/core.hpp>
 
-#include "util/string_generator.hpp"
-
-struct GeneratedStringsArgs {
-    size_t num_strings;
-    size_t len_strings;
-    size_t len_strings_min;
-    size_t len_strings_max;
-    double DN_ratio;
-    std::string path;
-};
-
-template <typename StringGenerator, typename StringSet>
-StringGenerator getGeneratedStringContainer(GeneratedStringsArgs const& args) {
-    using namespace dss_schimek;
-
-    auto check_path_exists = [](std::string const& path) {
-        tlx_die_verbose_unless(std::filesystem::exists(path), "file not found: " << path);
-    };
-
-    if constexpr (std::is_same_v<StringGenerator, DNRatioGenerator<StringSet>>) {
-        return DNRatioGenerator<StringSet>(args.num_strings, args.len_strings, args.DN_ratio);
-    } else if constexpr (std::is_same_v<StringGenerator, FileDistributer<StringSet>>) {
-        check_path_exists(args.path);
-        return FileDistributer<StringSet>(args.path);
-    } else if constexpr (std::is_same_v<StringGenerator, SkewedDNRatioGenerator<StringSet>>) {
-        return SkewedDNRatioGenerator<StringSet>(args.num_strings, args.len_strings, args.DN_ratio);
-    } else if constexpr (std::is_same_v<StringGenerator, SuffixGenerator<StringSet>>) {
-        check_path_exists(args.path);
-        return SuffixGenerator<StringSet>(args.path);
-    } else {
-        return StringGenerator(args.num_strings, args.len_strings_min, args.len_strings_max);
-    }
-}
-
 namespace PolicyEnums {
 
 enum class StringGenerator {

@@ -135,7 +135,6 @@ public:
         using dss_schimek::Length;
 
         auto char_it = this->raw_strs.begin();
-        auto const end = this->raw_strs.end();
         for (size_t i = 0; auto& str: strptr.active()) {
             auto const str_begin = char_it;
             while (*char_it != 0) {
@@ -150,7 +149,7 @@ public:
                 str = {&*str_begin, Length{str_len}};
             }
 
-            assert(char_it != end);
+            assert(char_it != this->raw_strs.end());
             ++char_it, ++i;
         }
 

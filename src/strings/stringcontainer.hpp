@@ -90,10 +90,13 @@ void init_strings(
 
     } else {
         assert(std::apply([size](auto const&... x) { return (size(x) == ...); }, initializers));
-        strings.resize(size(std::get<0>(initializers)));
+        // todo I'm unhappy with the usage of back_inserter here, but resize
+        // todo gives weird potential null-dereference warnings again
+        strings.clear();
+        strings.reserve(size(std::get<0>(initializers)));
 
         assert_equal(std::ssize(strings), std::count(raw_strings.begin(), raw_strings.end(), 0));
-        init_strings_impl<StringSet>(raw_strings, initializers, strings.begin());
+        init_strings_impl<StringSet>(raw_strings, initializers, std::back_inserter(strings));
     }
 }
 
@@ -309,7 +312,7 @@ public:
     }
 
     template <typename StringSet, typename LcpIt>
-    void extend_prefix(StringSet const& ss, const LcpIt first_lcp, LcpIt const last_lcp) {
+    void extend_prefix(StringSet const& ss, LcpIt const first_lcp, LcpIt const last_lcp) {
         assert_equal(std::distance(first_lcp, last_lcp), std::ssize(ss));
         assert(first_lcp == last_lcp || *first_lcp == 0);
         if (ss.empty()) {
