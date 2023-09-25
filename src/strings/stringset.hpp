@@ -102,10 +102,10 @@ public:
 
     //! check equality of two strings a and b at char iterators ai and bi.
     bool is_equal(
-        const typename Traits::String& a,
-        const typename Traits::CharIterator& ai,
-        const typename Traits::String& b,
-        const typename Traits::CharIterator& bi
+        typename Traits::String const& a,
+        typename Traits::CharIterator const& ai,
+        typename Traits::String const& b,
+        typename Traits::CharIterator const& bi
     ) const {
         StringSet const& ss = *static_cast<StringSet const*>(this);
         return !ss.is_end(a, ai) && !ss.is_end(b, bi) && (*ai == *bi);
@@ -113,10 +113,10 @@ public:
 
     //! check if string a is less or equal to string b at iterators ai and bi.
     bool is_less(
-        const typename Traits::String& a,
-        const typename Traits::CharIterator& ai,
-        const typename Traits::String& b,
-        const typename Traits::CharIterator& bi
+        typename Traits::String const& a,
+        typename Traits::CharIterator const& ai,
+        typename Traits::String const& b,
+        typename Traits::CharIterator const& bi
     ) const {
         StringSet const& ss = *static_cast<StringSet const*>(this);
         return ss.is_end(a, ai) || (!ss.is_end(a, ai) && !ss.is_end(b, bi) && *ai < *bi);
@@ -124,10 +124,10 @@ public:
 
     //! check if string a is less or equal to string b at iterators ai and bi.
     bool is_leq(
-        const typename Traits::String& a,
-        const typename Traits::CharIterator& ai,
-        const typename Traits::String& b,
-        const typename Traits::CharIterator& bi
+        typename Traits::String const& a,
+        typename Traits::CharIterator const& ai,
+        typename Traits::String const& b,
+        typename Traits::CharIterator const& bi
     ) const {
         StringSet const& ss = *static_cast<StringSet const*>(this);
         return ss.is_end(a, ai) || (!ss.is_end(a, ai) && !ss.is_end(b, bi) && *ai <= *bi);
@@ -144,7 +144,7 @@ public:
     //! \name Character Extractors
     //! \{
 
-    typename Traits::Char get_char(const typename Traits::String& s, size_t depth) const {
+    typename Traits::Char get_char(typename Traits::String const& s, size_t depth) const {
         StringSet const& ss = *static_cast<StringSet const*>(this);
         return *ss.get_chars(s, depth);
     }
@@ -152,7 +152,7 @@ public:
     //! Return up to 1 characters of string s at iterator i packed into a uint8
     //! (only works correctly for 8-bit characters)
     uint8_t
-    get_char_uint8_simple(const typename Traits::String& s, typename Traits::CharIterator i) const {
+    get_char_uint8_simple(typename Traits::String const& s, typename Traits::CharIterator i) const {
         StringSet const& ss = *static_cast<StringSet const*>(this);
 
         if (ss.is_end(s, i))
@@ -163,7 +163,7 @@ public:
     //! Return up to 2 characters of string s at iterator i packed into a uint16
     //! (only works correctly for 8-bit characters)
     uint16_t get_char_uint16_simple(
-        const typename Traits::String& s, typename Traits::CharIterator i
+        typename Traits::String const& s, typename Traits::CharIterator i
     ) const {
         StringSet const& ss = *static_cast<StringSet const*>(this);
 
@@ -181,7 +181,7 @@ public:
     //! Return up to 4 characters of string s at iterator i packed into a uint32
     //! (only works correctly for 8-bit characters)
     uint32_t get_char_uint32_simple(
-        const typename Traits::String& s, typename Traits::CharIterator i
+        typename Traits::String const& s, typename Traits::CharIterator i
     ) const {
         StringSet const& ss = *static_cast<StringSet const*>(this);
 
@@ -207,7 +207,7 @@ public:
     //! Return up to 8 characters of string s at iterator i packed into a uint64
     //! (only works correctly for 8-bit characters)
     uint64_t get_char_uint64_simple(
-        const typename Traits::String& s, typename Traits::CharIterator i
+        typename Traits::String const& s, typename Traits::CharIterator i
     ) const {
         StringSet const& ss = *static_cast<StringSet const*>(this);
 
@@ -246,22 +246,22 @@ public:
         return v;
     }
 
-    uint8_t get_uint8(const typename Traits::String& s, size_t depth) const {
+    uint8_t get_uint8(typename Traits::String const& s, size_t depth) const {
         StringSet const& ss = *static_cast<StringSet const*>(this);
         return get_char_uint8_simple(s, ss.get_chars(s, depth));
     }
 
-    uint16_t get_uint16(const typename Traits::String& s, size_t depth) const {
+    uint16_t get_uint16(typename Traits::String const& s, size_t depth) const {
         StringSet const& ss = *static_cast<StringSet const*>(this);
         return get_char_uint16_simple(s, ss.get_chars(s, depth));
     }
 
-    uint32_t get_uint32(const typename Traits::String& s, size_t depth) const {
+    uint32_t get_uint32(typename Traits::String const& s, size_t depth) const {
         StringSet const& ss = *static_cast<StringSet const*>(this);
         return get_char_uint32_simple(s, ss.get_chars(s, depth));
     }
 
-    uint64_t get_uint64(const typename Traits::String& s, size_t depth) const {
+    uint64_t get_uint64(typename Traits::String const& s, size_t depth) const {
         StringSet const& ss = *static_cast<StringSet const*>(this);
         return get_char_uint64_simple(s, ss.get_chars(s, depth));
     }
@@ -269,7 +269,7 @@ public:
     //! \}
 
     //! Subset this string set using begin and size range.
-    StringSet subr(const typename Traits::Iterator& begin, size_t size) const {
+    StringSet subr(typename Traits::Iterator const& begin, size_t size) const {
         StringSet const& ss = *static_cast<StringSet const*>(this);
         return ss.sub(begin, begin + size);
     }
@@ -280,7 +280,7 @@ public:
         return ss.sub(ss.begin() + begin, ss.begin() + end);
     }
 
-    bool check_order(const typename Traits::String& s1, const typename Traits::String& s2) const {
+    bool check_order(typename Traits::String const& s1, typename Traits::String const& s2) const {
         StringSet const& ss = *static_cast<StringSet const*>(this);
 
         typename StringSet::CharIterator c1 = ss.get_chars(s1, 0);
@@ -314,13 +314,13 @@ public:
 template <typename Type>
 struct StringSetGetKeyHelper {
     template <typename StringSet>
-    static Type get_key(StringSet const& ss, const typename StringSet::String& s, size_t depth);
+    static Type get_key(StringSet const& ss, typename StringSet::String const& s, size_t depth);
 };
 
 template <>
 struct StringSetGetKeyHelper<uint8_t> {
     template <typename StringSet>
-    static uint8_t get_key(StringSet const& ss, const typename StringSet::String& s, size_t depth) {
+    static uint8_t get_key(StringSet const& ss, typename StringSet::String const& s, size_t depth) {
         return ss.get_uint8(s, depth);
     }
 };
@@ -329,7 +329,7 @@ template <>
 struct StringSetGetKeyHelper<uint16_t> {
     template <typename StringSet>
     static uint16_t
-    get_key(StringSet const& ss, const typename StringSet::String& s, size_t depth) {
+    get_key(StringSet const& ss, typename StringSet::String const& s, size_t depth) {
         return ss.get_uint16(s, depth);
     }
 };
@@ -338,7 +338,7 @@ template <>
 struct StringSetGetKeyHelper<uint32_t> {
     template <typename StringSet>
     static uint32_t
-    get_key(StringSet const& ss, const typename StringSet::String& s, size_t depth) {
+    get_key(StringSet const& ss, typename StringSet::String const& s, size_t depth) {
         return ss.get_uint32(s, depth);
     }
 };
@@ -347,13 +347,13 @@ template <>
 struct StringSetGetKeyHelper<uint64_t> {
     template <typename StringSet>
     static uint64_t
-    get_key(StringSet const& ss, const typename StringSet::String& s, size_t depth) {
+    get_key(StringSet const& ss, typename StringSet::String const& s, size_t depth) {
         return ss.get_uint64(s, depth);
     }
 };
 
 template <typename Type, typename StringSet>
-Type get_key(StringSet const& ss, const typename StringSet::String& s, size_t depth) {
+Type get_key(StringSet const& ss, typename StringSet::String const& s, size_t depth) {
     return StringSetGetKeyHelper<Type>::get_key(ss, s, depth);
 }
 
@@ -407,8 +407,8 @@ struct StringData : public Members... {
     StringData() = default;
 
     template <typename... Init>
-    StringData(String string, Init... args) : Init{args}...,
-                                              string{string} {}
+    StringData(String string, Init... args) noexcept : Init{args}...,
+                                                       string{string} {}
 
     String string;
 
@@ -417,7 +417,8 @@ struct StringData : public Members... {
     inline String getChars() const { return string; }
 
     template <typename... NewMembers>
-    inline StringData<String, Members..., NewMembers...> with_members(NewMembers&&... args) const {
+    inline StringData<String, Members..., NewMembers...> with_members(NewMembers&&... args
+    ) const noexcept {
         return {
             this->string,
             static_cast<Members const&>(*this)...,

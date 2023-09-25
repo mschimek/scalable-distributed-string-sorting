@@ -24,13 +24,8 @@ inline size_t get_file_size(std::string const& path) {
     return in.tellg();
 }
 
-struct RawStringsLines {
-    std::vector<unsigned char> rawStrings;
-    size_t lines;
-};
-
 inline std::vector<unsigned char>
-distribute_strings(std::string const& input_path, size_t max_size = 0, mpi::environment env = {}) {
+distribute_file(std::string const& input_path, size_t max_size = 0, mpi::environment env = {}) {
     MPI_File mpi_file;
 
     MPI_File_open(
@@ -64,7 +59,12 @@ distribute_strings(std::string const& input_path, size_t max_size = 0, mpi::envi
         mpi::type_mapper<unsigned char>::type(),
         MPI_STATUS_IGNORE
     );
+    return result;
+}
 
+inline std::vector<unsigned char>
+distribute_lines(std::string const& input_path, size_t max_size = 0, mpi::environment env = {}) {
+    auto result = distribute_file(input_path, max_size, env);
     auto first_newline = std::find(result.begin(), result.end(), '\n') - result.begin();
 
     std::replace(result.begin(), result.end(), '\n', static_cast<char>(0));
@@ -86,6 +86,11 @@ distribute_strings(std::string const& input_path, size_t max_size = 0, mpi::envi
 
     return result;
 }
+
+struct RawStringsLines {
+    std::vector<unsigned char> rawStrings;
+    size_t lines;
+};
 
 inline RawStringsLines read_file(std::string const& path) {
     RawStringsLines data;
