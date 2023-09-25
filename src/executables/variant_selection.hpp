@@ -78,20 +78,4 @@ inline Redistribution getRedistribution(size_t i) {
     }
 };
 
-struct CombinationKey {
-    StringGenerator string_generator;
-    bool sample_chars;
-    bool sample_indexed;
-    bool sample_random;
-    MPIRoutineAllToAll alltoall_routine;
-    Subcommunicators subcomms;
-    bool rquick_v1;
-    bool rquick_lcp;
-    Redistribution redistribution;
-    bool prefix_compression;
-    bool lcp_compression;
-    bool prefix_doubling;
-    bool grid_bloomfilter;
-};
-
 } // namespace PolicyEnums

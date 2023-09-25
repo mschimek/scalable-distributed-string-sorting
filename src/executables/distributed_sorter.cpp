@@ -57,11 +57,26 @@ struct SorterArgs {
     std::vector<size_t> levels;
 };
 
+struct CombinationKey {
+    PolicyEnums::StringGenerator string_generator;
+    bool sample_chars;
+    bool sample_indexed;
+    bool sample_random;
+    PolicyEnums::MPIRoutineAllToAll alltoall_routine;
+    PolicyEnums::Subcommunicators subcomms;
+    bool rquick_v1;
+    bool rquick_lcp;
+    PolicyEnums::Redistribution redistribution;
+    bool prefix_compression;
+    bool lcp_compression;
+    bool prefix_doubling;
+    bool grid_bloomfilter;
+    bool space_efficient;
+};
+
 template <typename StringSet>
 auto generate_strings(
-    PolicyEnums::CombinationKey const& key,
-    SorterArgs const& args,
-    dss_mehnert::Communicator const& comm
+    CombinationKey const& key, SorterArgs const& args, dss_mehnert::Communicator const& comm
 ) {
     using dss_mehnert::measurement::MeasuringTool;
     auto& measuring_tool = MeasuringTool::measuringTool();
@@ -133,7 +148,7 @@ template <
     typename PrefixCompression,
     typename BloomFilterPolicy>
 void run_merge_sort(
-    PolicyEnums::CombinationKey const& key,
+    CombinationKey const& key,
     SorterArgs const& args,
     std::string prefix,
     dss_mehnert::Communicator const& comm
@@ -225,7 +240,7 @@ template <
     typename PrefixCompression,
     typename BloomFilterPolicy>
 void run_prefix_doubling(
-    PolicyEnums::CombinationKey const& key,
+    CombinationKey const& key,
     SorterArgs const& args,
     std::string prefix,
     dss_mehnert::Communicator const& comm
@@ -320,10 +335,27 @@ void run_prefix_doubling(
     measuring_tool.reset();
 }
 
-std::string get_result_prefix(
+template <
+    typename CharType,
+    typename SamplePolicy,
+    typename PartitionPolicy,
+    typename MPIAllToAllRoutine,
+    typename Subcommunicators,
+    typename RedistributionPolicy,
+    typename LcpCompression,
+    typename PrefixCompression,
+    typename BloomFilterPolicy>
+void run_space_efficient_sort(
+    CombinationKey const& key,
     SorterArgs const& args,
-    PolicyEnums::CombinationKey const& key,
+    std::string prefix,
     dss_mehnert::Communicator const& comm
+) {
+    tlx_die("not yet implemented");
+}
+
+std::string get_result_prefix(
+    SorterArgs const& args, CombinationKey const& key, dss_mehnert::Communicator const& comm
 ) {
     // clang-format off
     return std::string("RESULT")
@@ -344,6 +376,7 @@ std::string get_result_prefix(
            + " prefix_compression=" + std::to_string(key.prefix_compression)
            + " prefix_doubling="    + std::to_string(key.prefix_doubling)
            + " grid_bloomfilter="   + std::to_string(key.grid_bloomfilter)
+           + " space_efficient="    + std::to_string(key.space_efficient)
            + " dn_ratio="           + std::to_string(args.generator_args.DN_ratio);
     // clang-format on
 }
@@ -358,12 +391,11 @@ template <
     typename LcpCompression,
     typename PrefixCompression,
     typename BloomFilterPolicy>
-void print_config(
-    std::string_view prefix, SorterArgs const& args, PolicyEnums::CombinationKey const& key
-) {
+void print_config(std::string_view prefix, SorterArgs const& args, CombinationKey const& key) {
     // todo print string generator arguments
     // todo partition policy
-    // std::cout << prefix << " key=string_generator name=" << StringGenerator::getName() << "\n";
+    // todo std::cout << prefix << " key=string_generator name=" << StringGenerator::getName() <<
+    // "\n";
     std::cout << prefix << " key=alltoall_routine name=" << MPIAllToAllRoutine::getName() << "\n";
     std::cout << prefix << " key=subcomms name=" << Subcommunicators::get_name() << "\n";
     std::cout << prefix << " key=redistribution name=" << RedistributionPolicy::get_name() << "\n";
@@ -374,14 +406,21 @@ void die_with_feature(std::string_view feature) {
 }
 
 template <typename... Args>
-void arg8(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
+void arg8(CombinationKey const& key, SorterArgs const& args) {
     dss_mehnert::Communicator comm;
     auto prefix = get_result_prefix(args, key, comm);
     if (comm.is_root()) {
         print_config<Args...>(prefix, args, key);
     }
 
-    if (key.prefix_doubling) {
+    if (key.space_efficient) {
+        // todo this currently ignores the prefix doubling flag
+        if constexpr (CliOptions::enable_space_efficient) {
+            run_space_efficient_sort<Args...>(key, args, prefix, comm);
+        } else {
+            die_with_feature("CLI_ENABLE_SPACE_EFFICIENT");
+        }
+    } else if (key.prefix_doubling) {
         if constexpr (CliOptions::enable_prefix_doubling) {
             run_prefix_doubling<Args...>(key, args, prefix, comm);
         } else {
@@ -393,7 +432,7 @@ void arg8(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
 }
 
 template <typename... Args>
-void arg7(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
+void arg7(CombinationKey const& key, SorterArgs const& args) {
     using namespace dss_mehnert::bloomfilter;
 
     if (key.grid_bloomfilter) {
@@ -404,7 +443,7 @@ void arg7(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
 }
 
 template <typename... Args>
-void arg6(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
+void arg6(CombinationKey const& key, SorterArgs const& args) {
     using namespace dss_schimek;
 
     if (key.prefix_compression) {
@@ -415,7 +454,7 @@ void arg6(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
 }
 
 template <typename... Args>
-void arg5(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
+void arg5(CombinationKey const& key, SorterArgs const& args) {
     if (key.lcp_compression) {
         arg6<Args..., std::true_type>(key, args);
     } else {
@@ -424,7 +463,7 @@ void arg5(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
 }
 
 template <typename... Args>
-void arg4(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
+void arg4(CombinationKey const& key, SorterArgs const& args) {
     using namespace dss_mehnert::multi_level;
     using namespace dss_mehnert::redistribution;
     using dss_mehnert::Communicator;
@@ -476,7 +515,7 @@ void arg4(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
 
 // todo remove this
 template <typename... Args>
-void arg3(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
+void arg3(CombinationKey const& key, SorterArgs const& args) {
     using namespace dss_schimek::mpi;
 
     switch (key.alltoall_routine) {
@@ -504,7 +543,7 @@ void arg3(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
 }
 
 template <typename CharType, typename Sampler>
-void arg2(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
+void arg2(CombinationKey const& key, SorterArgs const& args) {
     using namespace dss_mehnert::partition;
 
     constexpr bool is_indexed = Sampler::is_indexed;
@@ -534,7 +573,7 @@ void arg2(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
 }
 
 template <typename... Args>
-void arg1(PolicyEnums::CombinationKey const& key, SorterArgs const& args) {
+void arg1(CombinationKey const& key, SorterArgs const& args) {
     using namespace dss_mehnert::sample;
 
     // todo this could/should use type erasure
@@ -580,6 +619,7 @@ int main(int argc, char* argv[]) {
     bool lcp_compression = false;
     bool prefix_doubling = false;
     bool grid_bloomfilter = true;
+    bool space_efficient = false;
     unsigned int generator = static_cast<int>(PolicyEnums::StringGenerator::DNRatioGenerator);
     unsigned int alltoall_routine = static_cast<int>(PolicyEnums::MPIRoutineAllToAll::combined);
     unsigned int comm_split = static_cast<int>(PolicyEnums::Subcommunicators::grid);
@@ -638,6 +678,7 @@ int main(int argc, char* argv[]) {
         grid_bloomfilter,
         "use gridwise bloom filter (requires prefix doubling) [default]"
     );
+    cp.add_flag('s', "space-efficient", space_efficient, "use space efficient sorting");
     cp.add_unsigned(
         'a',
         "alltoall-routine",
@@ -681,7 +722,7 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
-    PolicyEnums::CombinationKey key{
+    CombinationKey key{
         .string_generator = PolicyEnums::getStringGenerator(generator),
         .sample_chars = sample_chars,
         .sample_indexed = sample_indexed,
@@ -695,6 +736,7 @@ int main(int argc, char* argv[]) {
         .lcp_compression = lcp_compression,
         .prefix_doubling = prefix_doubling,
         .grid_bloomfilter = grid_bloomfilter,
+        .space_efficient = space_efficient,
     };
 
     GeneratedStringsArgs generator_args{
