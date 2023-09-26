@@ -10,4 +10,5 @@ target_sources(dss_base
         prefix_doubling.hpp
         redistribution.hpp
         sample.hpp
+        space_efficient.hpp
 )

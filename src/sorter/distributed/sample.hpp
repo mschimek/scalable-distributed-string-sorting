@@ -184,7 +184,7 @@ private:
 
 } // namespace _internal
 
-template <bool is_indexed_ = false, bool is_random_ = false>
+template <bool is_indexed_, bool is_random_>
 class StringBasedSampling {
 public:
     static constexpr bool is_indexed = is_indexed_;
@@ -234,7 +234,7 @@ private:
     size_t sampling_factor_;
 };
 
-template <bool is_indexed_ = false, bool is_random_ = false>
+template <bool is_indexed_, bool is_random_>
 class CharBasedSampling {
 public:
     static constexpr bool is_indexed = is_indexed_;

@@ -71,24 +71,40 @@ public:
     ) {
         this->measuring_tool_.start("init_container");
         // create a new container with additional rank and string index data members
+        std::vector<typename StringPEIndexSet::String> strings;
+        strings.reserve(container.size());
+
         auto const rank = comms.comm_root().rank();
-        auto index_container = add_rank_and_index(std::move(container), rank);
+        for (size_t index = 0; auto const& src: container.get_strings()) {
+            strings.push_back(src.with_members(StringIndex{index++}, PEIndex{rank}));
+        }
+
+        StringLcpContainer<StringPEIndexSet> index_container{
+            container.release_raw_strings(),
+            std::move(strings),
+            container.release_lcps()
+        };
+        container.delete_all();
         this->measuring_tool_.stop("init_container");
 
         return sort(std::move(index_container), comms);
     }
 
-
-    std::vector<StringIndexPEIndex>
-    sort(StringPEIndexContainer&& container, Subcommunicators const& comms) {
+    std::vector<StringIndexPEIndex> sort(
+        StringPEIndexContainer&& container,
+        Subcommunicators const& comms,
+        bool const is_sorted_locally = false
+    ) {
         this->measuring_tool_.setPhase("local_sorting");
 
         auto strptr = container.make_string_lcp_ptr();
         this->measuring_tool_.add(container.char_size(), "chars_in_set");
 
-        this->measuring_tool_.start("local_sorting", "sort_locally");
-        tlx::sort_strings_detail::radixsort_CI3(strptr, 0, 0);
-        this->measuring_tool_.stop("local_sorting", "sort_locally", comms.comm_root());
+        if (!is_sorted_locally) {
+            this->measuring_tool_.start("local_sorting", "sort_locally");
+            tlx::sort_strings_detail::radixsort_CI3(strptr, 0, 0);
+            this->measuring_tool_.stop("local_sorting", "sort_locally", comms.comm_root());
+        }
 
         if (comms.comm_root().size() == 1) {
             return write_permutation(strptr.active());
@@ -192,17 +208,6 @@ private:
 
         this->measuring_tool_.setPhase("none");
         return permutation;
-    }
-
-    StringPEIndexContainer add_rank_and_index(
-        StringLcpContainer<typename StringPtr::StringSet>&& container, size_t const rank
-    ) {
-        std::vector<typename StringPEIndexSet::String> strings(container.size());
-        auto d_string = strings.begin();
-        for (size_t index = 0; auto const& src: container.get_strings()) {
-            *d_string++ = src.with_members(StringIndex{index++}, PEIndex{rank});
-        }
-        return {container.release_raw_strings(), std::move(strings), container.release_lcps()};
     }
 
     std::vector<size_t>

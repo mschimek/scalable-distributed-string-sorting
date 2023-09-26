@@ -253,6 +253,10 @@ public:
         : Base{std::move(raw_strings), std::move(strings)},
           lcps_{std::move(lcps)} {}
 
+    StringLcpContainer(std::vector<Char>&& raw_strings, std::vector<String>&& strings)
+        : Base{std::move(raw_strings), std::move(strings)},
+          lcps_(this->strings_.size()) {}
+
     template <typename... Member, typename... InputIt>
     explicit StringLcpContainer(
         std::vector<Char>&& raw_strings, Initializer<Member, InputIt>... initializer

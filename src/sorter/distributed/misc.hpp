@@ -125,7 +125,8 @@ StringContainer<StringSet> choose_splitters_distributed(
         auto idx_result = comm.allgatherv(kamping::send_buf(splitter_idxs));
         return StringContainer<StringSet>{
             char_result.extract_recv_buffer(),
-            make_initializer<Index>(idx_result.extract_recv_buffer())};
+            make_initializer<Index>(idx_result.extract_recv_buffer())
+        };
     } else {
         return StringContainer<StringSet>{char_result.extract_recv_buffer()};
     }

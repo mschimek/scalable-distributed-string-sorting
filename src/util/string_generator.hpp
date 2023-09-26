@@ -356,19 +356,19 @@ public:
 namespace dss_mehnert {
 
 template <typename StringSet>
-class RandomCharGenerator : std::vector<typename StringSet::Char> {
+struct RandomCharGenerator : public std::vector<typename StringSet::Char> {
     using Char = StringSet::Char;
 
     RandomCharGenerator(size_t const num_chars) : std::vector<Char>(num_chars) {
         std::random_device rand_seed;
         std::mt19937 gen(rand_seed());
         std::uniform_int_distribution<Char> dist{65, 90};
-        std::generate(this->begin(), this->end(), [=] { return dist(gen); });
+        std::generate(this->begin(), this->end(), [&] { return dist(gen); });
     }
 };
 
 template <typename StringSet>
-class FileCharGenerator : std::vector<typename StringSet::Char> {
+struct FileCharGenerator : public std::vector<typename StringSet::Char> {
     using Char = StringSet::Char;
 
     FileCharGenerator(std::string const& path)
@@ -376,24 +376,24 @@ class FileCharGenerator : std::vector<typename StringSet::Char> {
 };
 
 template <typename StringSet>
-struct CompressedSuffixGenerator : std::vector<typename StringSet::String> {
+struct CompressedSuffixGenerator : public std::vector<typename StringSet::String> {
     using Char = StringSet::Char;
 
-    CompressedSuffixGenerator(std::vector<Char> const& chars, size_t const step) {
+    CompressedSuffixGenerator(std::vector<Char>& chars, size_t const step = 1) {
         assert(step > 0);
 
         for (auto it = chars.begin(); it < chars.end(); it += step) {
-            this->emplace_back(&*it, Length{chars.end() - it});
+            this->emplace_back(&*it, Length{static_cast<size_t>(chars.end() - it)});
         }
     }
 };
 
 template <typename StringSet>
-struct CompressedStringGenerator : std::vector<typename StringSet::String> {
+struct CompressedStringGenerator : public std::vector<typename StringSet::String> {
     using Char = StringSet::Char;
 
     CompressedStringGenerator(
-        std::vector<Char> const& chars, size_t const length, size_t const step
+        std::vector<Char>& chars, size_t const length, size_t const step = 1
     ) {
         assert(length > 0 && step > 0);
 
@@ -404,7 +404,7 @@ struct CompressedStringGenerator : std::vector<typename StringSet::String> {
 };
 
 template <typename StringSet>
-struct CompressedDifferenceCoverGenerator : std::vector<typename StringSet::String> {
+struct CompressedDifferenceCoverGenerator : public std::vector<typename StringSet::String> {
     using Char = StringSet::Char;
 
     CompressedDifferenceCoverGenerator(std::vector<Char>& chars, size_t const size) {
