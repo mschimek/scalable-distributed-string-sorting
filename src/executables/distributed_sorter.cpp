@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <functional>
 #include <map>
+#include <numeric>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -31,6 +32,7 @@
 #include "sorter/distributed/prefix_doubling.hpp"
 #include "sorter/distributed/redistribution.hpp"
 #include "sorter/distributed/sample.hpp"
+#include "sorter/distributed/space_efficient.hpp"
 #include "strings/stringset.hpp"
 #include "util/measuringTool.hpp"
 #include "util/string_generator.hpp"
@@ -74,6 +76,10 @@ struct CombinationKey {
     bool space_efficient;
 };
 
+void check_path_exists(std::string const& path) {
+    tlx_die_verbose_unless(std::filesystem::exists(path), "file not found: " << path);
+};
+
 template <typename StringSet>
 auto generate_strings(
     CombinationKey const& key, SorterArgs const& args, dss_mehnert::Communicator const& comm
@@ -81,16 +87,8 @@ auto generate_strings(
     using dss_mehnert::measurement::MeasuringTool;
     auto& measuring_tool = MeasuringTool::measuringTool();
 
-    if (comm.is_root()) {
-        std::cout << "string generation started " << std::endl;
-    }
-
     comm.barrier();
     measuring_tool.start("generate_strings");
-
-    auto check_path_exists = [](std::string const& path) {
-        tlx_die_verbose_unless(std::filesystem::exists(path), "file not found: " << path);
-    };
 
     auto input_container = [=]() -> dss_mehnert::StringLcpContainer<StringSet> {
         using namespace dss_schimek;
@@ -125,14 +123,48 @@ auto generate_strings(
     measuring_tool.stop("generate_strings");
 
     comm.barrier();
-    if (comm.is_root()) {
-        std::cout << "string generation completed " << std::endl;
-    }
 
     auto const num_gen_chars = input_container.char_size();
     auto const num_gen_strs = input_container.size();
     measuring_tool.add(num_gen_chars - num_gen_strs, "input_chars");
     measuring_tool.add(num_gen_strs, "input_strings");
+
+    return input_container;
+}
+
+template <typename StringSet>
+auto generate_compressed_strings(
+    CombinationKey const& key, SorterArgs const& args, dss_mehnert::Communicator const& comm
+) {
+    using dss_mehnert::measurement::MeasuringTool;
+    auto& measuring_tool = MeasuringTool::measuringTool();
+
+    comm.barrier();
+    measuring_tool.start("generate_strings");
+
+    auto input_chars = []() -> std::vector<typename StringSet::Char> {
+        return dss_mehnert::RandomCharGenerator<StringSet>{50};
+    }();
+
+    auto input_strings = [&input_chars]() -> std::vector<typename StringSet::String> {
+        return dss_mehnert::CompressedSuffixGenerator<StringSet>{input_chars};
+    }();
+
+
+    dss_mehnert::StringLcpContainer<StringSet> input_container{
+        std::move(input_chars),
+        std::move(input_strings)
+    };
+    measuring_tool.stop("generate_strings");
+
+    comm.barrier();
+
+    auto const num_gen_chars = input_container.char_size();
+    auto const num_gen_strs = input_container.size();
+    auto const num_uncompressed_chars = input_container.make_string_set().get_sum_length();
+    measuring_tool.add(num_gen_chars - num_gen_strs, "input_chars");
+    measuring_tool.add(num_gen_strs, "input_strings");
+    measuring_tool.add(num_uncompressed_chars, "uncompressed_input_chars");
 
     return input_container;
 }
@@ -351,7 +383,64 @@ void run_space_efficient_sort(
     std::string prefix,
     dss_mehnert::Communicator const& comm
 ) {
-    tlx_die("not yet implemented");
+    using namespace dss_schimek;
+
+    constexpr bool lcp_compression = LcpCompression();
+    constexpr bool prefix_compression = PrefixCompression();
+
+    using MaterializedStringSet = dss_mehnert::StringSet<CharType, dss_mehnert::Length>;
+    using AllToAllPolicy = mpi::AllToAllStringImplPrefixDoubling<
+        lcp_compression,
+        prefix_compression,
+        MaterializedStringSet,
+        MPIAllToAllRoutine>;
+    using BaseSorter = dss_mehnert::sorter::PrefixDoublingMergeSort<
+        tlx::sort_strings_detail::StringLcpPtr<MaterializedStringSet, size_t>,
+        Subcommunicators,
+        RedistributionPolicy,
+        AllToAllPolicy,
+        SamplePolicy,
+        PartitionPolicy,
+        BloomFilterPolicy>;
+
+    using StringSet = dss_mehnert::CompressedStringSet<CharType>;
+    // todo maybe use different sample policy
+    using Sorter = dss_mehnert::sorter::
+        SpaceEfficientSort<CharType, Subcommunicators, SamplePolicy, PartitionPolicy, BaseSorter>;
+
+    using dss_mehnert::measurement::MeasuringTool;
+    auto& measuring_tool = MeasuringTool::measuringTool();
+    measuring_tool.setPrefix(prefix);
+    measuring_tool.setVerbose(false);
+
+    measuring_tool.disableCommVolume();
+
+    auto input_container = generate_compressed_strings<StringSet>(key, args, comm);
+    // auto num_input_chars = input_container.char_size();
+    // auto num_input_strs = input_container.size();
+
+    // skip unused levels for multi-level merge sort
+    auto pred = [&](auto const& group_size) { return group_size < comm.size(); };
+    auto first_level = std::find_if(args.levels.begin(), args.levels.end(), pred);
+
+    measuring_tool.enableCommVolume();
+
+    comm.barrier();
+    measuring_tool.start("none", "sorting_overall");
+
+    measuring_tool.start("none", "create_communicators");
+    Subcommunicators comms{first_level, args.levels.end(), comm};
+    measuring_tool.stop("none", "create_communicators", comm);
+
+    Sorter merge_sort{SamplePolicy{args.sampling_factor}};
+    auto permutation = merge_sort.sort(std::move(input_container), comms);
+
+    measuring_tool.stop("none", "sorting_overall", comm);
+    measuring_tool.disable();
+    measuring_tool.disableCommVolume();
+
+    measuring_tool.write_on_root(std::cout, comm);
+    measuring_tool.reset();
 }
 
 std::string get_result_prefix(
@@ -776,7 +865,8 @@ int main(int argc, char* argv[]) {
             .iteration = i,
             .strong_scaling = strong_scaling,
             .generator_args = generator_args,
-            .levels = levels};
+            .levels = levels
+        };
         arg1<unsigned char>(key, args);
     }
 
