@@ -389,10 +389,10 @@ struct CompressedSuffixGenerator : public std::vector<typename StringSet::String
 };
 
 template <typename StringSet>
-struct CompressedStringGenerator : public std::vector<typename StringSet::String> {
+struct CompressedWindowGenerator : public std::vector<typename StringSet::String> {
     using Char = StringSet::Char;
 
-    CompressedStringGenerator(
+    CompressedWindowGenerator(
         std::vector<Char>& chars, size_t const length, size_t const step = 1
     ) {
         assert(length > 0 && step > 0);
@@ -412,7 +412,7 @@ struct CompressedDifferenceCoverGenerator : public std::vector<typename StringSe
         chars.resize(chars.size() + size - 1, 0);
 
         for (auto const& k: get_difference_cover(size)) {
-            for (auto it = chars.begin() + k; it + size <= chars.size(); it += size) {
+            for (auto it = chars.begin() + k; it + size <= chars.end(); it += size) {
                 this->emplace_back(&*it, Length{size});
             }
         }

@@ -16,7 +16,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_COLOR_DIAGNOSTICS ON)
 
 option(CLI_ENABLE_PREFIX_DOUBLING "enable prefix doubling merge sort" On)
-option(CLI_ENABLE_SPACE_EFFICIENT "enable space efficient sort" Off)
 option(CLI_ENABLE_SPLIT "enable support for different communicator split strategies" Off)
 option(CLI_ENABLE_ALLTOALL "enable support for different AllToAll routines" Off)
 option(CLI_ENABLE_RQUICK_V1 "enable version of RQuick" Off)
@@ -25,7 +24,6 @@ option(CLI_ENABLE_ALL "enable all optional command line features" Off)
 
 if(CLI_ENABLE_ALL)
   set(CLI_ENABLE_PREFIX_DOUBLING On)
-  set(CLI_ENABLE_SPACE_EFFICIENT On)
   set(CLI_ENABLE_SPLIT On)
   set(CLI_ENABLE_ALLTOALL On)
   set(CLI_ENABLE_RQUICK_V1 On)
@@ -33,7 +31,6 @@ if(CLI_ENABLE_ALL)
 endif()
 
 message(STATUS "Prefix Doubling Enabled: ${CLI_ENABLE_PREFIX_DOUBLING}")
-message(STATUS "Space Efficient Enabled: ${CLI_ENABLE_SPACE_EFFICIENT}")
 message(STATUS "Split Strategies Enabled: ${CLI_ENABLE_SPLIT}")
 message(STATUS "All-To-All Routines Enabled: ${CLI_ENABLE_ALLTOALL}")
 message(STATUS "RQuick Version 1 Enabled: ${CLI_ENABLE_RQUICK_V1}")
@@ -126,4 +123,16 @@ target_compile_options(distributed_sorter PRIVATE ${DSS_MEHNERT_WARNING_FLAGS})
 target_link_libraries(distributed_sorter kamping)
 target_link_libraries(distributed_sorter dss_base)
 target_link_libraries(distributed_sorter tlx)
+
+add_executable(space_efficient_sorter
+  src/executables/space_efficient_sorter.cpp
+  src/executables/variant_selection.hpp)
+
+target_include_directories(space_efficient_sorter PRIVATE
+  "${CMAKE_CURRENT_BINARY_DIR}/include")
+
+target_compile_options(space_efficient_sorter PRIVATE ${DSS_MEHNERT_WARNING_FLAGS})
+target_link_libraries(space_efficient_sorter kamping)
+target_link_libraries(space_efficient_sorter dss_base)
+target_link_libraries(space_efficient_sorter tlx)
 

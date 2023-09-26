@@ -1,8 +1,8 @@
-// (c) 2019 Matthias Schimek
 // (c) 2023 Pascal Mehnert
 // This code is licensed under BSD 2-Clause License (see LICENSE for details)
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
@@ -22,39 +22,50 @@
 
 #include "mpi/alltoall.hpp"
 #include "mpi/communicator.hpp"
-#include "mpi/is_sorted.hpp"
 #include "mpi/warmup.hpp"
 #include "options.hpp"
 #include "sorter/distributed/bloomfilter.hpp"
-#include "sorter/distributed/merge_sort.hpp"
 #include "sorter/distributed/multi_level.hpp"
 #include "sorter/distributed/partition.hpp"
 #include "sorter/distributed/prefix_doubling.hpp"
 #include "sorter/distributed/redistribution.hpp"
 #include "sorter/distributed/sample.hpp"
+#include "sorter/distributed/space_efficient.hpp"
 #include "strings/stringset.hpp"
 #include "util/measuringTool.hpp"
 #include "util/string_generator.hpp"
 #include "variant_selection.hpp"
 
+enum class CharGenerator { file = 0, random = 1, sentinel = 2 };
+
+enum class StringGenerator { suffix = 0, window = 1, difference_cover = 2, sentinel = 3 };
+
+template <typename T>
+T get_enum_value(size_t const i) {
+    if (i < static_cast<size_t>(T::sentinel)) {
+        return static_cast<T>(i);
+    } else {
+        tlx_die("enum value out of range");
+    }
+}
+
 struct GeneratedStringsArgs {
-    PolicyEnums::StringGenerator string_generator;
-    size_t num_strings;
+    CharGenerator char_gen;
+    StringGenerator string_gen;
+    size_t num_chars;
+    size_t step;
     size_t len_strings;
-    size_t len_strings_min;
-    size_t len_strings_max;
-    double DN_ratio;
+    size_t difference_cover;
     std::string path;
 };
 
 struct SorterArgs {
     std::string experiment;
-    size_t num_strings;
     size_t sampling_factor;
+    size_t quantile_size;
     bool check;
     bool check_exhaustive;
     size_t iteration;
-    bool strong_scaling;
     GeneratedStringsArgs generator_args;
     std::vector<size_t> levels;
 };
@@ -79,51 +90,69 @@ void check_path_exists(std::string const& path) {
 };
 
 template <typename StringSet>
-auto generate_strings(SorterArgs const& args, dss_mehnert::Communicator const& comm) {
+auto generate_compressed_strings(SorterArgs const& args, dss_mehnert::Communicator const& comm) {
     using dss_mehnert::measurement::MeasuringTool;
     auto& measuring_tool = MeasuringTool::measuringTool();
 
     comm.barrier();
     measuring_tool.start("generate_strings");
 
-    auto input_container = [=]() -> dss_mehnert::StringLcpContainer<StringSet> {
-        using namespace dss_schimek;
+    auto const& gen_args = args.generator_args;
 
-        auto const& gen_args = args.generator_args;
-        auto const num_strings = (args.strong_scaling ? 1 : comm.size()) * gen_args.num_strings;
-        auto const len_strings = gen_args.len_strings;
-        auto const DN_ratio = gen_args.DN_ratio;
-        auto const& path = gen_args.path;
+    auto input_chars = [=]() -> std::vector<typename StringSet::Char> {
+        using namespace PolicyEnums;
+        using namespace dss_mehnert;
 
-        switch (args.generator_args.string_generator) {
-            case PolicyEnums::StringGenerator::skewedRandomStringLcpContainer: {
-                tlx_die("not implemented");
+        switch (gen_args.char_gen) {
+            case CharGenerator::random: {
+                return RandomCharGenerator<StringSet>{gen_args.num_chars};
             }
-            case PolicyEnums::StringGenerator::DNRatioGenerator: {
-                return DNRatioGenerator<StringSet>{num_strings, len_strings, DN_ratio};
+            case CharGenerator::file: {
+                return FileCharGenerator<StringSet>{gen_args.path};
             }
-            case PolicyEnums::StringGenerator::File: {
-                check_path_exists(path);
-                return FileDistributer<StringSet>{path};
+            case CharGenerator::sentinel: {
+                break;
             }
-            case PolicyEnums::StringGenerator::SkewedDNRatioGenerator: {
-                return SkewedDNRatioGenerator<StringSet>{num_strings, len_strings, DN_ratio};
+        }
+        tlx_die("invalid chararcter generator");
+    }();
+
+    auto input_strings = [=, &input_chars]() -> std::vector<typename StringSet::String> {
+        using namespace dss_mehnert;
+
+        auto const step = gen_args.step, length = gen_args.len_strings;
+        auto const dc = gen_args.difference_cover;
+
+        switch (gen_args.string_gen) {
+            case StringGenerator::suffix: {
+                return CompressedSuffixGenerator<StringSet>{input_chars, step};
             }
-            case PolicyEnums::StringGenerator::SuffixGenerator: {
-                check_path_exists(path);
-                return SuffixGenerator<StringSet>{path};
+            case StringGenerator::window: {
+                return CompressedWindowGenerator<StringSet>{input_chars, length, step};
             }
-        };
+            case StringGenerator::difference_cover: {
+                return CompressedDifferenceCoverGenerator<StringSet>{input_chars, dc};
+            }
+            case StringGenerator::sentinel: {
+                break;
+            }
+        }
         tlx_die("invalid string generator");
     }();
+
+    dss_mehnert::StringLcpContainer<StringSet> input_container{
+        std::move(input_chars),
+        std::move(input_strings)};
     measuring_tool.stop("generate_strings");
 
     comm.barrier();
 
     auto const num_gen_chars = input_container.char_size();
     auto const num_gen_strs = input_container.size();
+    auto const num_uncompressed_chars = input_container.make_string_set().get_sum_length();
     measuring_tool.add(num_gen_chars - num_gen_strs, "input_chars");
     measuring_tool.add(num_gen_strs, "input_strings");
+    measuring_tool.add(num_uncompressed_chars, "uncompressed_input_chars");
 
     return input_container;
 }
@@ -138,7 +167,7 @@ template <
     typename LcpCompression,
     typename PrefixCompression,
     typename BloomFilterPolicy>
-void run_merge_sort(
+void run_space_efficient_sort(
     CombinationKey const& key,
     SorterArgs const& args,
     std::string prefix,
@@ -149,108 +178,14 @@ void run_merge_sort(
     constexpr bool lcp_compression = LcpCompression();
     constexpr bool prefix_compression = PrefixCompression();
 
-    using StringSet = dss_mehnert::StringSet<CharType, dss_mehnert::Length>;
-    using StringLcpPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
-    using AllToAllPolicy =
-        mpi::AllToAllStringImpl<lcp_compression, prefix_compression, StringSet, MPIAllToAllRoutine>;
-
-    using MergeSort = dss_mehnert::sorter::DistributedMergeSort<
-        StringLcpPtr,
-        Subcommunicators,
-        RedistributionPolicy,
-        AllToAllPolicy,
-        SamplePolicy,
-        PartitionPolicy>;
-
-    using dss_mehnert::measurement::MeasuringTool;
-    auto& measuring_tool = MeasuringTool::measuringTool();
-    measuring_tool.setPrefix(prefix);
-    measuring_tool.setVerbose(false);
-    measuring_tool.disableCommVolume();
-
-    auto input_container = generate_strings<StringSet>(args, comm);
-    auto num_input_chars = input_container.char_size();
-    auto num_input_strs = input_container.size();
-
-    CheckerWithCompleteExchange<StringLcpPtr> checker;
-    if (args.check || args.check_exhaustive) {
-        checker.storeLocalInput(input_container.raw_strings());
-    }
-
-    // skip unused levels for multi-level merge sort
-    auto pred = [&](auto const& group_size) { return group_size < comm.size(); };
-    auto first_level = std::find_if(args.levels.begin(), args.levels.end(), pred);
-
-    measuring_tool.enableCommVolume();
-    comm.barrier();
-
-    measuring_tool.start("none", "sorting_overall");
-
-    measuring_tool.start("none", "create_communicators");
-    Subcommunicators comms{first_level, args.levels.end(), comm};
-    measuring_tool.stop("none", "create_communicators", comm);
-
-    MergeSort merge_sort{SamplePolicy{args.sampling_factor}};
-    auto sorted_container = merge_sort.sort(std::move(input_container), comms);
-
-    measuring_tool.stop("none", "sorting_overall", comm);
-
-    if (args.check || args.check_exhaustive) {
-        auto sorted_str_ptr = sorted_container.make_string_lcp_ptr();
-        auto num_sorted_chars = sorted_container.char_size();
-        auto num_sorted_strs = sorted_container.size();
-
-        bool is_sorted = is_complete_and_sorted(
-            sorted_str_ptr,
-            num_input_chars,
-            num_sorted_chars,
-            num_input_strs,
-            num_sorted_strs,
-            comm
-        );
-        die_verbose_unless(is_sorted, "output is not sorted or missing characters");
-
-        if (args.check_exhaustive) {
-            bool is_complete = checker.check(sorted_str_ptr, true);
-            die_verbose_unless(is_complete, "output is not a permutation of the input");
-        }
-    }
-
-    measuring_tool.write_on_root(std::cout, comm);
-    measuring_tool.reset();
-}
-
-template <
-    typename CharType,
-    typename SamplePolicy,
-    typename PartitionPolicy,
-    typename MPIAllToAllRoutine,
-    typename Subcommunicators,
-    typename RedistributionPolicy,
-    typename LcpCompression,
-    typename PrefixCompression,
-    typename BloomFilterPolicy>
-void run_prefix_doubling(
-    CombinationKey const& key,
-    SorterArgs const& args,
-    std::string prefix,
-    dss_mehnert::Communicator const& comm
-) {
-    using namespace dss_schimek;
-
-    constexpr bool lcp_compression = LcpCompression();
-    constexpr bool prefix_compression = PrefixCompression();
-
-    using StringSet = dss_mehnert::StringSet<CharType, dss_mehnert::Length>;
-    using StringLcpPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
+    using MaterializedStringSet = dss_mehnert::StringSet<CharType, dss_mehnert::Length>;
     using AllToAllPolicy = mpi::AllToAllStringImplPrefixDoubling<
         lcp_compression,
         prefix_compression,
-        StringSet,
+        MaterializedStringSet,
         MPIAllToAllRoutine>;
-
-    using MergeSort = dss_mehnert::sorter::PrefixDoublingMergeSort<
-        StringLcpPtr,
+    using BaseSorter = dss_mehnert::sorter::PrefixDoublingMergeSort<
+        tlx::sort_strings_detail::StringLcpPtr<MaterializedStringSet, size_t>,
         Subcommunicators,
         RedistributionPolicy,
         AllToAllPolicy,
@@ -258,6 +193,11 @@ void run_prefix_doubling(
         PartitionPolicy,
         BloomFilterPolicy>;
 
+    using StringSet = dss_mehnert::CompressedStringSet<CharType>;
+    // todo maybe use different sample policy
+    using Sorter = dss_mehnert::sorter::
+        SpaceEfficientSort<CharType, Subcommunicators, SamplePolicy, PartitionPolicy, BaseSorter>;
+
     using dss_mehnert::measurement::MeasuringTool;
     auto& measuring_tool = MeasuringTool::measuringTool();
     measuring_tool.setPrefix(prefix);
@@ -265,14 +205,9 @@ void run_prefix_doubling(
 
     measuring_tool.disableCommVolume();
 
-    auto input_container = generate_strings<StringSet>(args, comm);
-    auto num_input_chars = input_container.char_size();
-    auto num_input_strs = input_container.size();
-
-    CheckerWithCompleteExchange<StringLcpPtr> checker;
-    if (args.check || args.check_exhaustive) {
-        checker.storeLocalInput(input_container.raw_strings());
-    }
+    auto input_container = generate_compressed_strings<StringSet>(args, comm);
+    // auto num_input_chars = input_container.char_size();
+    // auto num_input_strs = input_container.size();
 
     // skip unused levels for multi-level merge sort
     auto pred = [&](auto const& group_size) { return group_size < comm.size(); };
@@ -287,40 +222,12 @@ void run_prefix_doubling(
     Subcommunicators comms{first_level, args.levels.end(), comm};
     measuring_tool.stop("none", "create_communicators", comm);
 
-    MergeSort merge_sort{SamplePolicy{args.sampling_factor}};
+    Sorter merge_sort{SamplePolicy{args.sampling_factor}, args.quantile_size};
     auto permutation = merge_sort.sort(std::move(input_container), comms);
 
     measuring_tool.stop("none", "sorting_overall", comm);
     measuring_tool.disable();
     measuring_tool.disableCommVolume();
-
-    if ((args.check || args.check_exhaustive) && comm.size() > 1) {
-        auto complete_strings_cont = dss_mehnert::sorter::apply_permutation(
-            StringLcpContainer<StringSet>{checker.getLocalInput()},
-            permutation,
-            comm
-        );
-
-        auto sorted_str_ptr = complete_strings_cont.make_string_lcp_ptr();
-        auto num_sorted_chars = complete_strings_cont.char_size();
-        auto num_sorted_strs = complete_strings_cont.size();
-
-        bool is_complete_and_sorted = dss_schimek::is_complete_and_sorted(
-            sorted_str_ptr,
-            num_input_chars,
-            num_sorted_chars,
-            num_input_strs,
-            num_sorted_strs,
-            comm
-        );
-
-        die_verbose_unless(is_complete_and_sorted, "output is not sorted or missing characters");
-
-        if (args.check_exhaustive) {
-            bool const isSorted = checker.check(sorted_str_ptr, false);
-            die_verbose_unless(isSorted, "output is not a permutation of the input");
-        }
-    }
 
     measuring_tool.write_on_root(std::cout, comm);
     measuring_tool.reset();
@@ -333,11 +240,8 @@ std::string get_result_prefix(
     return std::string("RESULT")
            + (args.experiment.empty() ? "" : (" experiment=" + args.experiment))
            + " num_procs="          + std::to_string(comm.size())
-           + " num_strings="        + std::to_string(args.num_strings)
-           + " len_strings="        + std::to_string(args.generator_args.len_strings)
            + " num_levels="         + std::to_string(args.levels.size())
            + " iteration="          + std::to_string(args.iteration)
-           + " strong_scaling="     + std::to_string(args.strong_scaling)
            + " sample_chars="       + std::to_string(key.sample_chars)
            + " sample_indexed="     + std::to_string(key.sample_indexed)
            + " sample_random="      + std::to_string(key.sample_random)
@@ -347,8 +251,7 @@ std::string get_result_prefix(
            + " lcp_compression="    + std::to_string(key.lcp_compression)
            + " prefix_compression=" + std::to_string(key.prefix_compression)
            + " prefix_doubling="    + std::to_string(key.prefix_doubling)
-           + " grid_bloomfilter="   + std::to_string(key.grid_bloomfilter)
-           + " dn_ratio="           + std::to_string(args.generator_args.DN_ratio);
+           + " grid_bloomfilter="   + std::to_string(key.grid_bloomfilter);
     // clang-format on
 }
 
@@ -384,15 +287,7 @@ void arg8(CombinationKey const& key, SorterArgs const& args) {
         print_config<Args...>(prefix, args, key);
     }
 
-    if (key.prefix_doubling) {
-        if constexpr (CliOptions::enable_prefix_doubling) {
-            run_prefix_doubling<Args...>(key, args, prefix, comm);
-        } else {
-            die_with_feature("CLI_ENABLE_PREFIX_DOUBLING");
-        }
-    } else {
-        run_merge_sort<Args...>(key, args, prefix, comm);
-    }
+    run_space_efficient_sort<Args...>(key, args, prefix, comm);
 }
 
 template <typename... Args>
@@ -572,7 +467,6 @@ int main(int argc, char* argv[]) {
 
     bool check = false;
     bool check_exhaustive = false;
-    bool strong_scaling = false;
     bool sample_chars = false;
     bool sample_indexed = false;
     bool sample_random = false;
@@ -583,39 +477,45 @@ int main(int argc, char* argv[]) {
     bool lcp_compression = false;
     bool prefix_doubling = false;
     bool grid_bloomfilter = true;
-    unsigned int generator = static_cast<int>(PolicyEnums::StringGenerator::DNRatioGenerator);
+    size_t quantile_size = 100 * 1024 * 1024;
+    size_t num_chars = 100000;
+    size_t step = 1;
+    size_t len_strings = 500;
+    size_t difference_cover = 3;
+    unsigned int char_generator = static_cast<unsigned int>(CharGenerator::random);
+    unsigned int string_generator = static_cast<unsigned int>(StringGenerator::suffix);
     unsigned int alltoall_routine = static_cast<int>(PolicyEnums::MPIRoutineAllToAll::combined);
     unsigned int comm_split = static_cast<int>(PolicyEnums::Subcommunicators::grid);
     unsigned int redistribution = static_cast<int>(PolicyEnums::Redistribution::naive);
-    size_t num_strings = 100000;
     size_t num_iterations = 5;
-    size_t string_length = 50;
-    size_t len_strings_min = string_length;
-    size_t len_strings_max = string_length + 10;
-    double DN_ratio = 0.5;
     std::string path;
     std::string experiment;
     std::vector<std::string> levels_param;
 
     tlx::CmdlineParser cp;
-    cp.set_description("a distributed string sorter");
-    cp.set_author("Matthias Schimek, Pascal Mehnert");
+    cp.set_description("a space efficient distributed string sorter");
+    cp.set_author("Pascal Mehnert");
     cp.add_string('e', "experiment", experiment, "name to identify the experiment being run");
     cp.add_unsigned(
-        'k',
-        "generator",
-        generator,
-        "type of string generation to use "
-        "(0=skewed, [1]=DNGen, 2=file, 3=skewedDNGen, 4=suffixGen)"
+        'c',
+        "char-generator",
+        char_generator,
+        "char generator to use "
+        "([0]=random, 1=file)"
     );
+    cp.add_unsigned(
+        's',
+        "string-generator",
+        string_generator,
+        "string generator to use "
+        "([0]=suffix, 1=window, 2=difference_cover)"
+    );
+    cp.add_size_t('m', "len-strings", len_strings, "number of characters per string");
+    cp.add_size_t('N', "num-chars", num_chars, "number of chars per rank");
+    cp.add_size_t('T', "step", step, "characters to skip between strings");
+    cp.add_size_t('D', "difference-cover", difference_cover, "size of difference cover");
     cp.add_string('y', "path", path, "path to input file");
-    cp.add_double('r', "DN-ratio", DN_ratio, "D/N ratio of generated strings");
-    cp.add_size_t('n', "num-strings", num_strings, "number of strings to be generated");
-    cp.add_size_t('m', "len-strings", string_length, "length of generated strings");
-    cp.add_size_t('b', "min-len-strings", len_strings_min, "minimum length of generated strings");
-    cp.add_size_t('B', "max-len-strings", len_strings_max, "maximum length of generated strings");
     cp.add_size_t('i', "num-iterations", num_iterations, "number of sorting iterations to run");
-    cp.add_flag('x', "strong-scaling", strong_scaling, "perform a strong scaling experiment");
     cp.add_flag('C', "sample-chars", sample_chars, "use character based sampling");
     cp.add_flag('I', "sample-indexed", sample_indexed, "use indexed sampling");
     cp.add_flag('R', "sample-random", sample_random, "use random sampling");
@@ -640,6 +540,12 @@ int main(int argc, char* argv[]) {
         "grid-bloomfilter",
         grid_bloomfilter,
         "use gridwise bloom filter (requires prefix doubling) [default]"
+    );
+    cp.add_bytes(
+        'q',
+        "quantile-size",
+        quantile_size,
+        "work on quantiles of the given size [default: 100MiB]"
     );
     cp.add_unsigned(
         'a',
@@ -700,12 +606,12 @@ int main(int argc, char* argv[]) {
     };
 
     GeneratedStringsArgs generator_args{
-        .string_generator = PolicyEnums::getStringGenerator(generator),
-        .num_strings = num_strings,
-        .len_strings = string_length,
-        .len_strings_min = len_strings_min,
-        .len_strings_max = len_strings_max,
-        .DN_ratio = DN_ratio,
+        .char_gen = get_enum_value<CharGenerator>(char_generator),
+        .string_gen = get_enum_value<StringGenerator>(string_generator),
+        .num_chars = num_chars,
+        .step = step,
+        .len_strings = len_strings,
+        .difference_cover = difference_cover,
         .path = path,
     };
 
@@ -713,29 +619,28 @@ int main(int argc, char* argv[]) {
     auto stoi = [](auto& str) { return std::stoi(str); };
     std::transform(levels_param.begin(), levels_param.end(), levels.begin(), stoi);
 
-    if (!std::is_sorted(levels.begin(), levels.end(), std::greater_equal<>{})) {
-        tlx_die("the given group sizes must be decreasing");
-    }
+    tlx_die_verbose_unless(
+        std::is_sorted(levels.begin(), levels.end(), std::greater_equal<>{}),
+        "the given group sizes must be decreasing"
+    );
 
     auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
     measuring_tool.disableCommVolume();
 
     // todo does this make sense? maybe discard first round instead?
-    auto num_bytes = std::min<size_t>(num_strings * 5, 100000u);
-    dss_schimek::mpi::randomDataAllToAllExchange(num_bytes);
+    dss_schimek::mpi::randomDataAllToAllExchange(100000u);
 
     measuring_tool.enableCommVolume();
 
     for (size_t i = 0; i < num_iterations; ++i) {
         SorterArgs args{
             .experiment = experiment,
-            .num_strings = num_strings,
             .sampling_factor = sampling_factor,
+            .quantile_size = quantile_size,
             .check = check,
             .check_exhaustive = check_exhaustive,
             .iteration = i,
-            .strong_scaling = strong_scaling,
             .generator_args = generator_args,
             .levels = levels};
         arg1<unsigned char>(key, args);
