@@ -6,13 +6,13 @@
 #include <algorithm>
 #include <numeric>
 
+#include <tlx/math/div_ceil.hpp>
 #include <tlx/sort/strings/radix_sort.hpp>
 
 #include "mpi/communicator.hpp"
 #include "sorter/distributed/prefix_doubling.hpp"
 #include "strings/stringcontainer.hpp"
 #include "strings/stringset.hpp"
-#include "tlx/math/div_ceil.hpp"
 #include "util/measuringTool.hpp"
 
 namespace dss_mehnert {
@@ -40,7 +40,6 @@ public:
     std::vector<StringIndexPEIndex>
     sort(StringLcpContainer<CompressedStringSet<Char>>&& container, Subcommunicators const& comms) {
         this->measuring_tool_.start("init_container");
-        // create a new container with additional rank and string index data members
         std::vector<typename StringSet::String> strings;
         strings.reserve(container.size());
 
@@ -121,8 +120,14 @@ private:
 
     std::pair<std::vector<size_t>, std::vector<size_t>>
     compute_quantiles(StringPtr const& strptr, Communicator const& comm) {
+        measuring_tool_.start("compute_num_quantiles");
         auto const total_size = strptr.active().get_sum_length();
-        size_t const num_quantiles = tlx::div_ceil(total_size, quantile_size_);
+        size_t const num_quantiles = comm.allreduce_single(
+            kamping::send_buf({tlx::div_ceil(total_size, quantile_size_)}),
+            kamping::op(kamping::ops::max<>{})
+        );
+        measuring_tool_.stop("compute_num_quantiles");
+        measuring_tool_.add(num_quantiles, "num_quantiles");
 
         if (num_quantiles == 1) {
             // todo get rid of this bodge
