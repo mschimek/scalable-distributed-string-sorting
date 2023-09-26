@@ -51,6 +51,7 @@ struct SorterArgs {
     std::string experiment;
     size_t num_strings;
     size_t sampling_factor;
+    size_t quantile_size;
     bool check;
     bool check_exhaustive;
     size_t iteration;
@@ -153,8 +154,7 @@ auto generate_compressed_strings(
 
     dss_mehnert::StringLcpContainer<StringSet> input_container{
         std::move(input_chars),
-        std::move(input_strings)
-    };
+        std::move(input_strings)};
     measuring_tool.stop("generate_strings");
 
     comm.barrier();
@@ -432,7 +432,7 @@ void run_space_efficient_sort(
     Subcommunicators comms{first_level, args.levels.end(), comm};
     measuring_tool.stop("none", "create_communicators", comm);
 
-    Sorter merge_sort{SamplePolicy{args.sampling_factor}};
+    Sorter merge_sort{SamplePolicy{args.sampling_factor}, args.quantile_size};
     auto permutation = merge_sort.sort(std::move(input_container), comms);
 
     measuring_tool.stop("none", "sorting_overall", comm);
@@ -709,6 +709,7 @@ int main(int argc, char* argv[]) {
     bool prefix_doubling = false;
     bool grid_bloomfilter = true;
     bool space_efficient = false;
+    size_t quantile_size = 100 * 1024 * 1024;
     unsigned int generator = static_cast<int>(PolicyEnums::StringGenerator::DNRatioGenerator);
     unsigned int alltoall_routine = static_cast<int>(PolicyEnums::MPIRoutineAllToAll::combined);
     unsigned int comm_split = static_cast<int>(PolicyEnums::Subcommunicators::grid);
@@ -768,6 +769,12 @@ int main(int argc, char* argv[]) {
         "use gridwise bloom filter (requires prefix doubling) [default]"
     );
     cp.add_flag('s', "space-efficient", space_efficient, "use space efficient sorting");
+    cp.add_bytes(
+        'q',
+        "quantile-size",
+        quantile_size,
+        "work on quantiles of the given size [default: 100MiB]"
+    );
     cp.add_unsigned(
         'a',
         "alltoall-routine",
@@ -860,13 +867,13 @@ int main(int argc, char* argv[]) {
             .experiment = experiment,
             .num_strings = num_strings,
             .sampling_factor = sampling_factor,
+            .quantile_size = quantile_size,
             .check = check,
             .check_exhaustive = check_exhaustive,
             .iteration = i,
             .strong_scaling = strong_scaling,
             .generator_args = generator_args,
-            .levels = levels
-        };
+            .levels = levels};
         arg1<unsigned char>(key, args);
     }
 

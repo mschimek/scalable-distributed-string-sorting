@@ -10,9 +10,9 @@
 
 #include "mpi/communicator.hpp"
 #include "sorter/distributed/prefix_doubling.hpp"
-#include "sorter/distributed/sample.hpp"
 #include "strings/stringcontainer.hpp"
 #include "strings/stringset.hpp"
+#include "tlx/math/div_ceil.hpp"
 #include "util/measuringTool.hpp"
 
 namespace dss_mehnert {
@@ -32,7 +32,10 @@ public:
 
     using MaterializedStringSet = dss_mehnert::StringSet<Char, Length, StringIndex, PEIndex>;
 
-    SpaceEfficientSort(SamplePolicy sampler) : SamplePolicy{std::move(sampler)} {}
+    SpaceEfficientSort(SamplePolicy const sampler, size_t const quantile_size)
+        : SamplePolicy{sampler},
+          sorter_{sampler},
+          quantile_size_{std::max<size_t>(1, quantile_size)} {}
 
     std::vector<StringIndexPEIndex>
     sort(StringLcpContainer<CompressedStringSet<Char>>&& container, Subcommunicators const& comms) {
@@ -49,8 +52,7 @@ public:
         StringLcpContainer<StringSet> index_container{
             container.release_raw_strings(),
             std::move(strings),
-            container.release_lcps()
-        };
+            container.release_lcps()};
         container.delete_all();
         this->measuring_tool_.stop("init_container");
 
@@ -84,7 +86,7 @@ public:
         // std::vector<size_t> ranks, indices;
         std::vector<StringIndexPEIndex> result;
 
-        SorterPolicy sorter{static_cast<SamplePolicy const&>(*this)};
+        // SorterPolicy sorter{static_cast<SamplePolicy const&>(*this)};
 
         for (size_t i = 0; i < quantile_sizes.size(); ++i) {
             measuring_tool_.setQuantile(i);
@@ -97,10 +99,9 @@ public:
             StringLcpContainer<MaterializedStringSet> materialized_strings{
                 std::vector<Char>{},
                 std::vector<String>{quantile.active().begin(), quantile.active().end()},
-                std::vector<size_t>{quantile.lcp(), quantile.lcp() + quantile.size()}
-            };
+                std::vector<size_t>{quantile.lcp(), quantile.lcp() + quantile.size()}};
 
-            auto permutation = sorter.sort(std::move(materialized_strings), comms, true);
+            auto permutation = sorter_.sort(std::move(materialized_strings), comms, true);
             std::copy(permutation.begin(), permutation.end(), std::back_inserter(result));
         }
 
@@ -112,10 +113,21 @@ private:
     using MeasuringTool = measurement::MeasuringTool;
     MeasuringTool& measuring_tool_ = MeasuringTool::measuringTool();
 
+    // private inheritance would cause problems here because SorterPolicy may
+    // also inherit from SamplePolicy
+    SorterPolicy sorter_;
+
+    size_t quantile_size_;
+
     std::pair<std::vector<size_t>, std::vector<size_t>>
     compute_quantiles(StringPtr const& strptr, Communicator const& comm) {
-        // todo how many partitions
-        size_t const num_quantiles = 2;
+        auto const total_size = strptr.active().get_sum_length();
+        size_t const num_quantiles = tlx::div_ceil(total_size, quantile_size_);
+
+        if (num_quantiles == 1) {
+            // todo get rid of this bodge
+            return {{strptr.size()}, {0}};
+        }
 
         measuring_tool_.start("sample_quantiles");
         auto sample = SamplePolicy::sample_splitters(
