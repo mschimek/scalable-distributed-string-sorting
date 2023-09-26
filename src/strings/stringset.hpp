@@ -422,7 +422,8 @@ struct StringData : public Members... {
         return {
             this->string,
             static_cast<Members const&>(*this)...,
-            std::forward<NewMembers>(args)...};
+            std::forward<NewMembers>(args)...
+        };
     }
 };
 
@@ -536,8 +537,7 @@ public:
 
     static String empty_string() {
         static Char zero_char = 0;
-        static String zero{&zero_char};
-        return zero;
+        return {&zero_char};
     }
 
     // todo move
@@ -621,19 +621,17 @@ public:
     String& operator[](Iterator const i) const { return *i; }
 
     //! Return length of the referenced string.
-    size_t get_length(String const& str) const { return str.getLength(); }
+    size_t get_length(String const& str) const { return str.length; }
 
     //! Return CharIterator for referenced string, which belong to this set.
     CharIterator get_chars(String const& s, size_t depth) const { return s.string + depth; }
 
     //! Returns true if CharIterator is at end of the given String
-    bool is_end(String const& s, CharIterator const& i) const {
-        return i - s.getChars() < s.length();
-    }
+    bool is_end(String const& s, CharIterator const& i) const { return i == (s.string + s.length); }
 
     //! Return complete string (for debugging purposes)
     std::string get_string(String const& s, size_t depth = 0) const {
-        return {reinterpret_cast<char const*>(s.string) + depth};
+        return {reinterpret_cast<char const*>(s.string) + depth, s.length - depth};
     }
 
     //! Subset this string set using iterator range.
@@ -654,10 +652,7 @@ public:
         }
     }
 
-    static String empty_string() {
-        static String zero{nullptr, Length{0}};
-        return zero;
-    }
+    static String empty_string() { return {nullptr, Length{0}}; }
 
 private:
     //! array of string pointers
