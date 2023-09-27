@@ -18,13 +18,8 @@
 namespace dss_mehnert {
 namespace sorter {
 
-template <
-    typename Char,
-    typename Subcommunicators,
-    typename SamplePolicy,
-    typename PartitionPolicy,
-    typename SorterPolicy>
-class SpaceEfficientSort : private SamplePolicy {
+template <typename Char, typename Subcommunicators, typename PartitionPolicy, typename SorterPolicy>
+class SpaceEfficientSort : private PartitionPolicy {
 public:
     using StringSet = CompressedStringSet<Char, StringIndex, PEIndex>;
     using StringPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
@@ -32,9 +27,9 @@ public:
 
     using MaterializedStringSet = dss_mehnert::StringSet<Char, Length, StringIndex, PEIndex>;
 
-    SpaceEfficientSort(SamplePolicy const sampler, size_t const quantile_size)
-        : SamplePolicy{sampler},
-          sorter_{sampler},
+    SpaceEfficientSort(PartitionPolicy const partition, size_t const quantile_size)
+        : PartitionPolicy{partition},
+          sorter_{partition},
           quantile_size_{std::max<size_t>(1, quantile_size)} {}
 
     std::vector<StringIndexPEIndex>
@@ -134,23 +129,16 @@ private:
             return {{strptr.size()}, {0}};
         }
 
-        measuring_tool_.start("sample_quantiles");
-        auto sample = SamplePolicy::sample_splitters(
+        measuring_tool_.start("compute_quantile_sizes");
+        auto sizes = PartitionPolicy::compute_partition(
             strptr.active(),
             num_quantiles,
             sample::NoExtraArg{},
             comm
         );
-        measuring_tool_.stop("sample_quantiles");
-
-
-        measuring_tool_.start("sort_quantiles");
-        auto sizes =
-            PartitionPolicy::compute_partition(strptr, std::move(sample), num_quantiles, comm);
-
         std::vector<size_t> offsets(sizes.size());
         std::exclusive_scan(sizes.begin(), sizes.end(), offsets.begin(), size_t{0});
-        measuring_tool_.stop("sort_quantiles");
+        measuring_tool_.stop("compute_quantile_sizes");
 
         return {std::move(sizes), std::move(offsets)};
     }

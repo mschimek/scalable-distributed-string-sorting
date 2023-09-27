@@ -40,11 +40,11 @@ template <
     typename Subcommunicators,
     typename RedistributionPolicy,
     typename AllToAllStringPolicy,
-    typename SamplePolicy,
     typename PartitionPolicy>
-class BaseDistributedMergeSort : private AllToAllStringPolicy, private SamplePolicy {
+class BaseDistributedMergeSort : private AllToAllStringPolicy, private PartitionPolicy {
 public:
-    explicit BaseDistributedMergeSort(SamplePolicy sampler) : SamplePolicy{std::move(sampler)} {}
+    explicit BaseDistributedMergeSort(PartitionPolicy const partition)
+        : PartitionPolicy{partition} {}
 
 protected:
     using Communicator = Subcommunicators::Communicator;
@@ -74,20 +74,14 @@ protected:
         measuring_tool_.add(num_groups, "num_groups");
         measuring_tool_.add(group_size, "group_size");
 
-        measuring_tool_.start("sample_splitters");
-        auto sample =
-            SamplePolicy::sample_splitters(strptr.active(), num_groups, extra_arg, comm_orig);
-        measuring_tool_.stop("sample_splitters");
-
         measuring_tool_.start("sort_globally", "compute_partition");
-        measuring_tool_.setPhase("bucket_computation");
         auto interval_sizes =
-            PartitionPolicy::compute_partition(strptr, std::move(sample), num_groups, comm_orig);
+            PartitionPolicy::compute_partition(strptr, num_groups, extra_arg, comm_orig);
         measuring_tool_.stop("sort_globally", "compute_partition");
 
         measuring_tool_.start("sort_globally", "exchange_and_merge");
-        auto const& ss = strptr.active();
-        auto send_counts = RedistributionPolicy::compute_send_counts(ss, interval_sizes, level);
+        auto send_counts =
+            RedistributionPolicy::compute_send_counts(strptr.active(), interval_sizes, level);
         assert_equal(send_counts.size(), comm_exchange.size());
         auto sorted_container =
             exchange_and_merge(std::move(container), send_counts, comm_exchange, extra_arg);
@@ -102,14 +96,9 @@ protected:
         auto strptr = container.make_string_lcp_ptr();
         measuring_tool_.add(container.size(), "num_strings");
 
-        measuring_tool_.start("sample_splitters");
-        auto sample = SamplePolicy::sample_splitters(strptr.active(), comm.size(), extra_arg, comm);
-        measuring_tool_.stop("sample_splitters");
-
         measuring_tool_.start("sort_globally", "compute_partition");
-        measuring_tool_.setPhase("bucket_computation");
         auto interval_sizes =
-            PartitionPolicy::compute_partition(strptr, std::move(sample), comm.size(), comm);
+            PartitionPolicy::compute_partition(strptr, comm.size(), extra_arg, comm);
         measuring_tool_.stop("sort_globally", "compute_partition");
 
         measuring_tool_.start("sort_globally", "exchange_and_merge");
@@ -192,20 +181,17 @@ template <
     typename Subcommunicators,
     typename RedistributionPolicy,
     typename AllToAllStringPolicy,
-    typename SamplePolicy,
     typename PartitionPolicy>
 class DistributedMergeSort : private BaseDistributedMergeSort<
                                  Subcommunicators,
                                  RedistributionPolicy,
                                  AllToAllStringPolicy,
-                                 SamplePolicy,
                                  PartitionPolicy> {
 public:
     using Base = BaseDistributedMergeSort<
         Subcommunicators,
         RedistributionPolicy,
         AllToAllStringPolicy,
-        SamplePolicy,
         PartitionPolicy>;
 
     using Base::Base;

@@ -30,13 +30,51 @@ template <typename Char, bool is_indexed>
 using SorterStringSet =
     std::conditional_t<is_indexed, StringSet<Char, Length, Index>, StringSet<Char, Length>>;
 
+template <typename SamplePolicy, typename SplitterPolicy>
+class PartitionPolicy : private SamplePolicy, private SplitterPolicy {
+public:
+    explicit PartitionPolicy(size_t const sampling_factor) : SamplePolicy{sampling_factor} {}
+
+    template <typename StringPtr, typename SamplerArg>
+    std::vector<size_t> compute_partition(
+        StringPtr const& strptr,
+        size_t const num_partitions,
+        SamplerArg const arg,
+        Communicator const& comm
+    ) const {
+        auto& measuring_tool = measurement::MeasuringTool::measuringTool();
+
+        measuring_tool.start("sample_strings");
+        auto sample = SamplePolicy::sample_splitters(strptr.active(), num_partitions, arg, comm);
+        measuring_tool.stop("sample_strings");
+
+        auto chosen_splitters =
+            SplitterPolicy::select_splitters(strptr, std::move(sample), num_partitions, comm);
+
+        measuring_tool.start("compute_intervals");
+        auto splitter_set = chosen_splitters.make_string_set();
+        std::vector<size_t> interval_sizes;
+        if constexpr (SamplePolicy::is_indexed) {
+            // todo this is being computed redundantly multiple times
+            auto local_offset = sample::get_local_offset(strptr.size(), comm);
+            interval_sizes =
+                compute_interval_binary_index(strptr.active(), splitter_set, local_offset);
+        } else {
+            interval_sizes = compute_interval_binary(strptr.active(), splitter_set);
+        }
+        measuring_tool.stop("compute_intervals");
+
+        return interval_sizes;
+    }
+};
+
 template <typename Char, bool is_indexed, typename Derived>
-class PartitionPolicy {
+class BaseSplitterPolicy {
 public:
     using Sample = sample::SampleResult<Char, is_indexed>;
 
     template <typename StringPtr>
-    static std::vector<size_t> compute_partition(
+    static auto select_splitters(
         StringPtr const& strptr,
         Sample&& sample,
         size_t const num_partitions,
@@ -53,26 +91,13 @@ public:
         auto chosen_splitters = Derived::choose_splitters(sample_set, num_partitions, comm);
         measuring_tool.stop("choose_splitters");
 
-        measuring_tool.start("compute_interval_sizes");
-        auto splitter_set = chosen_splitters.make_string_set();
-        std::vector<size_t> interval_sizes;
-        if constexpr (is_indexed) {
-            // todo this is being computed redundantly multiple times
-            auto local_offset = sample::get_local_offset(strptr.size(), comm);
-            interval_sizes =
-                compute_interval_binary_index(strptr.active(), splitter_set, local_offset);
-        } else {
-            interval_sizes = compute_interval_binary(strptr.active(), splitter_set);
-        }
-        measuring_tool.stop("compute_interval_sizes");
-
-        return interval_sizes;
+        return chosen_splitters;
     }
 };
 
 template <typename Char, bool is_indexed>
-class RQuickV1 : public PartitionPolicy<Char, is_indexed, RQuickV1<Char, is_indexed>> {
-    friend PartitionPolicy<Char, is_indexed, RQuickV1<Char, is_indexed>>;
+class RQuickV1 : public BaseSplitterPolicy<Char, is_indexed, RQuickV1<Char, is_indexed>> {
+    friend BaseSplitterPolicy<Char, is_indexed, RQuickV1<Char, is_indexed>>;
 
 private:
     static constexpr int tag = 50352;
@@ -104,8 +129,8 @@ private:
 };
 
 template <typename Char, bool is_indexed, bool use_lcps>
-class RQuickV2 : public PartitionPolicy<Char, is_indexed, RQuickV2<Char, is_indexed, use_lcps>> {
-    friend PartitionPolicy<Char, is_indexed, RQuickV2<Char, is_indexed, use_lcps>>;
+class RQuickV2 : public BaseSplitterPolicy<Char, is_indexed, RQuickV2<Char, is_indexed, use_lcps>> {
+    friend BaseSplitterPolicy<Char, is_indexed, RQuickV2<Char, is_indexed, use_lcps>>;
 
 private:
     static constexpr int tag = 23560;
@@ -138,8 +163,8 @@ private:
 
 // todo consider adding a CLI option for this
 template <typename Char, bool is_indexed>
-class Sequential : public PartitionPolicy<Char, is_indexed, Sequential<Char, is_indexed>> {
-    friend PartitionPolicy<Char, is_indexed, Sequential<Char, is_indexed>>;
+class Sequential : public BaseSplitterPolicy<Char, is_indexed, Sequential<Char, is_indexed>> {
+    friend BaseSplitterPolicy<Char, is_indexed, Sequential<Char, is_indexed>>;
 
 private:
     using StringSet = SorterStringSet<Char, is_indexed>;
@@ -153,7 +178,8 @@ private:
             auto recv_indices = comm.allgatherv(kamping::send_buf(sample.indices));
             global_samples = StringContainer{
                 recv_sample.extract_recv_buffer(),
-                make_initializer<Index>(recv_indices.extract_recv_buffer())};
+                make_initializer<Index>(recv_indices.extract_recv_buffer())
+            };
         } else {
             global_samples = StringLcpContainer{recv_sample.extract_recv_buffer()};
         }

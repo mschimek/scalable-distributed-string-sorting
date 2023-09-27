@@ -41,21 +41,18 @@ template <
     typename Subcommunicators,
     typename RedistributionPolicy,
     typename AllToAllStringPolicy,
-    typename SamplePolicy,
     typename PartitionPolicy,
     typename BloomFilter>
 class PrefixDoublingMergeSort : private BaseDistributedMergeSort<
                                     Subcommunicators,
                                     RedistributionPolicy,
                                     AllToAllStringPolicy,
-                                    SamplePolicy,
                                     PartitionPolicy> {
 public:
     using Base = BaseDistributedMergeSort<
         Subcommunicators,
         RedistributionPolicy,
         AllToAllStringPolicy,
-        SamplePolicy,
         PartitionPolicy>;
 
     using Base::Base;

@@ -130,7 +130,6 @@ auto generate_strings(SorterArgs const& args, dss_mehnert::Communicator const& c
 
 template <
     typename CharType,
-    typename SamplePolicy,
     typename PartitionPolicy,
     typename MPIAllToAllRoutine,
     typename Subcommunicators,
@@ -159,7 +158,6 @@ void run_merge_sort(
         Subcommunicators,
         RedistributionPolicy,
         AllToAllPolicy,
-        SamplePolicy,
         PartitionPolicy>;
 
     using dss_mehnert::measurement::MeasuringTool;
@@ -190,7 +188,7 @@ void run_merge_sort(
     Subcommunicators comms{first_level, args.levels.end(), comm};
     measuring_tool.stop("none", "create_communicators", comm);
 
-    MergeSort merge_sort{SamplePolicy{args.sampling_factor}};
+    MergeSort merge_sort{PartitionPolicy{args.sampling_factor}};
     auto sorted_container = merge_sort.sort(std::move(input_container), comms);
 
     measuring_tool.stop("none", "sorting_overall", comm);
@@ -222,7 +220,6 @@ void run_merge_sort(
 
 template <
     typename CharType,
-    typename SamplePolicy,
     typename PartitionPolicy,
     typename MPIAllToAllRoutine,
     typename Subcommunicators,
@@ -254,7 +251,6 @@ void run_prefix_doubling(
         Subcommunicators,
         RedistributionPolicy,
         AllToAllPolicy,
-        SamplePolicy,
         PartitionPolicy,
         BloomFilterPolicy>;
 
@@ -287,7 +283,7 @@ void run_prefix_doubling(
     Subcommunicators comms{first_level, args.levels.end(), comm};
     measuring_tool.stop("none", "create_communicators", comm);
 
-    MergeSort merge_sort{SamplePolicy{args.sampling_factor}};
+    MergeSort merge_sort{PartitionPolicy{args.sampling_factor}};
     auto permutation = merge_sort.sort(std::move(input_container), comms);
 
     measuring_tool.stop("none", "sorting_overall", comm);
@@ -354,7 +350,6 @@ std::string get_result_prefix(
 
 template <
     typename CharType,
-    typename SamplePolicy,
     typename PartitionPolicy,
     typename MPIAllToAllRoutine,
     typename Subcommunicators,
@@ -519,19 +514,22 @@ void arg2(CombinationKey const& key, SorterArgs const& args) {
 
     if (key.rquick_v1) {
         if constexpr (CliOptions::enable_rquick_v1) {
-            arg3<CharType, Sampler, RQuickV1<CharType, is_indexed>>(key, args);
+            using Splitter = RQuickV1<CharType, is_indexed>;
+            arg3<CharType, PartitionPolicy<Sampler, Splitter>>(key, args);
         } else {
             die_with_feature("CLI_ENABLE_RQUICK_V1");
         }
     } else {
         if (key.rquick_lcp) {
             if constexpr (CliOptions::enable_rquick_lcp) {
-                arg3<CharType, Sampler, RQuickV2<CharType, is_indexed, true>>(key, args);
+                using Splitter = RQuickV2<CharType, is_indexed, true>;
+                arg3<CharType, PartitionPolicy<Sampler, Splitter>>(key, args);
             } else {
                 die_with_feature("CLI_ENABLE_RQUICK_LCP");
             }
         } else {
-            arg3<CharType, Sampler, RQuickV2<CharType, is_indexed, false>>(key, args);
+            using Splitter = RQuickV2<CharType, is_indexed, false>;
+            arg3<CharType, PartitionPolicy<Sampler, Splitter>>(key, args);
         }
     }
 }
