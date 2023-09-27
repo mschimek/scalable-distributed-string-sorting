@@ -37,14 +37,14 @@ template <typename StringSet, typename... Member, typename... InputIt, typename 
 void init_strings_impl(
     std::vector<typename StringSet::Char>& raw_strings,
     std::tuple<Initializer<Member, InputIt>...> initializers,
-    OutputIt dest
+    OutputIt d_str
 ) {
     using String = StringSet::String;
 
     auto const begin = raw_strings.begin(), end = raw_strings.end();
 
     size_t i = 0;
-    for (auto char_it = begin; char_it != end; ++char_it, ++i, ++dest) {
+    for (auto char_it = begin; char_it != end; ++char_it, ++i, ++d_str) {
         auto const str_begin = char_it;
         while (*char_it != 0) {
             ++char_it;
@@ -53,14 +53,14 @@ void init_strings_impl(
 
         if constexpr (StringSet::has_length) {
             size_t const str_len = std::distance(str_begin, str_end);
-            *dest = std::apply(
+            *d_str = std::apply(
                 [=](Initializer<Member, InputIt> const&... init) {
                     return String{&*str_begin, Length{str_len}, Member{init.begin[i]}...};
                 },
                 initializers
             );
         } else {
-            *dest = std::apply(
+            *d_str = std::apply(
                 [=](Initializer<Member, InputIt> const&... init) {
                     return String{&*str_begin, Member{init.begin[i]}...};
                 },
@@ -90,13 +90,11 @@ void init_strings(
 
     } else {
         assert(std::apply([size](auto const&... x) { return (size(x) == ...); }, initializers));
-        // todo I'm unhappy with the usage of back_inserter here, but resize
-        // todo gives weird potential null-dereference warnings again
         strings.clear();
         strings.reserve(size(std::get<0>(initializers)));
 
-        assert_equal(std::ssize(strings), std::count(raw_strings.begin(), raw_strings.end(), 0));
         init_strings_impl<StringSet>(raw_strings, initializers, std::back_inserter(strings));
+        assert_equal(std::ssize(strings), std::count(raw_strings.begin(), raw_strings.end(), 0));
     }
 }
 
@@ -315,36 +313,34 @@ public:
         delete_lcps();
     }
 
-    template <typename StringSet, typename LcpIt>
-    void extend_prefix(StringSet const& ss, LcpIt const first_lcp, LcpIt const last_lcp) {
+    template <typename LcpIt>
+    void extend_prefix(LcpIt const first_lcp, LcpIt const last_lcp) {
+        auto const ss = this->make_string_set();
+
         assert_equal(std::distance(first_lcp, last_lcp), std::ssize(ss));
         assert(first_lcp == last_lcp || *first_lcp == 0);
-        if (ss.empty()) {
-            return;
-        }
 
         size_t const L = std::accumulate(first_lcp, last_lcp, size_t{0});
-        std::vector<typename StringSet::Char> raw_strings(this->char_size() + L);
-        auto prev_chars = raw_strings.begin();
-        auto curr_chars = raw_strings.begin();
+        std::vector<Char> raw_strings(this->char_size() + L);
+        auto prev_chars = raw_strings.begin(), curr_chars = prev_chars;
 
-        auto lcp_it = first_lcp;
-        for (auto it = ss.begin(); it != ss.end(); ++it, ++lcp_it) {
-            auto& curr_str = ss[it];
+        for (auto lcp_it = first_lcp; auto& curr_str: ss) {
+            auto const curr_lcp = *lcp_it++;
             auto curr_str_begin = ss.get_chars(curr_str, 0);
             auto curr_str_len = ss.get_length(curr_str) + 1;
 
             curr_str.string = &(*curr_chars);
-            curr_str.length = curr_str_len + *lcp_it - 1;
+            curr_str.length = curr_str_len + curr_lcp - 1;
 
             // copy common prefix from previous string
             auto lcp_chars = std::exchange(prev_chars, curr_chars);
-            curr_chars = std::copy_n(lcp_chars, *lcp_it, curr_chars);
+            curr_chars = std::copy_n(lcp_chars, curr_lcp, curr_chars);
 
             // copy remaining (distinct) characters
             curr_chars = std::copy_n(curr_str_begin, curr_str_len, curr_chars);
         }
 
+        raw_strings.erase(curr_chars, raw_strings.end());
         *this->raw_strings_ = std::move(raw_strings);
     }
 

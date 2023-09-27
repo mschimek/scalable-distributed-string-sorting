@@ -34,7 +34,7 @@ template <typename DataType>
 inline std::vector<DataType> alltoall(std::vector<DataType> const& send_data, environment env) {
     using dss_schimek::measurement::MeasuringTool;
     MeasuringTool& measuringTool = MeasuringTool::measuringTool();
-    const size_t sentItems = send_data.size();
+    size_t const sentItems = send_data.size();
     measuringTool.addRawCommunication(sentItems * sizeof(DataType), "alltoall");
 
     std::vector<DataType> receive_data(send_data.size(), 0);
@@ -210,9 +210,9 @@ inline void set_interval_start_lcp(LcpIter lcp_it, IntervalIter begin, IntervalI
     }
 }
 
-template <bool compress_prefixes>
+template <bool compress_prefixes, typename StringSet>
 std::pair<unsigned char*, size_t>
-write_interval(unsigned char* buffer, auto const& ss, size_t const* lcps) {
+write_interval(unsigned char* buffer, StringSet const& ss, size_t const* lcps) {
     auto dest = buffer;
     for (auto const& str: ss) {
         size_t str_depth;
@@ -230,9 +230,10 @@ write_interval(unsigned char* buffer, auto const& ss, size_t const* lcps) {
     return {dest, static_cast<size_t>(dest - buffer)};
 }
 
-template <bool compress_prefixes>
-std::pair<unsigned char*, size_t>
-write_interval(unsigned char* buffer, auto const& ss, size_t const* lcps, size_t const* prefixes) {
+template <bool compress_prefixes, typename StringSet>
+std::pair<unsigned char*, size_t> write_interval(
+    unsigned char* buffer, StringSet const& ss, size_t const* lcps, size_t const* prefixes
+) {
     auto dest = buffer;
     for (auto const& str: ss) {
         size_t str_depth;

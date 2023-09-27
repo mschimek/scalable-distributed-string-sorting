@@ -82,8 +82,7 @@ public:
         StringLcpContainer<StringPEIndexSet> index_container{
             container.release_raw_strings(),
             std::move(strings),
-            container.release_lcps()
-        };
+            container.release_lcps()};
         container.delete_all();
         this->measuring_tool_.stop("init_container");
 
@@ -110,7 +109,7 @@ public:
             return write_permutation(strptr.active());
         } else {
             this->measuring_tool_.start("bloomfilter", "bloomfilter_overall");
-            auto prefixes = compute_distinguishing_prefixes(strptr, comms);
+            auto const prefixes = compute_distinguishing_prefixes(strptr, comms);
             this->measuring_tool_.stop("bloomfilter", "bloomfilter_overall", comms.comm_root());
 
             auto sorted_container = sort_impl_(std::move(container), comms, prefixes);
@@ -135,8 +134,7 @@ private:
         auto sorted_container = this->sort_exhaustive(
             std::move(container),
             comms.comm_final(),
-            sample::DistPrefixes{dist_prefixes},
-            dist_prefixes
+            sample::DistPrefixes{dist_prefixes}
         );
         this->measuring_tool_.stop("sort_globally", "final_sorting");
 
@@ -157,8 +155,7 @@ private:
             auto sorted_container = this->sort_exhaustive(
                 std::move(container),
                 comms.comm_final(),
-                sample::DistPrefixes{dist_prefixes},
-                dist_prefixes
+                sample::DistPrefixes{dist_prefixes}
             );
             this->measuring_tool_.stop("sort_globally", "final_sorting");
 
@@ -173,8 +170,7 @@ private:
             container = this->sort_partial(
                 std::move(container),
                 *level++,
-                sample::DistPrefixes{dist_prefixes},
-                dist_prefixes
+                sample::DistPrefixes{dist_prefixes}
             );
             this->measuring_tool_.stop("sort_globally", "partial_sorting", comms.comm_root());
             this->measuring_tool_.setRound(++round);

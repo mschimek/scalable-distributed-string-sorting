@@ -54,15 +54,13 @@ protected:
 
     template <
         typename Container,
-        typename SampleArg,
-        typename... AllToAllArgs,
+        typename ExtraArg,
         typename Subcommunicators_ = Subcommunicators,
         std::enable_if_t<Subcommunicators_::is_multi_level, bool> = true>
     auto sort_partial(
         Container&& container,
         multi_level::Level<Communicator> const& level,
-        SampleArg const sample_arg,
-        AllToAllArgs... extra_all_to_all_args
+        ExtraArg const extra_arg
     ) {
         auto const& comm_orig = level.comm_orig;
         auto const& comm_exchange = level.comm_exchange;
@@ -78,7 +76,7 @@ protected:
 
         measuring_tool_.start("sample_splitters");
         auto sample =
-            SamplePolicy::sample_splitters(strptr.active(), num_groups, sample_arg, comm_orig);
+            SamplePolicy::sample_splitters(strptr.active(), num_groups, extra_arg, comm_orig);
         measuring_tool_.stop("sample_splitters");
 
         measuring_tool_.start("sort_globally", "compute_partition");
@@ -91,30 +89,21 @@ protected:
         auto const& ss = strptr.active();
         auto send_counts = RedistributionPolicy::compute_send_counts(ss, interval_sizes, level);
         assert_equal(send_counts.size(), comm_exchange.size());
-        auto sorted_container = exchange_and_merge(
-            std::move(container),
-            send_counts,
-            comm_exchange,
-            extra_all_to_all_args...
-        );
+        auto sorted_container =
+            exchange_and_merge(std::move(container), send_counts, comm_exchange, extra_arg);
         measuring_tool_.stop("sort_globally", "exchange_and_merge");
 
         return sorted_container;
     }
 
-    template <typename Container, typename SampleArg, typename... AllToAllArgs>
-    auto sort_exhaustive(
-        Container&& container,
-        Communicator const& comm,
-        SampleArg const sample_arg,
-        AllToAllArgs... extra_all_to_all_args
-    ) {
+    template <typename Container, typename ExtraArg>
+    auto
+    sort_exhaustive(Container&& container, Communicator const& comm, ExtraArg const extra_arg) {
         auto strptr = container.make_string_lcp_ptr();
         measuring_tool_.add(container.size(), "num_strings");
 
         measuring_tool_.start("sample_splitters");
-        auto sample =
-            SamplePolicy::sample_splitters(strptr.active(), comm.size(), sample_arg, comm);
+        auto sample = SamplePolicy::sample_splitters(strptr.active(), comm.size(), extra_arg, comm);
         measuring_tool_.stop("sample_splitters");
 
         measuring_tool_.start("sort_globally", "compute_partition");
@@ -124,34 +113,37 @@ protected:
         measuring_tool_.stop("sort_globally", "compute_partition");
 
         measuring_tool_.start("sort_globally", "exchange_and_merge");
-        auto sorted_container = exchange_and_merge(
-            std::move(container),
-            interval_sizes,
-            comm,
-            extra_all_to_all_args...
-        );
+        auto sorted_container =
+            exchange_and_merge(std::move(container), interval_sizes, comm, extra_arg);
         measuring_tool_.stop("sort_globally", "exchange_and_merge");
 
         return sorted_container;
     }
 
-    template <typename Container, typename... AllToAllArgs>
+    template <typename Container, typename ExtraArg>
     auto exchange_and_merge(
         Container&& container,
         std::vector<size_t>& send_counts,
         Communicator const& comm,
-        AllToAllArgs... extra_all_to_all_args
+        ExtraArg const extra_arg
     ) {
         measuring_tool_.setPhase("string_exchange");
         measuring_tool_.start("all_to_all_strings");
 
-        auto alltoall_result = comm.alltoall(kamping::send_buf(send_counts));
-        auto recv_counts = alltoall_result.extract_recv_buffer();
+        auto recv_counts = comm.alltoall(kamping::send_buf(send_counts)).extract_recv_buffer();
 
-        auto alltoallv = [&, this](auto... args) {
-            return this->AllToAllStringPolicy::alltoallv(container, send_counts, args..., comm);
-        };
-        auto recv_string_cont = std::apply(alltoallv, std::tuple{extra_all_to_all_args...});
+        auto recv_string_cont = [&, this] {
+            if constexpr (std::is_same_v<sample::DistPrefixes, ExtraArg>) {
+                return this->AllToAllStringPolicy::alltoallv(
+                    container,
+                    send_counts,
+                    extra_arg.prefixes,
+                    comm
+                );
+            } else {
+                return this->AllToAllStringPolicy::alltoallv(container, send_counts, comm);
+            };
+        }();
         container.delete_all();
         measuring_tool_.stop("all_to_all_strings");
 
@@ -168,30 +160,25 @@ protected:
         std::vector<size_t> offsets(recv_counts.size());
         std::exclusive_scan(recv_counts.begin(), recv_counts.end(), offsets.begin(), size_t{0});
 
-        if (recv_string_cont.size() > 0) {
-            auto& lcps = recv_string_cont.lcps();
-            auto set_lcp = [&lcps](auto const offset) { lcps[offset] = 0; };
-            std::for_each(offsets.begin(), offsets.end(), set_lcp);
+        auto const strptr = recv_string_cont.make_string_lcp_ptr();
+        if (!recv_string_cont.empty()) {
+            for (auto const offset: offsets) {
+                strptr.set_lcp(offset, 0);
+            }
         }
         measuring_tool_.stop("compute_ranges");
 
         measuring_tool_.start("merge_ranges");
-        auto result = choose_merge<AllToAllStringPolicy::PrefixCompression>(
-            recv_string_cont.make_string_lcp_ptr(),
-            offsets,
-            recv_counts
-        );
+        constexpr bool is_compressed = AllToAllStringPolicy::PrefixCompression;
+        auto result = choose_merge<is_compressed>(strptr, offsets, recv_counts);
         result.container.set(recv_string_cont.release_raw_strings());
         recv_string_cont.delete_all();
         measuring_tool_.stop("merge_ranges");
 
         measuring_tool_.start("prefix_decompression");
-        if constexpr (AllToAllStringPolicy::PrefixCompression) {
-            result.container.extend_prefix(
-                result.container.make_string_set(),
-                result.saved_lcps.begin(),
-                result.saved_lcps.end()
-            );
+        if constexpr (is_compressed) {
+            auto const& lcps = result.saved_lcps;
+            result.container.extend_prefix(lcps.begin(), lcps.end());
         }
         measuring_tool_.stop("prefix_decompression");
         measuring_tool_.stop("merge_strings");
