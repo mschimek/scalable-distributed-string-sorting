@@ -103,13 +103,17 @@ public:
             this->measuring_tool_.start("local_sorting", "sort_locally");
             tlx::sort_strings_detail::radixsort_CI3(strptr, 0, 0);
             this->measuring_tool_.stop("local_sorting", "sort_locally", comms.comm_root());
+        } else {
+            assert(strptr.active().check_order());
         }
 
         if (comms.comm_root().size() == 1) {
             return write_permutation(strptr.active());
         } else {
             this->measuring_tool_.start("bloomfilter", "bloomfilter_overall");
-            auto const prefixes = compute_distinguishing_prefixes(strptr, comms);
+            BloomFilter bloom_filter{comms, strptr.size()};
+            auto const prefixes =
+                bloom_filter.compute_distinguishing_prefixes(strptr, comms, start_depth);
             this->measuring_tool_.stop("bloomfilter", "bloomfilter_overall", comms.comm_root());
 
             auto sorted_container = sort_impl_(std::move(container), comms, prefixes);
@@ -117,6 +121,18 @@ public:
             this->measuring_tool_.setRound(0);
             return write_permutation(sorted_container.make_string_set());
         }
+    }
+
+    std::vector<StringIndexPEIndex> sort(
+        StringPEIndexContainer&& container,
+        std::vector<size_t> const& dist_prefixes,
+        Subcommunicators const& comms
+    ) {
+        assert(container.make_string_set().check_order());
+        auto sorted_container = sort_impl_(std::move(container), comms, dist_prefixes);
+
+        this->measuring_tool_.setRound(0);
+        return write_permutation(sorted_container.make_string_set());
     }
 
 private:
@@ -185,7 +201,7 @@ private:
         }
 
         this->measuring_tool_.start("sort_globally", "final_sorting");
-        // final level of multi-level sort
+        // final level of multi-level sort, don't consider distinguishing prefixes
         auto sorted_container =
             this->sort_exhaustive(std::move(container), comms.comm_final(), sample::NoExtraArg{});
         this->measuring_tool_.stop("sort_globally", "final_sorting");
@@ -204,39 +220,6 @@ private:
 
         this->measuring_tool_.setPhase("none");
         return permutation;
-    }
-
-    std::vector<size_t>
-    compute_distinguishing_prefixes(StringPEIndexPtr strptr, Subcommunicators const& comms) {
-        this->measuring_tool_.start("bloomfilter_init");
-        auto const& ss = strptr.active();
-        BloomFilter bloom_filter{comms, ss.size()};
-        std::vector<size_t> results(ss.size());
-        this->measuring_tool_.stop("bloomfilter_init");
-
-        size_t round = 0;
-        this->measuring_tool_.setRound(round);
-        std::vector<size_t> candidates = bloom_filter.filter(strptr, start_depth, results);
-
-        for (size_t i = start_depth * 2; i < std::numeric_limits<size_t>::max(); i *= 2) {
-            this->measuring_tool_.add(candidates.size(), "bloomfilter_numberCandidates");
-            this->measuring_tool_.start("bloomfilter_allreduce");
-            auto const all_empty = comms.comm_root().allreduce_single(
-                kamping::send_buf({candidates.empty()}),
-                kamping::op(std::logical_and<>{})
-            );
-            this->measuring_tool_.stop("bloomfilter_allreduce");
-
-            if (all_empty) {
-                break;
-            }
-
-            this->measuring_tool_.setRound(++round);
-            candidates = bloom_filter.filter(strptr, i, results, candidates);
-        }
-
-        this->measuring_tool_.setRound(0);
-        return results;
     }
 };
 

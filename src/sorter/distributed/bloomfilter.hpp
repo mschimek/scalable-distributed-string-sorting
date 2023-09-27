@@ -306,6 +306,38 @@ public:
     explicit BloomFilter(size_t size)
         : hash_values_((HashPolicy::supports_hash_reuse) ? size : 0) {}
 
+    template <typename StringPtr, typename Subcommunicators>
+    std::vector<size_t> compute_distinguishing_prefixes(
+        StringPtr const& strptr, Subcommunicators const& comms, size_t const start_depth
+    ) {
+        auto const& ss = strptr.active();
+        std::vector<size_t> results(ss.size());
+
+        size_t round = 0;
+        measuring_tool_.setRound(round);
+        std::vector<size_t> candidates = filter(strptr, start_depth, results);
+
+        for (size_t i = start_depth * 2; i < std::numeric_limits<size_t>::max(); i *= 2) {
+            measuring_tool_.add(candidates.size(), "bloomfilter_numberCandidates");
+            measuring_tool_.start("bloomfilter_allreduce");
+            auto const all_empty = comms.comm_root().allreduce_single(
+                kamping::send_buf({candidates.empty()}),
+                kamping::op(std::logical_and<>{})
+            );
+            measuring_tool_.stop("bloomfilter_allreduce");
+
+            if (all_empty) {
+                break;
+            }
+
+            measuring_tool_.setRound(++round);
+            candidates = filter(strptr, i, results, candidates);
+        }
+
+        measuring_tool_.setRound(0);
+        return results;
+    }
+
     template <typename StringSet, typename... Candidates>
     std::vector<size_t> filter(
         StringLcpPtr<StringSet> const strptr,
@@ -313,35 +345,34 @@ public:
         std::vector<size_t>& results,
         Candidates const&... candidates
     ) {
-        auto& measuringTool = measurement::MeasuringTool::measuringTool();
         auto const& ss = strptr.active();
 
-        measuringTool.start("bloomfilter_find_local_duplicates");
+        measuring_tool_.start("bloomfilter_find_local_duplicates");
         auto hash_pairs = generate_hash_pairs(ss, candidates..., depth, strptr.lcp());
         auto& hash_idx_pairs = hash_pairs.hash_idx_pairs;
 
         ips4o::sort(hash_idx_pairs.begin(), hash_idx_pairs.end(), hash_less<HashStringIndex>{});
         auto local_hash_dups = get_local_duplicates(hash_idx_pairs);
         std::erase_if(hash_idx_pairs, std::not_fn(should_send));
-        measuringTool.stop("bloomfilter_find_local_duplicates");
+        measuring_tool_.stop("bloomfilter_find_local_duplicates");
 
-        measuringTool.start("bloomfilter_find_remote_duplicates");
+        measuring_tool_.start("bloomfilter_find_remote_duplicates");
         auto remote_dups = static_cast<Derived*>(this)->find_remote_duplicates(
             hash_idx_pairs,
             HashRange{0, filter_size}
         );
-        measuringTool.stop("bloomfilter_find_remote_duplicates");
+        measuring_tool_.stop("bloomfilter_find_remote_duplicates");
 
-        measuringTool.start("bloomfilter_merge_duplicates");
+        measuring_tool_.start("bloomfilter_merge_duplicates");
         auto& local_lcp_dups = hash_pairs.lcp_duplicates;
         auto remote_dups_ =
             prune_remote_duplicates(remote_dups.value_or(std::vector<int>{}), hash_idx_pairs);
         auto final_duplicates = merge_duplicates(local_hash_dups, local_lcp_dups, remote_dups_);
-        measuringTool.stop("bloomfilter_merge_duplicates");
+        measuring_tool_.stop("bloomfilter_merge_duplicates");
 
-        measuringTool.start("bloomfilter_write_depth");
+        measuring_tool_.start("bloomfilter_write_depth");
         set_depth(ss, depth, candidates..., hash_pairs.eos_candidates, results);
-        measuringTool.stop("bloomfilter_write_depth");
+        measuring_tool_.stop("bloomfilter_write_depth");
 
         return final_duplicates;
     }
@@ -350,6 +381,9 @@ protected:
     std::vector<hash_t> hash_values_;
 
 private:
+    using MeasuringTool = measurement::MeasuringTool;
+    MeasuringTool& measuring_tool_ = MeasuringTool::measuringTool();
+
     struct GeneratedHashPairs {
         std::vector<HashStringIndex> hash_idx_pairs;
         std::vector<size_t> lcp_duplicates;

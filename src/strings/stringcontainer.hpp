@@ -12,7 +12,6 @@
 #include <numeric>
 #include <vector>
 
-#include <stdint.h>
 #include <tlx/logger.hpp>
 #include <tlx/sort/strings/string_ptr.hpp>
 
