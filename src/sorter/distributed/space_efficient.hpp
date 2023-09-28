@@ -11,6 +11,7 @@
 
 #include "mpi/communicator.hpp"
 #include "sorter/distributed/prefix_doubling.hpp"
+#include "sorter/distributed/sample.hpp"
 #include "strings/stringcontainer.hpp"
 #include "strings/stringset.hpp"
 #include "util/measuringTool.hpp"
@@ -124,18 +125,9 @@ private:
         measuring_tool_.stop("compute_num_quantiles");
         measuring_tool_.add(num_quantiles, "num_quantiles");
 
-        if (num_quantiles == 1) {
-            // todo get rid of this bodge
-            return {{strptr.size()}, {0}};
-        }
-
         measuring_tool_.start("compute_quantile_sizes");
-        auto sizes = PartitionPolicy::compute_partition(
-            strptr.active(),
-            num_quantiles,
-            sample::NoExtraArg{},
-            comm
-        );
+        sample::NoExtraArg const arg;
+        auto sizes = PartitionPolicy::compute_partition(strptr, num_quantiles, arg, comm);
         std::vector<size_t> offsets(sizes.size());
         std::exclusive_scan(sizes.begin(), sizes.end(), offsets.begin(), size_t{0});
         measuring_tool_.stop("compute_quantile_sizes");

@@ -42,6 +42,11 @@ public:
         SamplerArg const arg,
         Communicator const& comm
     ) const {
+        assert(num_partitions > 0);
+        if (num_partitions == 1) {
+            return {strptr.size()};
+        }
+
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
         measuring_tool.start("sample_strings");
@@ -178,8 +183,7 @@ private:
             auto recv_indices = comm.allgatherv(kamping::send_buf(sample.indices));
             global_samples = StringContainer{
                 recv_sample.extract_recv_buffer(),
-                make_initializer<Index>(recv_indices.extract_recv_buffer())
-            };
+                make_initializer<Index>(recv_indices.extract_recv_buffer())};
         } else {
             global_samples = StringLcpContainer{recv_sample.extract_recv_buffer()};
         }

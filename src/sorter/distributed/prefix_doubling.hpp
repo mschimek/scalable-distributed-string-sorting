@@ -100,9 +100,8 @@ public:
             this->measuring_tool_.start("local_sorting", "sort_locally");
             tlx::sort_strings_detail::radixsort_CI3(strptr, 0, 0);
             this->measuring_tool_.stop("local_sorting", "sort_locally", comms.comm_root());
-        } else {
-            assert(strptr.active().check_order());
         }
+        assert(strptr.active().check_order());
 
         if (comms.comm_root().size() == 1) {
             return write_permutation(strptr.active());
@@ -120,6 +119,7 @@ public:
         }
     }
 
+    // todo this is no longer really prefix doubling merge sort
     std::vector<StringIndexPEIndex> sort(
         StringPEIndexContainer&& container,
         std::vector<size_t> const& dist_prefixes,

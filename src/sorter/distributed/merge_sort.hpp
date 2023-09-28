@@ -35,7 +35,6 @@ namespace dss_mehnert {
 namespace sorter {
 
 // todo this could also be an _internal namespace
-// todo remove defaulted environments (dss_schimek::mpi::environment env;)
 template <
     typename Subcommunicators,
     typename RedistributionPolicy,
