@@ -114,7 +114,7 @@ add_subdirectory(src)
 
 add_executable(distributed_sorter
   src/executables/distributed_sorter.cpp
-  src/executables/variant_selection.hpp)
+  src/executables/common_cli.hpp)
 
 target_include_directories(distributed_sorter PRIVATE
   "${CMAKE_CURRENT_BINARY_DIR}/include")
@@ -126,7 +126,7 @@ target_link_libraries(distributed_sorter tlx)
 
 add_executable(space_efficient_sorter
   src/executables/space_efficient_sorter.cpp
-  src/executables/variant_selection.hpp)
+  src/executables/common_cli.hpp)
 
 target_include_directories(space_efficient_sorter PRIVATE
   "${CMAKE_CURRENT_BINARY_DIR}/include")
