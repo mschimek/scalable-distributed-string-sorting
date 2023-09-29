@@ -137,8 +137,8 @@ void run_merge_sort(
 
     using StringSet = dss_mehnert::StringSet<CharType, dss_mehnert::Length>;
     using StringLcpPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
-    using AllToAllPolicy =
-        mpi::AllToAllStringImpl<lcp_compression, prefix_compression, StringSet, MPIAllToAllRoutine>;
+    using AllToAllPolicy = dss_mehnert::mpi::
+        AllToAllStringImpl<lcp_compression, prefix_compression, MPIAllToAllRoutine>;
 
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
     using MergeSort = dss_mehnert::sorter::
@@ -215,11 +215,8 @@ void run_prefix_doubling(
 
     using StringSet = dss_mehnert::StringSet<CharType, dss_mehnert::Length>;
     using StringLcpPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
-    using AllToAllPolicy = mpi::AllToAllStringImplPrefixDoubling<
-        lcp_compression,
-        prefix_compression,
-        StringSet,
-        MPIAllToAllRoutine>;
+    using AllToAllPolicy = dss_mehnert::mpi::
+        AllToAllStringImpl<lcp_compression, prefix_compression, MPIAllToAllRoutine>;
 
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
     using MergeSort = dss_mehnert::sorter::PrefixDoublingMergeSort<
@@ -311,8 +308,6 @@ void run(SorterArgs const& args) {
 
 
 int main(int argc, char* argv[]) {
-    kamping::Environment env{argc, argv};
-
     SorterArgs args;
 
     tlx::CmdlineParser cp;
@@ -358,6 +353,8 @@ int main(int argc, char* argv[]) {
     }
 
     parse_level_arg(levels_param, args.levels);
+
+    kamping::Environment env{argc, argv};
 
     using dss_mehnert::measurement::MeasuringTool;
     auto& measuring_tool = MeasuringTool::measuringTool();

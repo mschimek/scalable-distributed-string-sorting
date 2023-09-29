@@ -214,8 +214,8 @@ StringLcpContainer<StringSet> receive_strings(
     InputPermutation const& permutation,
     Communicator const& comm
 ) {
-    using namespace dss_schimek;
-    using MPIRoutine = mpi::AllToAllvCombined<mpi::AllToAllvSmall>;
+    using MPIAlltoall = dss_schimek::mpi::AllToAllvSmall;
+    using MPIRoutine = dss_schimek::mpi::AllToAllvCombined<MPIAlltoall>;
 
     std::vector<int> req_sizes(comm.size());
     for (auto const rank: permutation.ranks()) {

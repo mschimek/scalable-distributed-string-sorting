@@ -18,7 +18,7 @@ inline void check_path_exists(std::string const& path) {
     tlx_die_verbose_unless(std::filesystem::exists(path), "file not found: " << path);
 };
 
-enum class MPIRoutineAllToAll { small = 0, directMessages, combined, sentinel };
+enum class MPIRoutineAllToAll { small = 0, direct, combined, sentinel };
 
 enum class Redistribution { none = 0, naive, simple_strings, simple_chars, grid, sentinel };
 
@@ -173,7 +173,7 @@ void arg3(Callback cb, CommonArgs const& args) {
             }
             return;
         }
-        case MPIRoutineAllToAll::directMessages: {
+        case MPIRoutineAllToAll::direct: {
             if constexpr (CliOptions::enable_alltoall) {
                 arg4<Callback, Args..., AllToAllvDirectMessages>(cb, args);
             } else {

@@ -197,7 +197,12 @@ public:
     }
 };
 
+} // namespace mpi
+} // namespace dss_schimek
 
+
+namespace dss_mehnert {
+namespace mpi {
 namespace _internal {
 
 template <typename LcpIter, typename IntervalIter>
@@ -312,7 +317,7 @@ inline std::vector<uint64_t> send_u64s(
     std::vector<uint64_t>& values,
     std::vector<uint64_t> const& send_counts,
     std::vector<uint64_t> const& recv_counts,
-    environment env
+    dss_schimek::mpi::environment env
 ) {
     using namespace dss_schimek;
     if constexpr (useCompression) {
@@ -341,14 +346,14 @@ public:
         std::vector<unsigned char>& send_buf_char,
         std::vector<size_t> const& send_counts_char,
         std::vector<size_t> const& send_counts,
-        mpi::environment env
+        dss_schimek::mpi::environment env
     ) {
         using dss_mehnert::measurement::MeasuringTool;
         auto& measuring_tool = MeasuringTool::measuringTool();
 
         measuring_tool.start("all_to_all_strings_mpi");
         auto recv_buf_char = AllToAllPolicy::alltoallv(send_buf_char.data(), send_counts_char, env);
-        auto recv_counts = mpi::alltoall(send_counts, env);
+        auto recv_counts = dss_schimek::mpi::alltoall(send_counts, env);
 
         measuring_tool.start("all_to_all_strings_send_lcps");
         auto send_lcps = _internal::send_u64s<compress_lcps, AllToAllPolicy>;
@@ -383,7 +388,7 @@ public:
         std::vector<unsigned char>& send_buf_char,
         std::vector<size_t> const& send_counts_char,
         std::vector<size_t> const& send_counts,
-        mpi::environment env
+        dss_schimek::mpi::environment env
     ) {
         using dss_mehnert::measurement::MeasuringTool;
         auto& measuring_tool = MeasuringTool::measuringTool();
@@ -399,7 +404,7 @@ public:
 
         measuring_tool.start("all_to_all_strings_mpi");
         auto recv_buf_char = AllToAllPolicy::alltoallv(send_buf_char.data(), send_counts_char, env);
-        auto recv_counts = mpi::alltoall(send_counts, env);
+        auto recv_counts = dss_schimek::mpi::alltoall(send_counts, env);
 
         measuring_tool.start("all_to_all_strings_send_lcps");
         auto send_lcps = _internal::send_u64s<compress_lcps, AllToAllPolicy>;
@@ -429,17 +434,16 @@ public:
 
 } // namespace _internal
 
-
-template <bool compress_lcps, bool compress_prefixes, typename StringSet, typename AllToAllPolicy>
+template <bool compress_lcps, bool compress_prefixes, typename AllToAllPolicy>
 class AllToAllStringImpl {
 public:
-    static constexpr bool Lcps = true;
     static constexpr bool PrefixCompression = compress_prefixes;
 
+    template <typename StringSet>
     StringLcpContainer<StringSet> alltoallv(
         StringLcpContainer<StringSet>& container,
         std::vector<size_t> const& send_counts,
-        environment env
+        Communicator const& comm
     ) {
         using dss_mehnert::measurement::MeasuringTool;
         auto& measuring_tool = MeasuringTool::measuringTool();
@@ -451,32 +455,15 @@ public:
         measuring_tool.stop("all_to_all_strings_intern_copy");
 
         using SendImpl = _internal::StringSetSendImpl<compress_lcps, StringSet, AllToAllPolicy>;
-        return SendImpl::alltoallv(container, send_buf_char, send_counts_char, send_counts, env);
+        return SendImpl::alltoallv(container, send_buf_char, send_counts_char, send_counts, comm);
     }
-};
 
-
-// Method for the All-To-All exchange of the reduced strings, i.e. only
-// distinguishing prefix - common prefix, in the prefix-doubling-algorithm
-template <bool compress_lcps, bool compress_prefixes, typename StringSet, typename AllToAllPolicy>
-struct AllToAllStringImplPrefixDoubling
-    : private AllToAllStringImpl<
-          compress_lcps,
-          compress_prefixes,
-          dss_schimek::StringSet<unsigned char, Length, StringIndex, PEIndex>,
-          AllToAllPolicy> {
-    using StringPEIndexSet = dss_schimek::StringSet<unsigned char, Length, StringIndex, PEIndex>;
-    static constexpr bool Lcps = true;
-    static constexpr bool PrefixCompression = compress_prefixes;
-
-    using AllToAllStringImpl<compress_lcps, compress_prefixes, StringPEIndexSet, AllToAllPolicy>::
-        alltoallv;
-
-    StringLcpContainer<StringPEIndexSet> alltoallv(
+    template <typename StringSet>
+    StringLcpContainer<StringSet> alltoallv(
         StringLcpContainer<StringSet>& container,
         std::vector<size_t> const& send_counts,
         std::vector<size_t> const& prefixes,
-        environment env
+        Communicator const& comm
     ) {
         using dss_mehnert::measurement::MeasuringTool;
         auto& measuring_tool = MeasuringTool::measuringTool();
@@ -487,59 +474,10 @@ struct AllToAllStringImplPrefixDoubling
         container.delete_raw_strings();
         measuring_tool.stop("all_to_all_strings_intern_copy");
 
-
-        measuring_tool.start("all_to_all_strings_mpi");
-        auto recv_buf_char = AllToAllPolicy::alltoallv(send_buf_char.data(), send_counts_char, env);
-
-        auto recv_counts = mpi::alltoall(send_counts, env);
-
-        measuring_tool.start("all_to_all_strings_send_lcps");
-        auto send_lcps = _internal::send_u64s<compress_lcps, AllToAllPolicy>;
-        auto recv_buf_lcp = send_lcps(container.lcps(), send_counts, recv_counts, env);
-        measuring_tool.stop("all_to_all_strings_send_lcps");
-        container.delete_all();
-
-        measuring_tool.start("all_to_all_strings_send_idxs");
-        measuring_tool.stop("all_to_all_strings_send_idxs");
-
-        std::vector<size_t> offsets(send_counts.size());
-        std::exclusive_scan(send_counts.begin(), send_counts.end(), offsets.begin(), size_t{0});
-
-        auto recv_offsets = mpi::alltoall(offsets, env);
-        measuring_tool.stop("all_to_all_strings_mpi");
-
-        measuring_tool.start("container_construction");
-        StringLcpContainer<StringPEIndexSet> recv_container{
-            std::move(recv_buf_char),
-            std::move(recv_buf_lcp),
-            recv_counts,
-            recv_offsets
-
-        };
-        measuring_tool.stop("container_construction");
-        return recv_container;
-    }
-
-    StringLcpContainer<StringPEIndexSet> alltoallv(
-        StringLcpContainer<StringPEIndexSet>& container,
-        std::vector<size_t> const& send_counts,
-        std::vector<size_t> const& prefixes,
-        environment env
-    ) {
-        using dss_mehnert::measurement::MeasuringTool;
-        auto& measuring_tool = MeasuringTool::measuringTool();
-
-        measuring_tool.start("all_to_all_strings_intern_copy");
-        auto [send_buf_char, send_counts_char] =
-            _internal::write_send_buf<compress_prefixes>(container, send_counts, prefixes);
-        container.delete_raw_strings();
-        measuring_tool.stop("all_to_all_strings_intern_copy");
-
-        using SendImpl =
-            _internal::StringSetSendImpl<compress_lcps, StringPEIndexSet, AllToAllPolicy>;
-        return SendImpl::alltoallv(container, send_buf_char, send_counts_char, send_counts, env);
+        using SendImpl = _internal::StringSetSendImpl<compress_lcps, StringSet, AllToAllPolicy>;
+        return SendImpl::alltoallv(container, send_buf_char, send_counts_char, send_counts, comm);
     }
 };
 
 } // namespace mpi
-} // namespace dss_schimek
+} // namespace dss_mehnert
