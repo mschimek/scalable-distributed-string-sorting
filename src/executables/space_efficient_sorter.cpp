@@ -24,15 +24,14 @@
 #include "mpi/alltoall.hpp"
 #include "mpi/communicator.hpp"
 #include "mpi/warmup.hpp"
-#include "sorter/distributed/prefix_doubling.hpp"
 #include "sorter/distributed/space_efficient.hpp"
 #include "strings/stringset.hpp"
 #include "util/measuringTool.hpp"
 #include "util/string_generator.hpp"
 
-enum class CharGenerator { file = 0, random = 1, sentinel = 2 };
+enum class CharGenerator { file = 0, random, sentinel };
 
-enum class StringGenerator { suffix = 0, window = 1, difference_cover = 2, sentinel = 3 };
+enum class StringGenerator { suffix = 0, window, difference_cover, sentinel };
 
 struct SorterArgs : public CommonArgs {
     size_t char_gen = static_cast<size_t>(CharGenerator::random);
@@ -139,23 +138,19 @@ void run_space_efficient_sort(
     constexpr bool lcp_compression = LcpCompression();
     constexpr bool prefix_compression = PrefixCompression();
 
-    using MaterializedStringSet = dss_mehnert::StringSet<CharType, dss_mehnert::Length>;
-    using AllToAllPolicy = mpi::AllToAllStringImplPrefixDoubling<
-        lcp_compression,
-        prefix_compression,
-        MaterializedStringSet,
-        MPIAllToAllRoutine>;
-    using BaseSorter = dss_mehnert::sorter::PrefixDoublingMergeSort<
+    using AllToAllPolicy = dss_mehnert::mpi::
+        AllToAllStringImpl<lcp_compression, prefix_compression, MPIAllToAllRoutine>;
+
+    using StringSet = dss_mehnert::CompressedStringSet<CharType>;
+
+    // todo maybe use separate sample policies
+    using Subcommunicators = RedistributionPolicy::Subcommunicators;
+    using Sorter = dss_mehnert::sorter::SpaceEfficientSort<
         CharType,
         RedistributionPolicy,
         AllToAllPolicy,
         PartitionPolicy,
         BloomFilterPolicy>;
-
-    using StringSet = dss_mehnert::CompressedStringSet<CharType>;
-    // todo maybe use different sample policy
-    using Subcommunicators = RedistributionPolicy::Subcommunicators;
-    using Sorter = dss_mehnert::sorter::SpaceEfficientSort<CharType, PartitionPolicy, BaseSorter>;
 
     using dss_mehnert::measurement::MeasuringTool;
     auto& measuring_tool = MeasuringTool::measuringTool();
@@ -199,8 +194,6 @@ void run(SorterArgs const& args) {
 }
 
 int main(int argc, char* argv[]) {
-    kamping::Environment env{argc, argv};
-
     SorterArgs args;
 
     tlx::CmdlineParser cp;
@@ -247,6 +240,8 @@ int main(int argc, char* argv[]) {
     }
 
     parse_level_arg(levels_param, args.levels);
+
+    kamping::Environment env{argc, argv};
 
     using dss_mehnert::measurement::MeasuringTool;
     auto& measuring_tool = MeasuringTool::measuringTool();

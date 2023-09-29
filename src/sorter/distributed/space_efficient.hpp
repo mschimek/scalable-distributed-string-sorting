@@ -11,35 +11,54 @@
 
 #include "mpi/communicator.hpp"
 #include "sorter/distributed/permutation.hpp"
+#include "sorter/distributed/prefix_doubling.hpp"
 #include "sorter/distributed/sample.hpp"
 #include "strings/stringcontainer.hpp"
 #include "strings/stringset.hpp"
-#include "util/measuringTool.hpp"
 
 namespace dss_mehnert {
 namespace sorter {
 
-template <typename Char, typename PartitionPolicy, typename SorterPolicy>
-class SpaceEfficientSort : private PartitionPolicy {
+template <
+    typename CharType,
+    typename RedistributionPolicy,
+    typename AllToAllStringPolicy,
+    typename PartitionPolicy,
+    typename BloomFilter>
+class SpaceEfficientSort : private BasePrefixDoublingMergeSort<
+                               CharType,
+                               RedistributionPolicy,
+                               AllToAllStringPolicy,
+                               PartitionPolicy,
+                               BloomFilter> {
 public:
-    using Subcommunicators = SorterPolicy::Subcommunicators;
-    using StringSet = CompressedStringSet<Char, StringIndex, PEIndex>;
+    using Base = BasePrefixDoublingMergeSort<
+        CharType,
+        RedistributionPolicy,
+        AllToAllStringPolicy,
+        PartitionPolicy,
+        BloomFilter>;
+
+    using Subcommunicators = Base::Subcommunicators;
+
+    using StringSet = CompressedStringSet<CharType, StringIndex, PEIndex>;
     using StringPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
     using String = StringSet::String;
 
-    using MaterializedStringSet = dss_mehnert::StringSet<Char, Length, StringIndex, PEIndex>;
+    using MaterializedStringSet = dss_mehnert::StringSet<CharType, Length, StringIndex, PEIndex>;
 
     SpaceEfficientSort(PartitionPolicy const partition, size_t const quantile_size)
-        : PartitionPolicy{partition},
-          sorter_{partition},
+        : Base{partition},
           quantile_size_{std::max<size_t>(1, quantile_size)} {}
 
-    InputPermutation
-    sort(StringLcpContainer<CompressedStringSet<Char>>&& container, Subcommunicators const& comms) {
+    InputPermutation sort(
+        StringLcpContainer<CompressedStringSet<CharType>>&& container, Subcommunicators const& comms
+    ) {
         this->measuring_tool_.start("init_container");
         std::vector<typename StringSet::String> strings;
         strings.reserve(container.size());
 
+        // todo get rid of duplicated code here
         auto const rank = comms.comm_root().rank();
         for (size_t index = 0; auto const& src: container.get_strings()) {
             strings.push_back(src.with_members(StringIndex{index++}, PEIndex{rank}));
@@ -65,9 +84,9 @@ public:
         // todo debug total size of strings
         this->measuring_tool_.add(container.char_size(), "chars_in_set");
 
-        measuring_tool_.start("local_sorting", "sort_locally");
+        this->measuring_tool_.start("local_sorting", "sort_locally");
         tlx::sort_strings_detail::radixsort_CI3(strptr, 0, 0);
-        measuring_tool_.stop("local_sorting", "sort_locally", comms.comm_root());
+        this->measuring_tool_.stop("local_sorting", "sort_locally", comms.comm_root());
 
         if (comm_root.size() == 1) {
             this->measuring_tool_.start("write_permutation");
@@ -78,62 +97,67 @@ public:
             return permutation;
         }
 
-        measuring_tool_.start("compute_quantiles", "compute_quantiles");
+        auto const prefixes = Base::run_bloom_filter(strptr, comms, start_depth);
+
+        this->measuring_tool_.start("compute_quantiles", "compute_quantiles");
+        sample::DistPrefixes const arg{prefixes};
         auto const [quantile_sizes, quantile_offsets] =
-            compute_quantiles(strptr, comms.comm_root());
-        measuring_tool_.stop("compute_quantiles", "compute_quantiles");
+            compute_quantiles(strptr, arg, comms.comm_root());
+        this->measuring_tool_.stop("compute_quantiles", "compute_quantiles");
 
         InputPermutation full_permutation;
         full_permutation.reserve(strptr.size());
 
-        for (size_t i = 0; i < quantile_sizes.size(); ++i) {
-            measuring_tool_.setQuantile(i);
-            auto const quantile = strptr.sub(quantile_offsets[i], quantile_sizes[i]);
+        for (size_t i = 0; i != quantile_sizes.size(); ++i) {
+            this->measuring_tool_.setQuantile(i);
+            auto const offset = quantile_offsets[i], size = quantile_sizes[i];
+            auto const quantile = strptr.sub(offset, size);
 
-            // todo auto const total_local_size = strptr.active().get_sum_length();
+            // todo use a std::span here
+            std::vector<size_t> const quantile_prefixes{
+                prefixes.begin() + offset,
+                prefixes.begin() + offset + size};
 
             // todo the usage of StringContainer is slightly dodgy here
             // the strings are only actually materialized later
+            // todo this is complete nonsense
             StringLcpContainer<MaterializedStringSet> materialized_strings{
-                std::vector<Char>{},
-                std::vector<String>{quantile.active().begin(), quantile.active().end()},
-                std::vector<size_t>{quantile.lcp(), quantile.lcp() + quantile.size()}};
+                std::vector<CharType>{},
+                {quantile.active().begin(), quantile.active().end()},
+                {quantile.lcp(), quantile.lcp() + quantile.size()}};
 
-            auto quantile_permutation = sorter_.sort(std::move(materialized_strings), comms, true);
-            full_permutation.append(quantile_permutation);
+            // todo would it be possible to pass `quantile` directly?
+            auto sorted_quantile =
+                Base::sort(std::move(materialized_strings), comms, quantile_prefixes);
+            full_permutation.append(sorted_quantile.make_string_set());
         }
 
-        measuring_tool_.setQuantile(0);
+        this->measuring_tool_.setQuantile(0);
         return full_permutation;
     }
 
 private:
-    using MeasuringTool = measurement::MeasuringTool;
-    MeasuringTool& measuring_tool_ = MeasuringTool::measuringTool();
-
-    // private inheritance would cause problems here because SorterPolicy may
-    // also inherit from SamplePolicy
-    SorterPolicy sorter_;
+    static constexpr size_t start_depth = 8;
 
     size_t quantile_size_;
 
+    template <typename ExtraArg>
     std::pair<std::vector<size_t>, std::vector<size_t>>
-    compute_quantiles(StringPtr const& strptr, Communicator const& comm) {
-        measuring_tool_.start("compute_num_quantiles");
-        auto const total_size = strptr.active().get_sum_length();
+    compute_quantiles(StringPtr const& strptr, ExtraArg const arg, Communicator const& comm) {
+        this->measuring_tool_.start("compute_num_quantiles");
+        size_t const total_size = sample::accumulate_chars(strptr.active(), arg);
         size_t const num_quantiles = comm.allreduce_single(
             kamping::send_buf({tlx::div_ceil(total_size, quantile_size_)}),
             kamping::op(kamping::ops::max<>{})
         );
-        measuring_tool_.stop("compute_num_quantiles");
-        measuring_tool_.add(num_quantiles, "num_quantiles");
+        this->measuring_tool_.stop("compute_num_quantiles");
+        this->measuring_tool_.add(num_quantiles, "num_quantiles");
 
-        measuring_tool_.start("compute_quantile_sizes");
-        sample::NoExtraArg const arg;
+        this->measuring_tool_.start("compute_quantile_sizes");
         auto const sizes = PartitionPolicy::compute_partition(strptr, num_quantiles, arg, comm);
         std::vector<size_t> offsets(sizes.size());
         std::exclusive_scan(sizes.begin(), sizes.end(), offsets.begin(), size_t{0});
-        measuring_tool_.stop("compute_quantile_sizes");
+        this->measuring_tool_.stop("compute_quantile_sizes");
 
         return {std::move(sizes), std::move(offsets)};
     }

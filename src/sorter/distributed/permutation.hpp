@@ -45,6 +45,19 @@ public:
         strings_.insert(strings_.end(), other.strings_.begin(), other.strings_.end());
     }
 
+    template <typename StringSet>
+    void append(StringSet const& ss) {
+        size_t offset = ranks_.size();
+        ranks_.resize(ranks_.size() + ss.size());
+        strings_.resize(strings_.size() + ss.size());
+
+        size_t i = offset;
+        for (auto it = ss.begin(); it != ss.end(); ++it, ++i) {
+            ranks_[i] = ss[it].getPEIndex();
+            strings_[i] = ss[it].getStringIndex();
+        }
+    }
+
 private:
     std::vector<rank_type> ranks_;
     std::vector<index_type> strings_;

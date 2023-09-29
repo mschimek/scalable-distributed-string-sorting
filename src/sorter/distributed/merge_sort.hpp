@@ -36,7 +36,7 @@ namespace sorter {
 
 // todo this could also be an _internal namespace
 template <typename RedistributionPolicy, typename AllToAllStringPolicy, typename PartitionPolicy>
-class BaseDistributedMergeSort : private AllToAllStringPolicy, private PartitionPolicy {
+class BaseDistributedMergeSort : protected AllToAllStringPolicy, protected PartitionPolicy {
 public:
     explicit BaseDistributedMergeSort(PartitionPolicy const partition)
         : PartitionPolicy{partition} {}
@@ -48,6 +48,7 @@ protected:
     using MeasuringTool = measurement::MeasuringTool;
     MeasuringTool& measuring_tool_ = MeasuringTool::measuringTool();
 
+    // todo make this generic of stringSet instead of container
     template <
         typename Container,
         typename ExtraArg,

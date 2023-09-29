@@ -50,6 +50,19 @@ public:
     using StringPEIndexSet = StringSet<CharType, Length, StringIndex, PEIndex>;
 
 protected:
+    template <typename StringPtr>
+    std::vector<size_t> run_bloom_filter(
+        StringPtr const& strptr, Subcommunicators const& comms, size_t const start_depth
+    ) {
+        this->measuring_tool_.start("bloomfilter", "bloomfilter_overall");
+        BloomFilter filter{comms, strptr.size()};
+        auto const prefixes = filter.compute_distinguishing_prefixes(strptr, comms, start_depth);
+        this->measuring_tool_.stop("bloomfilter", "bloomfilter_overall", comms.comm_root());
+
+        return prefixes;
+    }
+
+    // todo sort out order of arguments
     template <
         typename Subcommunicators_ = Subcommunicators,
         std::enable_if_t<!Subcommunicators_::is_multi_level, bool> = true>
@@ -190,7 +203,7 @@ public:
     ) {
         this->measuring_tool_.setPhase("local_sorting");
 
-        auto strptr = container.make_string_lcp_ptr();
+        auto const strptr = container.make_string_lcp_ptr();
         this->measuring_tool_.add(container.char_size(), "chars_in_set");
 
         if (!is_sorted_locally) {
@@ -203,12 +216,7 @@ public:
         if (comms.comm_root().size() == 1) {
             return Base::write_permutation(strptr.active());
         } else {
-            this->measuring_tool_.start("bloomfilter", "bloomfilter_overall");
-            BloomFilter bloom_filter{comms, strptr.size()};
-            auto const prefixes =
-                bloom_filter.compute_distinguishing_prefixes(strptr, comms, start_depth);
-            this->measuring_tool_.stop("bloomfilter", "bloomfilter_overall", comms.comm_root());
-
+            auto const prefixes = Base::run_bloom_filter(strptr, comms, start_depth);
             auto sorted_container = Base::sort(std::move(container), comms, prefixes);
 
             this->measuring_tool_.setRound(0);
@@ -217,7 +225,7 @@ public:
     }
 
 private:
-    static constexpr uint64_t start_depth = 8;
+    static constexpr size_t start_depth = 8;
 };
 
 namespace _internal {
