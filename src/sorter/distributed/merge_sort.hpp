@@ -35,17 +35,14 @@ namespace dss_mehnert {
 namespace sorter {
 
 // todo this could also be an _internal namespace
-template <
-    typename Subcommunicators,
-    typename RedistributionPolicy,
-    typename AllToAllStringPolicy,
-    typename PartitionPolicy>
+template <typename RedistributionPolicy, typename AllToAllStringPolicy, typename PartitionPolicy>
 class BaseDistributedMergeSort : private AllToAllStringPolicy, private PartitionPolicy {
 public:
     explicit BaseDistributedMergeSort(PartitionPolicy const partition)
         : PartitionPolicy{partition} {}
 
 protected:
+    using Subcommunicators = RedistributionPolicy::Subcommunicators;
     using Communicator = Subcommunicators::Communicator;
 
     using MeasuringTool = measurement::MeasuringTool;
@@ -176,25 +173,21 @@ protected:
 };
 
 template <
-    typename StringPtr,
-    typename Subcommunicators,
+    typename StringPtr, // todo this should take CharType instead
     typename RedistributionPolicy,
     typename AllToAllStringPolicy,
     typename PartitionPolicy>
 class DistributedMergeSort : private BaseDistributedMergeSort<
-                                 Subcommunicators,
                                  RedistributionPolicy,
                                  AllToAllStringPolicy,
                                  PartitionPolicy> {
 public:
-    using Base = BaseDistributedMergeSort<
-        Subcommunicators,
-        RedistributionPolicy,
-        AllToAllStringPolicy,
-        PartitionPolicy>;
+    using Base =
+        BaseDistributedMergeSort<RedistributionPolicy, AllToAllStringPolicy, PartitionPolicy>;
 
     using Base::Base;
 
+    using Subcommunicators = RedistributionPolicy::Subcommunicators;
     using StringSet = StringPtr::StringSet;
 
     StringLcpContainer<StringSet>

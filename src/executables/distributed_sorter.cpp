@@ -83,7 +83,7 @@ auto generate_strings(SorterArgs const& args, dss_mehnert::Communicator const& c
         auto const DN_ratio = args.DN_ratio;
         auto const& path = args.path;
 
-        switch (get_enum_value<StringGenerator>(args.string_generator)) {
+        switch (clamp_enum_value<StringGenerator>(args.string_generator)) {
             case StringGenerator::skewed_random: {
                 tlx_die("not implemented");
             }
@@ -123,7 +123,6 @@ template <
     typename CharType,
     typename PartitionPolicy,
     typename MPIAllToAllRoutine,
-    typename Subcommunicators,
     typename RedistributionPolicy,
     typename LcpCompression,
     typename PrefixCompression,
@@ -141,12 +140,9 @@ void run_merge_sort(
     using AllToAllPolicy =
         mpi::AllToAllStringImpl<lcp_compression, prefix_compression, StringSet, MPIAllToAllRoutine>;
 
-    using MergeSort = dss_mehnert::sorter::DistributedMergeSort<
-        StringLcpPtr,
-        Subcommunicators,
-        RedistributionPolicy,
-        AllToAllPolicy,
-        PartitionPolicy>;
+    using Subcommunicators = RedistributionPolicy::Subcommunicators;
+    using MergeSort = dss_mehnert::sorter::
+        DistributedMergeSort<StringLcpPtr, RedistributionPolicy, AllToAllPolicy, PartitionPolicy>;
 
     using dss_mehnert::measurement::MeasuringTool;
     auto& measuring_tool = MeasuringTool::measuringTool();
@@ -205,7 +201,6 @@ template <
     typename CharType,
     typename PartitionPolicy,
     typename MPIAllToAllRoutine,
-    typename Subcommunicators,
     typename RedistributionPolicy,
     typename LcpCompression,
     typename PrefixCompression,
@@ -226,9 +221,9 @@ void run_prefix_doubling(
         StringSet,
         MPIAllToAllRoutine>;
 
+    using Subcommunicators = RedistributionPolicy::Subcommunicators;
     using MergeSort = dss_mehnert::sorter::PrefixDoublingMergeSort<
         CharType,
-        Subcommunicators,
         RedistributionPolicy,
         AllToAllPolicy,
         PartitionPolicy,

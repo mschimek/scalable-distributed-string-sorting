@@ -69,7 +69,7 @@ auto generate_compressed_strings(SorterArgs const& args, dss_mehnert::Communicat
     auto input_chars = [&]() -> std::vector<typename StringSet::Char> {
         using namespace dss_mehnert;
 
-        switch (get_enum_value<CharGenerator>(args.char_gen)) {
+        switch (clamp_enum_value<CharGenerator>(args.char_gen)) {
             case CharGenerator::random: {
                 return RandomCharGenerator<StringSet>{args.num_chars};
             }
@@ -89,7 +89,7 @@ auto generate_compressed_strings(SorterArgs const& args, dss_mehnert::Communicat
         auto const step = args.step, length = args.len_strings;
         auto const dc = args.difference_cover;
 
-        switch (get_enum_value<StringGenerator>(args.string_gen)) {
+        switch (clamp_enum_value<StringGenerator>(args.string_gen)) {
             case StringGenerator::suffix: {
                 return CompressedSuffixGenerator<StringSet>{input_chars, step};
             }
@@ -127,7 +127,6 @@ template <
     typename CharType,
     typename PartitionPolicy,
     typename MPIAllToAllRoutine,
-    typename Subcommunicators,
     typename RedistributionPolicy,
     typename LcpCompression,
     typename PrefixCompression,
@@ -148,7 +147,6 @@ void run_space_efficient_sort(
         MPIAllToAllRoutine>;
     using BaseSorter = dss_mehnert::sorter::PrefixDoublingMergeSort<
         CharType,
-        Subcommunicators,
         RedistributionPolicy,
         AllToAllPolicy,
         PartitionPolicy,
@@ -156,8 +154,8 @@ void run_space_efficient_sort(
 
     using StringSet = dss_mehnert::CompressedStringSet<CharType>;
     // todo maybe use different sample policy
-    using Sorter = dss_mehnert::sorter::
-        SpaceEfficientSort<CharType, Subcommunicators, PartitionPolicy, BaseSorter>;
+    using Subcommunicators = RedistributionPolicy::Subcommunicators;
+    using Sorter = dss_mehnert::sorter::SpaceEfficientSort<CharType, PartitionPolicy, BaseSorter>;
 
     using dss_mehnert::measurement::MeasuringTool;
     auto& measuring_tool = MeasuringTool::measuringTool();

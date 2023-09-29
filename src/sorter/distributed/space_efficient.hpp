@@ -19,9 +19,10 @@
 namespace dss_mehnert {
 namespace sorter {
 
-template <typename Char, typename Subcommunicators, typename PartitionPolicy, typename SorterPolicy>
+template <typename Char, typename PartitionPolicy, typename SorterPolicy>
 class SpaceEfficientSort : private PartitionPolicy {
 public:
+    using Subcommunicators = SorterPolicy::Subcommunicators;
     using StringSet = CompressedStringSet<Char, StringIndex, PEIndex>;
     using StringPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
     using String = StringSet::String;

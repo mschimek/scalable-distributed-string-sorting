@@ -3,15 +3,15 @@
 
 #pragma once
 
-#cmakedefine01 CLI_ENABLE_SPLIT
+#cmakedefine01 CLI_ENABLE_REDISTRIBUTION
 #cmakedefine01 CLI_ENABLE_PREFIX_DOUBLING
 #cmakedefine01 CLI_ENABLE_ALLTOALL
 #cmakedefine01 CLI_ENABLE_RQUICK_V1
 #cmakedefine01 CLI_ENABLE_RQUICK_LCP
 
 struct CliOptions {
-    static constexpr bool enable_split = static_cast<bool>(CLI_ENABLE_SPLIT);
     static constexpr bool enable_prefix_doubling = static_cast<bool>(CLI_ENABLE_PREFIX_DOUBLING);
+    static constexpr bool enable_redistribution = static_cast<bool>(CLI_ENABLE_REDISTRIBUTION);
     static constexpr bool enable_alltoall = static_cast<bool>(CLI_ENABLE_ALLTOALL);
     static constexpr bool enable_rquick_v1 = static_cast<bool>(CLI_ENABLE_RQUICK_V1);
     static constexpr bool enable_rquick_lcp = static_cast<bool>(CLI_ENABLE_RQUICK_LCP);

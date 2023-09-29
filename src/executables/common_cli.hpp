@@ -12,24 +12,19 @@
 #include "sorter/distributed/bloomfilter.hpp"
 #include "sorter/distributed/partition.hpp"
 #include "sorter/distributed/redistribution.hpp"
+#include "tlx/die/core.hpp"
 
 inline void check_path_exists(std::string const& path) {
     tlx_die_verbose_unless(std::filesystem::exists(path), "file not found: " << path);
 };
 
-enum class MPIRoutineAllToAll { small = 0, directMessages = 1, combined = 2, sentinel = 3 };
+enum class MPIRoutineAllToAll { small = 0, directMessages, combined, sentinel };
 
-enum class Subcommunicators { none = 0, naive = 1, grid = 2, sentinel = 3 };
-
-enum class Redistribution { naive = 0, simple_strings = 1, simple_chars = 2, sentinel = 3 };
+enum class Redistribution { none = 0, naive, simple_strings, simple_chars, grid, sentinel };
 
 template <typename T>
-T get_enum_value(size_t const i) {
-    if (i < static_cast<size_t>(T::sentinel)) {
-        return static_cast<T>(i);
-    } else {
-        tlx_die("enum value out of range");
-    }
+T clamp_enum_value(size_t const i) {
+    return static_cast<T>(std::min(i, static_cast<size_t>(T::sentinel)));
 }
 
 struct CommonArgs {
@@ -39,10 +34,9 @@ struct CommonArgs {
     bool sample_random = false;
     size_t sampling_factor = 2;
     size_t alltoall_routine = static_cast<size_t>(MPIRoutineAllToAll::combined);
-    size_t subcomms = static_cast<size_t>(Subcommunicators::grid);
     bool rquick_v1 = false;
     bool rquick_lcp = false;
-    size_t redistribution = static_cast<size_t>(Redistribution::naive);
+    size_t redistribution = static_cast<size_t>(Redistribution::grid);
     bool prefix_compression = false;
     bool lcp_compression = false;
     bool prefix_doubling = false;
@@ -125,69 +119,52 @@ void arg5(Callback cb, CommonArgs const& args) {
 
 template <typename Callback, typename... Args>
 void arg4(Callback cb, CommonArgs const& args) {
-    using namespace dss_mehnert::multi_level;
     using namespace dss_mehnert::redistribution;
     using dss_mehnert::Communicator;
 
-    switch (get_enum_value<Subcommunicators>(args.subcomms)) {
-        case Subcommunicators::none: {
-            if constexpr (CliOptions::enable_split) {
-                using Split = NoSplit<Communicator>;
-                using Redistribution = NoRedistribution<Communicator>;
-                arg5<Callback, Args..., Split, Redistribution>(cb, args);
-            } else {
-                die_with_feature("CLI_ENABLE_SPLIT");
+    auto const redistribution = clamp_enum_value<Redistribution>(args.redistribution);
+    if constexpr (CliOptions::enable_redistribution) {
+        switch (redistribution) {
+            case Redistribution::none: {
+                arg5<Callback, Args..., NoRedistribution<Communicator>>(cb, args);
+                return;
             }
-            return;
-        }
-        case Subcommunicators::naive: {
-            if constexpr (CliOptions::enable_split) {
-                using Split = RowwiseSplit<Communicator>;
-                switch (get_enum_value<Redistribution>(args.redistribution)) {
-                    case Redistribution::naive: {
-                        using Redistribution = NaiveRedistribution<Communicator>;
-                        arg5<Callback, Args..., Split, Redistribution>(cb, args);
-                        return;
-                    };
-                    case Redistribution::simple_strings: {
-                        using Redistribution = SimpleStringRedistribution<Communicator>;
-                        arg5<Callback, Args..., Split, Redistribution>(cb, args);
-                        return;
-                    };
-                    case Redistribution::simple_chars: {
-                        using Redistribution = SimpleCharRedistribution<Communicator>;
-                        arg5<Callback, Args..., Split, Redistribution>(cb, args);
-                        return;
-                    };
-                    case Redistribution::sentinel: {
-                        break;
-                    }
-                };
-                tlx_die("unknown redistribution policy");
-            } else {
-                die_with_feature("CLI_ENABLE_SPLIT");
+            case Redistribution::naive: {
+                arg5<Callback, Args..., NaiveRedistribution<Communicator>>(cb, args);
+                return;
+            };
+            case Redistribution::simple_strings: {
+                arg5<Callback, Args..., SimpleStringRedistribution<Communicator>>(cb, args);
+                return;
+            };
+            case Redistribution::simple_chars: {
+                arg5<Callback, Args..., SimpleCharRedistribution<Communicator>>(cb, args);
+                return;
+            };
+            case Redistribution::grid: {
+                arg5<Callback, Args..., GridwiseRedistribution<Communicator>>(cb, args);
+                return;
             }
-            break;
-        }
-        case Subcommunicators::grid: {
-            using Split = GridwiseSplit<Communicator>;
-            using Redistribution = GridwiseRedistribution<Communicator>;
-            arg5<Callback, Args..., Split, Redistribution>(cb, args);
-            return;
-        }
-        case Subcommunicators::sentinel: {
-            break;
+            case Redistribution::sentinel: {
+                break;
+            }
+        };
+        tlx_die("unknown redistribution policy");
+    } else {
+        if (redistribution == Redistribution::grid) {
+            arg5<Callback, Args..., GridwiseRedistribution<Communicator>>(cb, args);
+        } else {
+            die_with_feature("CLI_ENABLE_REDISTRIBUTION");
         }
     }
-    tlx_die("unknown subcommunicators");
 }
 
-// todo remove this
+// todo remove this or make small the default
 template <typename Callback, typename... Args>
 void arg3(Callback cb, CommonArgs const& args) {
     using namespace dss_schimek::mpi;
 
-    switch (get_enum_value<MPIRoutineAllToAll>(args.alltoall_routine)) {
+    switch (clamp_enum_value<MPIRoutineAllToAll>(args.alltoall_routine)) {
         case MPIRoutineAllToAll::small: {
             if constexpr (CliOptions::enable_alltoall) {
                 arg4<Callback, Args..., AllToAllvSmall>(cb, args);
@@ -328,18 +305,11 @@ inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
         "(0=small, 1=direct, [2]=combined)"
     );
     cp.add_size_t(
-        'u',
-        "subcomms",
-        args.subcomms,
-        "whether and how to create subcommunicators during merge sort "
-        "(0=none, 1=naive, [2]=grid)"
-    );
-    cp.add_size_t(
         't',
         "redistribution",
         args.redistribution,
-        "redistribution scheme to use for multi-level sort"
-        "([0]=naive, 1=simple-strings, 2=simple-chars)"
+        "redistribution scheme to use for multi-level sort "
+        "(0=none, 1=naive, 2=simple-strings, 3=simple-chars, [4]=grid)"
     );
     cp.add_flag(
         'v',

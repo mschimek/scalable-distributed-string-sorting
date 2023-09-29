@@ -55,6 +55,7 @@ exscan_and_bcast(std::vector<size_t> const& values, Communicator const& comm) {
 template <typename Communicator>
 class NoRedistribution {
 public:
+    using Subcommunicators = multi_level::NoSplit<Communicator>;
     using Level = multi_level::Level<Communicator>;
 
     static constexpr std::string_view get_name() { return "no_redistribution"; }
@@ -70,6 +71,7 @@ public:
 template <typename Communicator>
 class GridwiseRedistribution {
 public:
+    using Subcommunicators = multi_level::GridwiseSplit<Communicator>;
     using Level = multi_level::Level<Communicator>;
 
     static constexpr std::string_view get_name() { return "gridwise_redistribution"; }
@@ -87,6 +89,7 @@ public:
 template <typename Communicator>
 class NaiveRedistribution {
 public:
+    using Subcommunicators = multi_level::RowwiseSplit<Communicator>;
     using Level = multi_level::Level<Communicator>;
 
     static constexpr std::string_view get_name() { return "naive_redistribution"; }
@@ -115,6 +118,7 @@ public:
 template <typename Communicator>
 class SimpleStringRedistribution {
 public:
+    using Subcommunicators = multi_level::RowwiseSplit<Communicator>;
     using Level = multi_level::Level<Communicator>;
 
     static constexpr std::string_view get_name() { return "simple_string_redistribution"; }
@@ -150,6 +154,7 @@ public:
 template <typename Communicator>
 class SimpleCharRedistribution {
 public:
+    using Subcommunicators = multi_level::RowwiseSplit<Communicator>;
     using Level = multi_level::Level<Communicator>;
 
     static constexpr std::string_view get_name() { return "simple_char_redistribution"; }

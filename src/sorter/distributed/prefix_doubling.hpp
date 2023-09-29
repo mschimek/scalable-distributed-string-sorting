@@ -30,25 +30,21 @@ namespace sorter {
 
 template <
     typename CharType,
-    typename Subcommunicators,
     typename RedistributionPolicy,
     typename AllToAllStringPolicy,
     typename PartitionPolicy,
     typename BloomFilter>
 class PrefixDoublingMergeSort : private BaseDistributedMergeSort<
-                                    Subcommunicators,
                                     RedistributionPolicy,
                                     AllToAllStringPolicy,
                                     PartitionPolicy> {
 public:
-    using Base = BaseDistributedMergeSort<
-        Subcommunicators,
-        RedistributionPolicy,
-        AllToAllStringPolicy,
-        PartitionPolicy>;
+    using Base =
+        BaseDistributedMergeSort<RedistributionPolicy, AllToAllStringPolicy, PartitionPolicy>;
 
     using Base::Base;
 
+    using Subcommunicators = RedistributionPolicy::Subcommunicators;
     using StringPEIndexSet = StringSet<CharType, Length, StringIndex, PEIndex>;
     using StringPEIndexPtr = tlx::sort_strings_detail::StringLcpPtr<StringPEIndexSet, size_t>;
     using StringPEIndexContainer = StringLcpContainer<StringPEIndexSet>;
