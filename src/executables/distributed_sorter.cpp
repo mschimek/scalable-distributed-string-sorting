@@ -227,7 +227,7 @@ void run_prefix_doubling(
         MPIAllToAllRoutine>;
 
     using MergeSort = dss_mehnert::sorter::PrefixDoublingMergeSort<
-        StringLcpPtr,
+        CharType,
         Subcommunicators,
         RedistributionPolicy,
         AllToAllPolicy,
@@ -286,8 +286,8 @@ void run_prefix_doubling(
         die_verbose_unless(is_complete_and_sorted, "output is not sorted or missing characters");
 
         if (args.check_exhaustive) {
-            bool const isSorted = checker.check(sorted_str_ptr, false);
-            die_verbose_unless(isSorted, "output is not a permutation of the input");
+            bool const is_sorted = checker.check(sorted_str_ptr, false);
+            die_verbose_unless(is_sorted, "output is not a permutation of the input");
         }
     }
 

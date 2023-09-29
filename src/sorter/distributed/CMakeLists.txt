@@ -7,6 +7,7 @@ target_sources(dss_base
         misc.hpp
         multi_level.hpp
         partition.hpp
+        permutation.hpp
         prefix_doubling.hpp
         redistribution.hpp
         sample.hpp

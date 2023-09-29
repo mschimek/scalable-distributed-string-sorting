@@ -10,7 +10,7 @@
 #include <tlx/sort/strings/radix_sort.hpp>
 
 #include "mpi/communicator.hpp"
-#include "sorter/distributed/prefix_doubling.hpp"
+#include "sorter/distributed/permutation.hpp"
 #include "sorter/distributed/sample.hpp"
 #include "strings/stringcontainer.hpp"
 #include "strings/stringset.hpp"
@@ -33,7 +33,7 @@ public:
           sorter_{partition},
           quantile_size_{std::max<size_t>(1, quantile_size)} {}
 
-    std::vector<StringIndexPEIndex>
+    InputPermutation
     sort(StringLcpContainer<CompressedStringSet<Char>>&& container, Subcommunicators const& comms) {
         this->measuring_tool_.start("init_container");
         std::vector<typename StringSet::String> strings;
@@ -54,7 +54,7 @@ public:
         return sort(std::move(index_container), comms);
     }
 
-    std::vector<StringIndexPEIndex>
+    InputPermutation
     sort(StringLcpContainer<StringSet>&& container, Subcommunicators const& comms) {
         auto const strptr = container.make_string_lcp_ptr();
         auto const& comm_root = comms.comm_root();
@@ -69,7 +69,12 @@ public:
         measuring_tool_.stop("local_sorting", "sort_locally", comms.comm_root());
 
         if (comm_root.size() == 1) {
-            return write_permutation(strptr.active());
+            this->measuring_tool_.start("write_permutation");
+            InputPermutation const permutation{strptr.active()};
+            this->measuring_tool_.stop("write_permutation");
+
+            this->measuring_tool_.setPhase("none");
+            return permutation;
         }
 
         measuring_tool_.start("compute_quantiles", "compute_quantiles");
@@ -77,11 +82,8 @@ public:
             compute_quantiles(strptr, comms.comm_root());
         measuring_tool_.stop("compute_quantiles", "compute_quantiles");
 
-        // todo alternative, put into struct
-        // std::vector<size_t> ranks, indices;
-        std::vector<StringIndexPEIndex> result;
-
-        // SorterPolicy sorter{static_cast<SamplePolicy const&>(*this)};
+        InputPermutation full_permutation;
+        full_permutation.reserve(strptr.size());
 
         for (size_t i = 0; i < quantile_sizes.size(); ++i) {
             measuring_tool_.setQuantile(i);
@@ -96,12 +98,12 @@ public:
                 std::vector<String>{quantile.active().begin(), quantile.active().end()},
                 std::vector<size_t>{quantile.lcp(), quantile.lcp() + quantile.size()}};
 
-            auto permutation = sorter_.sort(std::move(materialized_strings), comms, true);
-            std::copy(permutation.begin(), permutation.end(), std::back_inserter(result));
+            auto quantile_permutation = sorter_.sort(std::move(materialized_strings), comms, true);
+            full_permutation.append(quantile_permutation);
         }
 
         measuring_tool_.setQuantile(0);
-        return result;
+        return full_permutation;
     }
 
 private:
@@ -127,26 +129,12 @@ private:
 
         measuring_tool_.start("compute_quantile_sizes");
         sample::NoExtraArg const arg;
-        auto sizes = PartitionPolicy::compute_partition(strptr, num_quantiles, arg, comm);
+        auto const sizes = PartitionPolicy::compute_partition(strptr, num_quantiles, arg, comm);
         std::vector<size_t> offsets(sizes.size());
         std::exclusive_scan(sizes.begin(), sizes.end(), offsets.begin(), size_t{0});
         measuring_tool_.stop("compute_quantile_sizes");
 
         return {std::move(sizes), std::move(offsets)};
-    }
-
-    // todo get rid of this copy paste
-    std::vector<StringIndexPEIndex> write_permutation(StringSet const& ss) {
-        this->measuring_tool_.start("writeback_permutation");
-        std::vector<StringIndexPEIndex> permutation(ss.size());
-
-        std::transform(ss.begin(), ss.end(), permutation.begin(), [&ss](auto const& str) {
-            return StringIndexPEIndex{str.getStringIndex(), str.getPEIndex()};
-        });
-        this->measuring_tool_.stop("writeback_permutation");
-
-        this->measuring_tool_.setPhase("none");
-        return permutation;
     }
 };
 

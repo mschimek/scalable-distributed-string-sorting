@@ -20,6 +20,7 @@
 #include "mpi/alltoall.hpp"
 #include "mpi/communicator.hpp"
 #include "sorter/distributed/merge_sort.hpp"
+#include "sorter/distributed/permutation.hpp"
 #include "sorter/distributed/sample.hpp"
 #include "strings/stringcontainer.hpp"
 #include "strings/stringset.hpp"
@@ -27,17 +28,8 @@
 namespace dss_mehnert {
 namespace sorter {
 
-struct StringIndexPEIndex {
-    size_t stringIndex;
-    size_t PEIndex;
-
-    friend std::ostream& operator<<(std::ostream& stream, StringIndexPEIndex const& indices) {
-        return stream << "[" << indices.stringIndex << ", " << indices.PEIndex << "]";
-    }
-};
-
 template <
-    typename StringPtr,
+    typename CharType,
     typename Subcommunicators,
     typename RedistributionPolicy,
     typename AllToAllStringPolicy,
@@ -57,15 +49,16 @@ public:
 
     using Base::Base;
 
-    using Char = StringPtr::StringSet::Char;
-
-    using StringPEIndexSet = StringSet<Char, Length, StringIndex, PEIndex>;
+    using StringPEIndexSet = StringSet<CharType, Length, StringIndex, PEIndex>;
     using StringPEIndexPtr = tlx::sort_strings_detail::StringLcpPtr<StringPEIndexSet, size_t>;
     using StringPEIndexContainer = StringLcpContainer<StringPEIndexSet>;
 
-    std::vector<StringIndexPEIndex> sort(
-        StringLcpContainer<typename StringPtr::StringSet>&& container, Subcommunicators const& comms
-    ) {
+    template <typename StringSet>
+    InputPermutation
+    sort(StringLcpContainer<StringSet>&& container, Subcommunicators const& comms) {
+        static_assert(!has_member<typename StringSet::String, StringIndex>);
+        static_assert(!has_member<typename StringSet::String, PEIndex>);
+
         this->measuring_tool_.start("init_container");
         // create a new container with additional rank and string index data members
         std::vector<typename StringPEIndexSet::String> strings;
@@ -86,7 +79,7 @@ public:
         return sort(std::move(index_container), comms);
     }
 
-    std::vector<StringIndexPEIndex> sort(
+    InputPermutation sort(
         StringPEIndexContainer&& container,
         Subcommunicators const& comms,
         bool const is_sorted_locally = false
@@ -120,7 +113,7 @@ public:
     }
 
     // todo this is no longer really prefix doubling merge sort
-    std::vector<StringIndexPEIndex> sort(
+    InputPermutation sort(
         StringPEIndexContainer&& container,
         std::vector<size_t> const& dist_prefixes,
         Subcommunicators const& comms
@@ -206,14 +199,10 @@ private:
         return sorted_container;
     }
 
-    std::vector<StringIndexPEIndex> write_permutation(StringPEIndexSet const& ss) {
-        this->measuring_tool_.start("writeback_permutation");
-        std::vector<StringIndexPEIndex> permutation(ss.size());
-
-        std::transform(ss.begin(), ss.end(), permutation.begin(), [&ss](auto const& str) {
-            return StringIndexPEIndex{str.getStringIndex(), str.getPEIndex()};
-        });
-        this->measuring_tool_.stop("writeback_permutation");
+    InputPermutation write_permutation(StringPEIndexSet const& ss) {
+        this->measuring_tool_.start("write_permutation");
+        InputPermutation const permutation{ss};
+        this->measuring_tool_.stop("write_permutation");
 
         this->measuring_tool_.setPhase("none");
         return permutation;
@@ -226,23 +215,23 @@ namespace _internal {
 template <typename StringSet>
 StringLcpContainer<StringSet> receive_strings(
     StringLcpContainer<StringSet>&& container,
-    std::vector<StringIndexPEIndex> const& permutation,
+    InputPermutation const& permutation,
     Communicator const& comm
 ) {
     using namespace dss_schimek;
     using MPIRoutine = mpi::AllToAllvCombined<mpi::AllToAllvSmall>;
 
     std::vector<int> req_sizes(comm.size());
-    for (auto const& elem: permutation) {
-        ++req_sizes[elem.PEIndex];
+    for (auto const rank: permutation.ranks()) {
+        ++req_sizes[rank];
     }
 
     std::vector<size_t> offsets(comm.size());
     std::exclusive_scan(req_sizes.begin(), req_sizes.end(), offsets.begin(), size_t{0});
 
     std::vector<size_t> requests(permutation.size());
-    for (auto const& elem: permutation) {
-        requests[offsets[elem.PEIndex]++] = elem.stringIndex;
+    for (size_t i = 0; i != permutation.size(); ++i) {
+        requests[offsets[permutation.rank(i)]++] = permutation.string(i);
     }
 
     auto result = comm.alltoallv(kamping::send_buf(requests), kamping::send_counts(req_sizes));
@@ -267,22 +256,23 @@ StringLcpContainer<StringSet> receive_strings(
 }
 
 template <typename StringSet>
-std::vector<typename StringSet::String> reordered_strings(
-    StringSet const& ss,
-    std::vector<StringIndexPEIndex> const& permutation,
-    Communicator const& comm
+std::vector<typename StringSet::String> compute_reordered_strings(
+    StringSet const& ss, InputPermutation const& permutation, Communicator const& comm
 ) {
     std::vector<size_t> offsets(comm.size());
-    for (auto const& elem: permutation) {
-        ++offsets[elem.PEIndex];
+    for (auto const rank: permutation.ranks()) {
+        ++offsets[rank];
     }
     std::exclusive_scan(offsets.begin(), offsets.end(), offsets.begin(), size_t{0});
 
-    // using back_inserter here becuase String may not be default-insertable
     std::vector<typename StringSet::String> strings;
     strings.reserve(ss.size());
-    auto op = [&](auto const& x) { return ss[ss.begin() + offsets[x.PEIndex]++]; };
-    std::transform(permutation.begin(), permutation.end(), std::back_inserter(strings), op);
+    std::transform(
+        permutation.ranks().begin(),
+        permutation.ranks().end(),
+        std::back_inserter(strings),
+        [&](auto const rank) { return ss.at(offsets[rank]++); }
+    );
 
     return strings;
 }
@@ -295,14 +285,15 @@ std::vector<typename StringSet::String> reordered_strings(
 template <typename StringSet>
 StringLcpContainer<StringSet> apply_permutation(
     StringLcpContainer<StringSet>&& container,
-    std::vector<StringIndexPEIndex> const& permutation,
+    InputPermutation const& permutation,
     Communicator const& comm
 ) {
     auto output_container = _internal::receive_strings(std::move(container), permutation, comm);
     assert_equal(output_container.size(), permutation.size());
 
-    auto ss = output_container.make_string_set();
-    output_container.set(_internal::reordered_strings(ss, permutation, comm));
+    output_container.set(
+        _internal::compute_reordered_strings(output_container.make_string_set(), permutation, comm)
+    );
 
     return output_container;
 }

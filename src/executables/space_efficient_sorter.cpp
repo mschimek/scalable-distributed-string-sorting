@@ -147,7 +147,7 @@ void run_space_efficient_sort(
         MaterializedStringSet,
         MPIAllToAllRoutine>;
     using BaseSorter = dss_mehnert::sorter::PrefixDoublingMergeSort<
-        tlx::sort_strings_detail::StringLcpPtr<MaterializedStringSet, size_t>,
+        CharType,
         Subcommunicators,
         RedistributionPolicy,
         AllToAllPolicy,
