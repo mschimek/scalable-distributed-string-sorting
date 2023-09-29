@@ -173,7 +173,7 @@ protected:
 };
 
 template <
-    typename StringPtr, // todo this should take CharType instead
+    typename CharType,
     typename RedistributionPolicy,
     typename AllToAllStringPolicy,
     typename PartitionPolicy>
@@ -188,7 +188,7 @@ public:
     using Base::Base;
 
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
-    using StringSet = StringPtr::StringSet;
+    using StringSet = dss_mehnert::StringSet<CharType, Length>;
 
     StringLcpContainer<StringSet>
     sort(StringLcpContainer<StringSet>&& container, Subcommunicators const& comms) {

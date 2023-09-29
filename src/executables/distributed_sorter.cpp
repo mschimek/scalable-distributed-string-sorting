@@ -142,7 +142,7 @@ void run_merge_sort(
 
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
     using MergeSort = dss_mehnert::sorter::
-        DistributedMergeSort<StringLcpPtr, RedistributionPolicy, AllToAllPolicy, PartitionPolicy>;
+        DistributedMergeSort<CharType, RedistributionPolicy, AllToAllPolicy, PartitionPolicy>;
 
     using dss_mehnert::measurement::MeasuringTool;
     auto& measuring_tool = MeasuringTool::measuringTool();
