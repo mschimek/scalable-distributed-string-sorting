@@ -161,11 +161,7 @@ protected:
     }
 };
 
-template <
-    typename CharType,
-    typename RedistributionPolicy,
-    typename AllToAllStringPolicy,
-    typename PartitionPolicy>
+template <typename RedistributionPolicy, typename AllToAllStringPolicy, typename PartitionPolicy>
 class DistributedMergeSort : private BaseDistributedMergeSort<
                                  RedistributionPolicy,
                                  AllToAllStringPolicy,
@@ -181,7 +177,7 @@ public:
     template <typename StringSet>
     StringLcpContainer<StringSet>
     sort(StringLcpContainer<StringSet>&& container, Subcommunicators const& comms)
-        requires has_member<typename StringSet::Sring, Length>
+        requires has_member<typename StringSet::String, Length>
     {
         auto const& comm_root = comms.comm_root();
 

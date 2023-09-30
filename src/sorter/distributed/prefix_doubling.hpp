@@ -38,7 +38,7 @@ using AugmentedStringSet =
 template <typename StringSet>
 StringLcpContainer<AugmentedStringSet<StringSet>>
 augment_string_container(StringLcpContainer<StringSet>&& container, size_t const rank)
-    requires(!PermutationStringSet<StringSet>)
+    requires(!has_permutation_members<StringSet>)
 {
     std::vector<AugmentedString<typename StringSet::String>> strings;
     strings.reserve(container.size());
@@ -51,7 +51,6 @@ augment_string_container(StringLcpContainer<StringSet>&& container, size_t const
 }
 
 template <
-    typename CharType,
     typename RedistributionPolicy,
     typename AllToAllStringPolicy,
     typename PartitionPolicy,
@@ -155,20 +154,17 @@ protected:
 };
 
 template <
-    typename CharType,
     typename RedistributionPolicy,
     typename AllToAllStringPolicy,
     typename PartitionPolicy,
     typename BloomFilter>
 class PrefixDoublingMergeSort : private BasePrefixDoublingMergeSort<
-                                    CharType,
                                     RedistributionPolicy,
                                     AllToAllStringPolicy,
                                     PartitionPolicy,
                                     BloomFilter> {
 public:
     using Base = BasePrefixDoublingMergeSort<
-        CharType,
         RedistributionPolicy,
         AllToAllStringPolicy,
         PartitionPolicy,
@@ -178,11 +174,9 @@ public:
 
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
 
-    using StringPEIndexSet = StringSet<CharType, Length, StringIndex, PEIndex>;
-
     template <typename StringSet>
     InputPermutation sort(StringLcpContainer<StringSet>&& container, Subcommunicators const& comms)
-        requires(!PermutationStringSet<StringSet>)
+        requires(!has_permutation_members<StringSet>)
     {
         this->measuring_tool_.start("augment_container");
         auto const rank = comms.comm_root().rank();

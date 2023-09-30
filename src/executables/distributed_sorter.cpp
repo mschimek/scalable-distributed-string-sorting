@@ -142,7 +142,7 @@ void run_merge_sort(
 
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
     using MergeSort = dss_mehnert::sorter::
-        DistributedMergeSort<CharType, RedistributionPolicy, AllToAllPolicy, PartitionPolicy>;
+        DistributedMergeSort<RedistributionPolicy, AllToAllPolicy, PartitionPolicy>;
 
     using dss_mehnert::measurement::MeasuringTool;
     auto& measuring_tool = MeasuringTool::measuringTool();
@@ -220,7 +220,6 @@ void run_prefix_doubling(
 
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
     using MergeSort = dss_mehnert::sorter::PrefixDoublingMergeSort<
-        CharType,
         RedistributionPolicy,
         AllToAllPolicy,
         PartitionPolicy,
