@@ -34,12 +34,11 @@ namespace dss_mehnert {
 
 namespace sorter {
 
-// todo this could also be an _internal namespace
 template <typename RedistributionPolicy, typename AllToAllStringPolicy, typename PartitionPolicy>
 class BaseDistributedMergeSort : protected AllToAllStringPolicy, protected PartitionPolicy {
 public:
-    explicit BaseDistributedMergeSort(PartitionPolicy const partition)
-        : PartitionPolicy{partition} {}
+    explicit BaseDistributedMergeSort(PartitionPolicy partition)
+        : PartitionPolicy{std::move(partition)} {}
 
 protected:
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
@@ -48,71 +47,60 @@ protected:
     using MeasuringTool = measurement::MeasuringTool;
     MeasuringTool& measuring_tool_ = MeasuringTool::measuringTool();
 
-    // todo make this generic of stringSet instead of container
-    template <
-        typename Container,
-        typename ExtraArg,
-        typename Subcommunicators_ = Subcommunicators,
-        std::enable_if_t<Subcommunicators_::is_multi_level, bool> = true>
-    auto sort_partial(
-        Container&& container,
-        multi_level::Level<Communicator> const& level,
-        ExtraArg const extra_arg
+    template <typename StringPtr, typename ExtraArg>
+    std::vector<size_t> compute_sorted_send_counts(
+        StringPtr const& strptr,
+        ExtraArg const extra_arg,
+        multi_level::Level<Communicator> const& level
     ) {
-        auto const& comm_orig = level.comm_orig;
-        auto const& comm_exchange = level.comm_exchange;
-
-        auto strptr = container.make_string_lcp_ptr();
-        measuring_tool_.add(container.size(), "num_strings");
-
-        auto num_groups = level.num_groups();
-        auto group_size = level.group_size();
-
-        measuring_tool_.add(num_groups, "num_groups");
-        measuring_tool_.add(group_size, "group_size");
+        measuring_tool_.add(level.num_groups(), "num_groups");
+        measuring_tool_.add(level.group_size(), "group_size");
 
         measuring_tool_.start("sort_globally", "compute_partition");
-        auto interval_sizes =
-            PartitionPolicy::compute_partition(strptr, num_groups, extra_arg, comm_orig);
+        auto const interval_sizes = PartitionPolicy::compute_partition(
+            strptr,
+            level.num_groups(),
+            extra_arg,
+            level.comm_orig
+        );
         measuring_tool_.stop("sort_globally", "compute_partition");
 
-        measuring_tool_.start("sort_globally", "exchange_and_merge");
-        auto send_counts =
+        measuring_tool_.start("sort_globally", "redistribute_strings");
+        auto const send_counts =
             RedistributionPolicy::compute_send_counts(strptr.active(), interval_sizes, level);
-        assert_equal(send_counts.size(), comm_exchange.size());
-        auto sorted_container =
-            exchange_and_merge(std::move(container), send_counts, comm_exchange, extra_arg);
-        measuring_tool_.stop("sort_globally", "exchange_and_merge");
+        assert_equal(send_counts.size(), level.comm_exchange.size());
+        measuring_tool_.stop("sort_globally", "redistribute_strings");
 
-        return sorted_container;
+        return send_counts;
     }
 
-    template <typename Container, typename ExtraArg>
-    auto
-    sort_exhaustive(Container&& container, Communicator const& comm, ExtraArg const extra_arg) {
-        auto strptr = container.make_string_lcp_ptr();
-        measuring_tool_.add(container.size(), "num_strings");
+    template <typename StringPtr, typename ExtraArg>
+    std::vector<size_t> compute_sorted_send_counts(
+        StringPtr const& strptr, ExtraArg const extra_arg, Communicator const& comm
+    ) {
+        measuring_tool_.add(1, "num_groups");
+        measuring_tool_.add(comm.size(), "group_size");
 
         measuring_tool_.start("sort_globally", "compute_partition");
-        auto interval_sizes =
+        auto const send_counts =
             PartitionPolicy::compute_partition(strptr, comm.size(), extra_arg, comm);
         measuring_tool_.stop("sort_globally", "compute_partition");
 
-        measuring_tool_.start("sort_globally", "exchange_and_merge");
-        auto sorted_container =
-            exchange_and_merge(std::move(container), interval_sizes, comm, extra_arg);
-        measuring_tool_.stop("sort_globally", "exchange_and_merge");
+        measuring_tool_.start("sort_globally", "redistribute_strings");
+        measuring_tool_.stop("sort_globally", "redistribute_strings");
 
-        return sorted_container;
+        return send_counts;
     }
 
     template <typename Container, typename ExtraArg>
     auto exchange_and_merge(
         Container&& container,
-        std::vector<size_t>& send_counts,
-        Communicator const& comm,
-        ExtraArg const extra_arg
+        std::vector<size_t> const& send_counts,
+        ExtraArg const extra_arg,
+        Communicator const& comm
     ) {
+        measuring_tool_.start("sort_globally", "exchange_and_merge");
+
         measuring_tool_.setPhase("string_exchange");
         measuring_tool_.start("all_to_all_strings");
 
@@ -169,6 +157,8 @@ protected:
         measuring_tool_.stop("prefix_decompression");
         measuring_tool_.stop("merge_strings");
 
+        measuring_tool_.stop("sort_globally", "exchange_and_merge");
+
         return std::move(result.container);
     }
 };
@@ -193,47 +183,55 @@ public:
 
     StringLcpContainer<StringSet>
     sort(StringLcpContainer<StringSet>&& container, Subcommunicators const& comms) {
-        using namespace kamping;
+        auto const& comm_root = comms.comm_root();
 
         // todo make phase names consistent
-        auto string_ptr = container.make_string_lcp_ptr();
         this->measuring_tool_.setPhase("local_sorting");
-
         this->measuring_tool_.add(container.char_size(), "chars_in_set");
 
-        this->measuring_tool_.start("local_sorting", "sort_locally");
-        tlx::sort_strings_detail::radixsort_CI3(string_ptr, 0, 0);
-        this->measuring_tool_.stop("local_sorting", "sort_locally", comms.comm_root());
+        {
+            this->measuring_tool_.start("local_sorting", "sort_locally");
+            auto const strptr = container.make_string_lcp_ptr();
+            tlx::sort_strings_detail::radixsort_CI3(strptr, 0, 0);
+            this->measuring_tool_.stop("local_sorting", "sort_locally", comm_root);
+        }
 
-        if (comms.comm_root().size() == 1) {
+        if (comm_root.size() == 1) {
             return container;
         }
 
         this->measuring_tool_.start("avg_lcp");
-        auto lcp_begin = string_ptr.lcp();
-        auto lcp_end = string_ptr.lcp() + string_ptr.size();
-        auto avg_lcp = compute_global_lcp_average(lcp_begin, lcp_end, comms.comm_root());
+        auto const lcp_begin = container.lcps().begin();
+        auto const lcp_end = container.lcps().end();
+        auto const avg_lcp = compute_global_lcp_average(lcp_begin, lcp_end, comm_root);
 
         // todo this formula is somewhat questionable
-        sample::MaxLength max_length{2 * avg_lcp + 8};
+        sample::MaxLength arg{2 * avg_lcp + 8};
         this->measuring_tool_.stop("avg_lcp");
 
-        if constexpr (Subcommunicators::is_multi_level) {
+        if constexpr (!Subcommunicators::is_single_level) {
             for (size_t round = 0; auto level: comms) {
                 this->measuring_tool_.start("sort_globally", "partial_sorting");
-                container = this->sort_partial(std::move(container), level, max_length);
-                this->measuring_tool_.stop("sort_globally", "partial_sorting", comms.comm_root());
+                auto const& comm = level.comm_exchange;
+                auto const strptr = container.make_string_lcp_ptr();
+                auto const send_counts = Base::compute_sorted_send_counts(strptr, arg, level);
+                container = Base::exchange_and_merge(std::move(container), send_counts, arg, comm);
+                this->measuring_tool_.stop("sort_globally", "partial_sorting", comm_root);
                 this->measuring_tool_.setRound(++round);
             }
         }
 
-        this->measuring_tool_.start("sort_globally", "final_sorting");
-        auto sorted_container =
-            this->sort_exhaustive(std::move(container), comms.comm_final(), max_length);
-        this->measuring_tool_.stop("sort_globally", "final_sorting");
+        {
+            this->measuring_tool_.start("sort_globally", "final_sorting");
+            auto const strptr = container.make_string_lcp_ptr();
+            auto const& comm = comms.comm_final();
+            auto const send_counts = Base::compute_sorted_send_counts(strptr, arg, comm);
+            container = Base::exchange_and_merge(std::move(container), send_counts, arg, comm);
+            this->measuring_tool_.stop("sort_globally", "final_sorting", comm_root);
+        }
 
         this->measuring_tool_.setRound(0);
-        return sorted_container;
+        return container;
     }
 };
 

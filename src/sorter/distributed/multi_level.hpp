@@ -125,7 +125,7 @@ public:
     using Communicator = Communicator_;
     using iterator = LevelIter<NoSplit<Communicator>, Communicator>;
 
-    static constexpr bool is_multi_level = false;
+    static constexpr bool is_single_level = true;
 
     static constexpr std::string_view get_name() { return "no_split"; }
 
@@ -154,7 +154,7 @@ public:
     using Communicator = Communicator_;
     using iterator = LevelIter<RowwiseSplit<Communicator>, Communicator>;
 
-    static constexpr bool is_multi_level = true;
+    static constexpr bool is_single_level = false;
 
     static constexpr std::string_view get_name() { return "naive_split"; }
 
@@ -183,7 +183,7 @@ public:
     using Communicator = Communicator_;
     using iterator = LevelIter<GridwiseSplit<Communicator>, Communicator>;
 
-    static constexpr bool is_multi_level = true;
+    static constexpr bool is_single_level = false;
     static constexpr std::string_view get_name() { return "grid_split"; }
 
     GridwiseSplit(auto first_level, auto last_level, Communicator const& root)

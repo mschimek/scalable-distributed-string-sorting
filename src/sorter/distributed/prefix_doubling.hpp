@@ -62,76 +62,66 @@ protected:
         return prefixes;
     }
 
-    // todo sort out order of arguments
-    template <
-        typename Subcommunicators_ = Subcommunicators,
-        std::enable_if_t<!Subcommunicators_::is_multi_level, bool> = true>
-    StringLcpContainer<StringPEIndexSet> sort(
-        StringLcpContainer<StringPEIndexSet>&& container,
+    template <typename StringSet>
+    StringLcpContainer<StringSet> sort(
+        StringLcpContainer<StringSet>&& container,
         Subcommunicators const& comms,
         std::vector<size_t> const& dist_prefixes
     ) {
-        this->measuring_tool_.start("sort_globally", "final_sorting");
-        auto sorted_container = this->sort_exhaustive(
-            std::move(container),
-            comms.comm_final(),
-            sample::DistPrefixes{dist_prefixes}
-        );
-        this->measuring_tool_.stop("sort_globally", "final_sorting");
+        auto const& comm_root = comms.comm_root();
 
-        return sorted_container;
-    }
-
-    template <
-        typename Subcommunicators_ = Subcommunicators,
-        std::enable_if_t<Subcommunicators_::is_multi_level, bool> = true>
-    StringLcpContainer<StringPEIndexSet> sort(
-        StringLcpContainer<StringPEIndexSet>&& container,
-        Subcommunicators const& comms,
-        std::vector<size_t> const& dist_prefixes
-    ) {
         if (comms.begin() == comms.end()) {
-            // special case for single level sort
+            // special case for single-level sort; consider distinguishing prefixes
             this->measuring_tool_.start("sort_globally", "final_sorting");
-            auto sorted_container = this->sort_exhaustive(
-                std::move(container),
-                comms.comm_final(),
-                sample::DistPrefixes{dist_prefixes}
-            );
-            this->measuring_tool_.stop("sort_globally", "final_sorting");
+            sample::DistPrefixes const arg{dist_prefixes};
+            auto const& comm = comms.comm_final();
+            auto const strptr = container.make_string_lcp_ptr();
+            auto const send_counts = Base::compute_sorted_send_counts(strptr, arg, comm);
+            container = Base::exchange_and_merge(std::move(container), send_counts, arg, comm);
+            this->measuring_tool_.stop("sort_globally", "final_sorting", comm_root);
 
-            return sorted_container;
+            return container;
         }
 
+        // todo maybe add a if constexpr (!is_single_level)
         size_t round = 0;
-        auto level = comms.begin();
+        auto level_it = comms.begin();
         {
-            // first level of multi-level sort, consider distinguishing prefixes
+            // first level of multi-level sort; consider distinguishing prefixes
             this->measuring_tool_.start("sort_globally", "partial_sorting");
-            container = this->sort_partial(
-                std::move(container),
-                *level++,
-                sample::DistPrefixes{dist_prefixes}
-            );
-            this->measuring_tool_.stop("sort_globally", "partial_sorting", comms.comm_root());
+            sample::DistPrefixes const arg{dist_prefixes};
+            auto const level = *level_it++;
+            auto const& comm = level.comm_exchange;
+            auto const strptr = container.make_string_lcp_ptr();
+            auto const send_counts = Base::compute_sorted_send_counts(strptr, arg, level);
+            container = Base::exchange_and_merge(std::move(container), send_counts, arg, comm);
+            this->measuring_tool_.stop("sort_globally", "partial_sorting", comm_root);
             this->measuring_tool_.setRound(++round);
         }
 
-        for (; level != comms.end(); ++level) {
-            // intermediate level of multi-level sort, don't consider distinguishing prefixes
+        for (; level_it != comms.end(); ++level_it) {
+            // intermediate level of multi-level sort; don't consider distinguishing prefixes
             this->measuring_tool_.start("sort_globally", "partial_sorting");
-            container = this->sort_partial(std::move(container), *level, sample::NoExtraArg{});
-            this->measuring_tool_.stop("sort_globally", "partial_sorting", comms.comm_root());
+            sample::NoExtraArg const arg;
+            auto const level = *level_it;
+            auto const& comm = level.comm_exchange;
+            auto const strptr = container.make_string_lcp_ptr();
+            auto const send_counts = Base::compute_sorted_send_counts(strptr, arg, level);
+            container = Base::exchange_and_merge(std::move(container), send_counts, arg, comm);
+            this->measuring_tool_.stop("sort_globally", "partial_sorting", comm_root);
             this->measuring_tool_.setRound(++round);
         }
 
         this->measuring_tool_.start("sort_globally", "final_sorting");
-        // final level of multi-level sort, don't consider distinguishing prefixes
-        auto sorted_container =
-            this->sort_exhaustive(std::move(container), comms.comm_final(), sample::NoExtraArg{});
-        this->measuring_tool_.stop("sort_globally", "final_sorting");
+        // final level of multi-level sort; don't consider distinguishing prefixes
+        sample::NoExtraArg const arg;
+        auto const& comm = comms.comm_final();
+        auto const strptr = container.make_string_lcp_ptr();
+        auto const send_counts = Base::compute_sorted_send_counts(strptr, arg, comm);
+        container = Base::exchange_and_merge(std::move(container), send_counts, arg, comm);
+        this->measuring_tool_.stop("sort_globally", "final_sorting", comm_root);
 
-        return sorted_container;
+        return container;
     }
 
     InputPermutation write_permutation(StringPEIndexSet const& ss) {

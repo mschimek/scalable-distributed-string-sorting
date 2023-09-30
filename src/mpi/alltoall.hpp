@@ -366,11 +366,11 @@ public:
         container.delete_all();
         measuring_tool.stop("all_to_all_strings_mpi");
 
-        measuring_tool.start("container_construction");
+        measuring_tool.start("all_to_all_strings_init_container");
         StringLcpContainer<StringSet> recv_container{
             std::move(recv_buf_char),
             std::move(recv_buf_lcp)};
-        measuring_tool.stop("container_construction");
+        measuring_tool.stop("all_to_all_strings_init_container");
         return recv_container;
     }
 };
@@ -421,13 +421,13 @@ public:
         measuring_tool.stop("all_to_all_strings_send_idxs");
         measuring_tool.stop("all_to_all_strings_mpi");
 
-        measuring_tool.start("container_construction");
+        measuring_tool.start("all_to_all_strings_init_container");
         StringLcpContainer<StringSet> recv_container{
             std::move(recv_buf_char),
             std::move(recv_buf_lcp),
             make_initializer<StringIndex>(std::move(recv_buf_index)),
             make_initializer<PEIndex>(std::move(recv_buf_rank))};
-        measuring_tool.stop("container_construction");
+        measuring_tool.stop("all_to_all_strings_init_container");
         return recv_container;
     }
 };
