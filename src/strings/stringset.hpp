@@ -482,6 +482,7 @@ public:
     using Iterator = Traits::Iterator;
     using CharIterator = Traits::CharIterator;
 
+    static constexpr bool is_compressed = false;
     static constexpr bool is_indexed = has_member<String, Index>;
     static constexpr bool has_length = has_member<String, Length>;
 
@@ -596,6 +597,7 @@ public:
 
     static_assert(has_member<String, Length>);
 
+    static constexpr bool is_compressed = true;
     static constexpr bool is_indexed = has_member<String, Index>;
 
     //! Construct from begin and end string pointers

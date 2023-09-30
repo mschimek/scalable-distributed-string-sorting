@@ -13,8 +13,11 @@
 namespace dss_mehnert {
 
 template <typename StringSet>
-concept PermutationStringSet = has_member<typename StringSet::String, StringIndex>
-                               && has_member<typename StringSet::String, PEIndex>;
+constexpr bool has_permutation_members = has_member<typename StringSet::String, StringIndex>
+                                         && has_member<typename StringSet::String, PEIndex>;
+
+template <typename StringSet>
+concept PermutationStringSet = has_permutation_members<StringSet>;
 
 class InputPermutation {
 public:
@@ -46,7 +49,10 @@ public:
     rank_type rank(size_type const n) const { return ranks_[n]; }
     index_type string(size_type const n) const { return strings_[n]; }
 
+    // todo not a fan of giving out vector references
+    std::vector<rank_type>& ranks() { return ranks_; }
     std::vector<rank_type> const& ranks() const { return ranks_; }
+    std::vector<index_type>& strings() { return strings_; }
     std::vector<index_type> const& strings() const { return strings_; }
 
     void append(InputPermutation const& other) {

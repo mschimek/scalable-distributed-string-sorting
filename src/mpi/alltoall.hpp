@@ -21,6 +21,7 @@
 #include "mpi/byte_encoder.hpp"
 #include "mpi/environment.hpp"
 #include "mpi/type_mapper.hpp"
+#include "sorter/distributed/permutation.hpp"
 #include "strings/stringcontainer.hpp"
 #include "strings/stringset.hpp"
 #include "util/measuringTool.hpp"
@@ -206,7 +207,7 @@ namespace mpi {
 namespace _internal {
 
 template <typename LcpIter, typename IntervalIter>
-inline void set_interval_start_lcp(LcpIter lcp_it, IntervalIter begin, IntervalIter end) {
+void set_interval_start_lcp(LcpIter lcp_it, IntervalIter const begin, IntervalIter const end) {
     for (auto it = begin; it != end; ++it) {
         if (*it != 0) {
             *lcp_it = 0;
@@ -227,10 +228,13 @@ write_interval(unsigned char* buffer, StringSet const& ss, size_t const* lcps) {
             str_depth = 0;
         }
 
-        auto str_len = ss.get_length(str) + 1;
-        auto actual_len = str_len - str_depth;
+        auto const str_len = ss.get_length(str);
+        auto const actual_len = str_len - str_depth;
+
+        // todo this is using std::copy everywhere else
         memcpy(dest, ss.get_chars(str, str_depth), actual_len);
         dest += actual_len;
+        *dest++ = 0;
     }
     return {dest, static_cast<size_t>(dest - buffer)};
 }
@@ -257,62 +261,62 @@ std::pair<unsigned char*, size_t> write_interval(
     return {dest, static_cast<size_t>(dest - buffer)};
 }
 
-template <bool compress_prefixes>
-size_t get_num_send_chars(auto& container) {
+template <bool compress_prefixes, typename StringPtr>
+size_t get_num_send_chars(StringPtr const& strptr) {
+    // todo maybe add back optimization for uncompressed string set
+    auto const N = strptr.active().get_sum_length();
     if constexpr (compress_prefixes) {
-        auto lcps = container.lcps();
-        auto L = std::accumulate(lcps.begin(), lcps.end(), size_t{0});
-        return container.char_size() - L;
+        auto const lcps = strptr.lcp(), size = strptr.size();
+        auto const L = std::accumulate(lcps, lcps + size, size_t{0});
+        return strptr.size() + N - L;
     } else {
-        return container.char_size();
+        return strptr.size() + N;
     }
 }
 
-template <bool compress_prefixes>
-size_t get_num_send_chars(auto& container, std::vector<size_t> const& prefixes) {
-    auto D = std::accumulate(prefixes.begin(), prefixes.end(), size_t{0});
+template <bool compress_prefixes, typename StringPtr>
+size_t get_num_send_chars(StringPtr const& strptr, std::vector<size_t> const& prefixes) {
+    auto const D = std::accumulate(prefixes.begin(), prefixes.end(), size_t{0});
     if constexpr (compress_prefixes) {
-        auto lcps = container.lcps();
-        auto L = std::accumulate(lcps.begin(), lcps.end(), size_t{0});
-        return container.size() + D - L;
+        auto const lcps = strptr.lcp(), size = strptr.size();
+        auto const L = std::accumulate(lcps, lcps + size, size_t{0});
+        return strptr.size() + D - L;
     } else {
-        return container.size() + D;
+        return strptr.size() + D;
     }
 }
 
-template <bool compress_prefixes>
-std::pair<std::vector<unsigned char>, std::vector<size_t>>
-write_send_buf(auto& container, std::vector<size_t> const& send_counts, auto const&... prefixes) {
-    auto& lcps = container.lcps();
-    set_interval_start_lcp(lcps.begin(), send_counts.begin(), send_counts.end());
+template <bool compress_prefixes, typename StringPtr>
+std::pair<std::vector<unsigned char>, std::vector<size_t>> write_send_buf(
+    StringPtr const& strptr, std::vector<size_t> const& send_counts, auto const&... prefixes
+) {
+    set_interval_start_lcp(strptr.lcp(), send_counts.begin(), send_counts.end());
 
-    auto num_send_chars = get_num_send_chars<compress_prefixes>(container, prefixes...);
+    auto const num_send_chars = get_num_send_chars<compress_prefixes>(strptr, prefixes...);
+
+    // todo this should ideally avoid zero initialization
     std::vector<unsigned char> send_buf_char(num_send_chars);
     std::vector<size_t> send_counts_char(send_counts.size());
 
-    auto ss = container.make_string_set();
     unsigned char* pos = send_buf_char.data();
-
-    for (size_t interval = 0, strs_written = 0; interval < send_counts.size(); ++interval) {
-        auto begin = ss.begin() + strs_written;
+    for (size_t i = 0, strs_written = 0; i != send_counts.size(); ++i) {
+        auto const interval = strptr.sub(strs_written, send_counts[i]);
 
         size_t chars_written = 0;
         std::tie(pos, chars_written) = write_interval<compress_prefixes>(
             pos,
-            ss.sub(begin, begin + send_counts[interval]),
-            lcps.data() + strs_written,
+            interval.active(),
+            interval.lcp(),
             (prefixes.data() + strs_written)...
         );
-
-        send_counts_char[interval] = chars_written;
-        strs_written += send_counts[interval];
+        send_counts_char[i] = chars_written;
+        strs_written += interval.size();
     }
-
     return {std::move(send_buf_char), std::move(send_counts_char)};
 }
 
 
-template <bool useCompression, typename AllToAllPolicy>
+template <bool use_compression, typename AllToAllPolicy>
 inline std::vector<uint64_t> send_u64s(
     std::vector<uint64_t>& values,
     std::vector<uint64_t> const& send_counts,
@@ -320,7 +324,7 @@ inline std::vector<uint64_t> send_u64s(
     dss_schimek::mpi::environment env
 ) {
     using namespace dss_schimek;
-    if constexpr (useCompression) {
+    if constexpr (use_compression) {
         auto compressedData =
             IntegerCompression::writeRanges(send_counts.begin(), send_counts.end(), values.data());
 
@@ -348,12 +352,16 @@ public:
         std::vector<size_t> const& send_counts,
         dss_schimek::mpi::environment env
     ) {
-        using dss_mehnert::measurement::MeasuringTool;
-        auto& measuring_tool = MeasuringTool::measuringTool();
+        auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
         measuring_tool.start("all_to_all_strings_mpi");
+        measuring_tool.start("all_to_all_strings_send_chars");
         auto recv_buf_char = AllToAllPolicy::alltoallv(send_buf_char.data(), send_counts_char, env);
+        send_buf_char.clear();
+        send_buf_char.shrink_to_fit();
+
         auto recv_counts = dss_schimek::mpi::alltoall(send_counts, env);
+        measuring_tool.stop("all_to_all_strings_send_chars");
 
         measuring_tool.start("all_to_all_strings_send_lcps");
         auto send_lcps = _internal::send_u64s<compress_lcps, AllToAllPolicy>;
@@ -375,13 +383,9 @@ public:
     }
 };
 
-template <bool compress_lcps, typename AllToAllPolicy>
-class StringSetSendImpl<
-    compress_lcps,
-    dss_schimek::StringSet<unsigned char, Length, StringIndex, PEIndex>,
-    AllToAllPolicy> {
-    using StringSet = dss_schimek::StringSet<unsigned char, Length, StringIndex, PEIndex>;
-
+template <bool compress_lcps, typename StringSet, typename AllToAllPolicy>
+    requires(has_permutation_members<StringSet>)
+class StringSetSendImpl<compress_lcps, StringSet, AllToAllPolicy> {
 public:
     static StringLcpContainer<StringSet> alltoallv(
         StringLcpContainer<StringSet>& container,
@@ -390,34 +394,35 @@ public:
         std::vector<size_t> const& send_counts,
         dss_schimek::mpi::environment env
     ) {
-        using dss_mehnert::measurement::MeasuringTool;
-        auto& measuring_tool = MeasuringTool::measuringTool();
+        auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
         auto const ss = container.make_string_set();
 
-        std::vector<size_t> send_buf_rank(ss.size()), send_buf_index(ss.size());
-        auto d_rank = send_buf_rank.begin(), d_index = send_buf_index.begin();
-        for (auto const& str: ss) {
-            *d_rank++ = str.getPEIndex();
-            *d_index++ = str.getStringIndex();
-        }
-
         measuring_tool.start("all_to_all_strings_mpi");
+        measuring_tool.start("all_to_all_strings_send_chars");
         auto recv_buf_char = AllToAllPolicy::alltoallv(send_buf_char.data(), send_counts_char, env);
-        auto recv_counts = dss_schimek::mpi::alltoall(send_counts, env);
+        send_buf_char.clear();
+        send_buf_char.shrink_to_fit();
 
+        auto recv_counts = dss_schimek::mpi::alltoall(send_counts, env);
+        measuring_tool.stop("all_to_all_strings_send_chars");
+
+
+        // todo it would be possible to combine all three send_u64 calls ...
         measuring_tool.start("all_to_all_strings_send_lcps");
         auto send_lcps = _internal::send_u64s<compress_lcps, AllToAllPolicy>;
         auto recv_buf_lcp = send_lcps(container.lcps(), send_counts, recv_counts, env);
         measuring_tool.stop("all_to_all_strings_send_lcps");
-        container.delete_all();
+        container.delete_lcps();
 
         // todo does 7-bit compression make sense for PE and string indices
-        // todo this is pretty wasteful in terms of memory
         measuring_tool.start("all_to_all_strings_send_idxs");
-        auto send_idxs = _internal::send_u64s<compress_lcps, AllToAllPolicy>;
-        auto recv_buf_rank = send_idxs(send_buf_rank, send_counts, recv_counts, env);
-        auto recv_buf_index = send_idxs(send_buf_index, send_counts, recv_counts, env);
+        InputPermutation permutation{ss};
+        container.delete_all();
+
+        auto const send_idxs = _internal::send_u64s<compress_lcps, AllToAllPolicy>;
+        auto recv_buf_rank = send_idxs(permutation.ranks(), send_counts, recv_counts, env);
+        auto recv_buf_index = send_idxs(permutation.strings(), send_counts, recv_counts, env);
         measuring_tool.stop("all_to_all_strings_send_idxs");
         measuring_tool.stop("all_to_all_strings_mpi");
 
@@ -445,14 +450,14 @@ public:
         std::vector<size_t> const& send_counts,
         Communicator const& comm
     ) {
-        using dss_mehnert::measurement::MeasuringTool;
-        auto& measuring_tool = MeasuringTool::measuringTool();
+        auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
-        measuring_tool.start("all_to_all_strings_intern_copy");
+        measuring_tool.start("all_to_all_strings_write_send_buf");
+        auto const strptr = container.make_string_lcp_ptr();
         auto [send_buf_char, send_counts_char] =
-            _internal::write_send_buf<compress_prefixes>(container, send_counts);
+            _internal::write_send_buf<compress_prefixes>(strptr, send_counts);
         container.delete_raw_strings();
-        measuring_tool.stop("all_to_all_strings_intern_copy");
+        measuring_tool.stop("all_to_all_strings_write_send_buf");
 
         using SendImpl = _internal::StringSetSendImpl<compress_lcps, StringSet, AllToAllPolicy>;
         return SendImpl::alltoallv(container, send_buf_char, send_counts_char, send_counts, comm);
@@ -464,15 +469,17 @@ public:
         std::vector<size_t> const& send_counts,
         std::vector<size_t> const& prefixes,
         Communicator const& comm
-    ) {
-        using dss_mehnert::measurement::MeasuringTool;
-        auto& measuring_tool = MeasuringTool::measuringTool();
+    )
+        requires(PermutationStringSet<StringSet>)
+    {
+        auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
-        measuring_tool.start("all_to_all_strings_intern_copy");
+        measuring_tool.start("all_to_all_strings_write_send_buf");
+        auto const strptr = container.make_string_lcp_ptr();
         auto [send_buf_char, send_counts_char] =
-            _internal::write_send_buf<compress_prefixes>(container, send_counts, prefixes);
+            _internal::write_send_buf<compress_prefixes>(strptr, send_counts, prefixes);
         container.delete_raw_strings();
-        measuring_tool.stop("all_to_all_strings_intern_copy");
+        measuring_tool.stop("all_to_all_strings_write_send_buf");
 
         using SendImpl = _internal::StringSetSendImpl<compress_lcps, StringSet, AllToAllPolicy>;
         return SendImpl::alltoallv(container, send_buf_char, send_counts_char, send_counts, comm);
