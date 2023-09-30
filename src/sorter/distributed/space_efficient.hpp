@@ -93,22 +93,18 @@ public:
             this->measuring_tool_.setQuantile(i);
             auto const offset = quantile_offsets[i], size = quantile_sizes[i];
             auto const quantile = strptr.sub(offset, size);
+            auto const quantile_prefixes = std::span{prefixes}.subspan(offset, size);
 
-            // todo use a std::span here
-            std::vector<size_t> const quantile_prefixes{
-                prefixes.begin() + offset,
-                prefixes.begin() + offset + size};
-
-            // todo the usage of StringContainer is slightly dodgy here
-            // the strings are only actually materialized later
-            StringLcpContainer<StringSet> materialized_strings{
+            // note that this container is not `consistent`, in the sense that
+            // it does not own the characters pointed to by its strings
+            StringLcpContainer<StringSet> quantile_cont{
                 std::vector<typename StringSet::Char>{},
                 {quantile.active().begin(), quantile.active().end()},
                 {quantile.lcp(), quantile.lcp() + quantile.size()}};
 
-            // todo would it be possible to pass `quantile` directly?
-            auto sorted_quantile =
-                Base::sort(std::move(materialized_strings), comms, quantile_prefixes);
+            this->measuring_tool_.disable();
+            auto sorted_quantile = Base::sort(std::move(quantile_cont), comms, quantile_prefixes);
+            this->measuring_tool_.enable();
             full_permutation.append(sorted_quantile.make_string_set());
         }
 

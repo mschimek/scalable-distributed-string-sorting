@@ -61,7 +61,7 @@ protected:
     StringLcpContainer<StringSet> sort(
         StringLcpContainer<StringSet>&& container,
         Subcommunicators const& comms,
-        std::vector<size_t> const& dist_prefixes
+        std::span<size_t const> dist_prefixes
     ) {
         auto const& comm_root = comms.comm_root();
 

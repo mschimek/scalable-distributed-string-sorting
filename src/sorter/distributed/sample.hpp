@@ -44,7 +44,7 @@ struct MaxLength {
 };
 
 struct DistPrefixes {
-    std::vector<size_t> const& prefixes;
+    std::span<size_t const> prefixes;
 };
 
 template <typename StringSet>

@@ -275,7 +275,7 @@ size_t get_num_send_chars(StringPtr const& strptr) {
 }
 
 template <bool compress_prefixes, typename StringPtr>
-size_t get_num_send_chars(StringPtr const& strptr, std::vector<size_t> const& prefixes) {
+size_t get_num_send_chars(StringPtr const& strptr, std::span<size_t const> prefixes) {
     auto const D = std::accumulate(prefixes.begin(), prefixes.end(), size_t{0});
     if constexpr (compress_prefixes) {
         auto const lcps = strptr.lcp(), size = strptr.size();
@@ -467,7 +467,7 @@ public:
     StringLcpContainer<StringSet> alltoallv(
         StringLcpContainer<StringSet>& container,
         std::vector<size_t> const& send_counts,
-        std::vector<size_t> const& prefixes,
+        std::span<size_t const> prefixes,
         Communicator const& comm
     )
         requires(PermutationStringSet<StringSet>)
