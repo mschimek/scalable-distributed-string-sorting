@@ -14,26 +14,22 @@
 #include "sorter/distributed/prefix_doubling.hpp"
 #include "sorter/distributed/sample.hpp"
 #include "strings/stringcontainer.hpp"
-#include "strings/stringset.hpp"
 
 namespace dss_mehnert {
 namespace sorter {
 
 template <
-    typename CharType,
     typename RedistributionPolicy,
     typename AllToAllStringPolicy,
     typename PartitionPolicy,
     typename BloomFilter>
 class SpaceEfficientSort : private BasePrefixDoublingMergeSort<
-                               CharType,
                                RedistributionPolicy,
                                AllToAllStringPolicy,
                                PartitionPolicy,
                                BloomFilter> {
 public:
     using Base = BasePrefixDoublingMergeSort<
-        CharType,
         RedistributionPolicy,
         AllToAllStringPolicy,
         PartitionPolicy,
@@ -41,39 +37,24 @@ public:
 
     using Subcommunicators = Base::Subcommunicators;
 
-    using StringSet = CompressedStringSet<CharType, StringIndex, PEIndex>;
-    using StringPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
-    using String = StringSet::String;
+    SpaceEfficientSort(PartitionPolicy partition, size_t const quantile_size)
+        : Base{std::move(partition)},
+          quantile_size_{quantile_size} {}
 
-    using MaterializedStringSet = dss_mehnert::StringSet<CharType, Length, StringIndex, PEIndex>;
-
-    SpaceEfficientSort(PartitionPolicy const partition, size_t const quantile_size)
-        : Base{partition},
-          quantile_size_{std::max<size_t>(1, quantile_size)} {}
-
-    InputPermutation sort(
-        StringLcpContainer<CompressedStringSet<CharType>>&& container, Subcommunicators const& comms
-    ) {
-        this->measuring_tool_.start("init_container");
-        std::vector<typename StringSet::String> strings;
-        strings.reserve(container.size());
-
-        // todo get rid of duplicated code here
+    template <typename StringSet>
+    InputPermutation sort(StringLcpContainer<StringSet>&& container, Subcommunicators const& comms)
+        requires(!PermutationStringSet<StringSet>)
+    {
+        this->measuring_tool_.start("augment_container");
         auto const rank = comms.comm_root().rank();
-        for (size_t index = 0; auto const& src: container.get_strings()) {
-            strings.push_back(src.with_members(StringIndex{index++}, PEIndex{rank}));
-        }
+        auto augmented_container = augment_string_container(std::move(container), rank);
+        this->measuring_tool_.stop("augment_container");
 
-        StringLcpContainer<StringSet> index_container{
-            container.release_raw_strings(),
-            std::move(strings),
-            container.release_lcps()};
-        container.delete_all();
-        this->measuring_tool_.stop("init_container");
-
-        return sort(std::move(index_container), comms);
+        return sort(std::move(augmented_container), comms);
     }
 
+
+    template <PermutationStringSet StringSet>
     InputPermutation
     sort(StringLcpContainer<StringSet>&& container, Subcommunicators const& comms) {
         auto const strptr = container.make_string_lcp_ptr();
@@ -120,9 +101,8 @@ public:
 
             // todo the usage of StringContainer is slightly dodgy here
             // the strings are only actually materialized later
-            // todo this is complete nonsense
-            StringLcpContainer<MaterializedStringSet> materialized_strings{
-                std::vector<CharType>{},
+            StringLcpContainer<StringSet> materialized_strings{
+                std::vector<typename StringSet::Char>{},
                 {quantile.active().begin(), quantile.active().end()},
                 {quantile.lcp(), quantile.lcp() + quantile.size()}};
 
@@ -141,13 +121,13 @@ private:
 
     size_t quantile_size_;
 
-    template <typename ExtraArg>
+    template <typename StringPtr, typename ExtraArg>
     std::pair<std::vector<size_t>, std::vector<size_t>>
     compute_quantiles(StringPtr const& strptr, ExtraArg const arg, Communicator const& comm) {
         this->measuring_tool_.start("compute_num_quantiles");
         size_t const total_size = sample::accumulate_chars(strptr.active(), arg);
         size_t const num_quantiles = comm.allreduce_single(
-            kamping::send_buf({tlx::div_ceil(total_size, quantile_size_)}),
+            kamping::send_buf({tlx::div_ceil(total_size, std::max<size_t>(1, quantile_size_))}),
             kamping::op(kamping::ops::max<>{})
         );
         this->measuring_tool_.stop("compute_num_quantiles");

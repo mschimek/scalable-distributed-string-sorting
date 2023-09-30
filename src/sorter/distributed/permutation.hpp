@@ -8,6 +8,7 @@
 #include <type_traits>
 #include <vector>
 
+#include "strings/stringcontainer.hpp"
 #include "strings/stringset.hpp"
 
 namespace dss_mehnert {
@@ -18,6 +19,28 @@ constexpr bool has_permutation_members = has_member<typename StringSet::String, 
 
 template <typename StringSet>
 concept PermutationStringSet = has_permutation_members<StringSet>;
+
+template <typename String>
+using AugmentedString = String::template with_members_t<StringIndex, PEIndex>;
+
+template <typename StringSet>
+using AugmentedStringSet =
+    StringSet::template StringSet<AugmentedString<typename StringSet::String>>;
+
+template <typename StringSet>
+StringLcpContainer<AugmentedStringSet<StringSet>>
+augment_string_container(StringLcpContainer<StringSet>&& container, size_t const rank)
+    requires(!has_permutation_members<StringSet>)
+{
+    std::vector<AugmentedString<typename StringSet::String>> strings;
+    strings.reserve(container.size());
+
+    for (size_t index = 0; auto const& src: container.get_strings()) {
+        strings.push_back(src.with_members(StringIndex{index++}, PEIndex{rank}));
+    }
+
+    return {container.release_raw_strings(), std::move(strings), container.release_lcps()};
+}
 
 class InputPermutation {
 public:

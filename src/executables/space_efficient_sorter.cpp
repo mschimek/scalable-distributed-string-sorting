@@ -146,7 +146,6 @@ void run_space_efficient_sort(
     // todo maybe use separate sample policies
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
     using Sorter = dss_mehnert::sorter::SpaceEfficientSort<
-        CharType,
         RedistributionPolicy,
         AllToAllPolicy,
         PartitionPolicy,
