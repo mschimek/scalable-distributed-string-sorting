@@ -28,6 +28,28 @@
 namespace dss_mehnert {
 namespace sorter {
 
+template <typename String>
+using AugmentedString = String::template with_members_t<StringIndex, PEIndex>;
+
+template <typename StringSet>
+using AugmentedStringSet =
+    StringSet::template StringSet<AugmentedString<typename StringSet::String>>;
+
+template <typename StringSet>
+StringLcpContainer<AugmentedStringSet<StringSet>>
+augment_string_container(StringLcpContainer<StringSet>&& container, size_t const rank)
+    requires(!PermutationStringSet<StringSet>)
+{
+    std::vector<AugmentedString<typename StringSet::String>> strings;
+    strings.reserve(container.size());
+
+    for (size_t index = 0; auto const& src: container.get_strings()) {
+        strings.push_back(src.with_members(StringIndex{index++}, PEIndex{rank}));
+    }
+
+    return {container.release_raw_strings(), std::move(strings), container.release_lcps()};
+}
+
 template <
     typename CharType,
     typename RedistributionPolicy,
@@ -46,9 +68,6 @@ public:
 
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
 
-    // todo add a namespace level typedef for this
-    using StringPEIndexSet = StringSet<CharType, Length, StringIndex, PEIndex>;
-
 protected:
     template <typename StringPtr>
     std::vector<size_t> run_bloom_filter(
@@ -62,7 +81,7 @@ protected:
         return prefixes;
     }
 
-    template <typename StringSet>
+    template <PermutationStringSet StringSet>
     StringLcpContainer<StringSet> sort(
         StringLcpContainer<StringSet>&& container,
         Subcommunicators const& comms,
@@ -124,7 +143,8 @@ protected:
         return container;
     }
 
-    InputPermutation write_permutation(StringPEIndexSet const& ss) {
+    template <PermutationStringSet StringSet>
+    InputPermutation write_permutation(StringSet const& ss) {
         this->measuring_tool_.start("write_permutation");
         InputPermutation const permutation{ss};
         this->measuring_tool_.stop("write_permutation");
@@ -161,56 +181,37 @@ public:
     using StringPEIndexSet = StringSet<CharType, Length, StringIndex, PEIndex>;
 
     template <typename StringSet>
-    InputPermutation
-    sort(StringLcpContainer<StringSet>&& container, Subcommunicators const& comms) {
-        static_assert(!has_member<typename StringSet::String, StringIndex>);
-        static_assert(!has_member<typename StringSet::String, PEIndex>);
-
-        this->measuring_tool_.start("init_container");
-        // create a new container with additional rank and string index data members
-        std::vector<typename StringPEIndexSet::String> strings;
-        strings.reserve(container.size());
-
+    InputPermutation sort(StringLcpContainer<StringSet>&& container, Subcommunicators const& comms)
+        requires(!PermutationStringSet<StringSet>)
+    {
+        this->measuring_tool_.start("augment_container");
         auto const rank = comms.comm_root().rank();
-        for (size_t index = 0; auto const& src: container.get_strings()) {
-            strings.push_back(src.with_members(StringIndex{index++}, PEIndex{rank}));
-        }
+        auto augmented_container = augment_string_container(std::move(container), rank);
+        this->measuring_tool_.stop("augment_container");
 
-        StringLcpContainer<StringPEIndexSet> index_container{
-            container.release_raw_strings(),
-            std::move(strings),
-            container.release_lcps()};
-        container.delete_all();
-        this->measuring_tool_.stop("init_container");
-
-        return sort(std::move(index_container), comms);
+        return sort(std::move(augmented_container), comms);
     }
 
-    InputPermutation sort(
-        StringLcpContainer<StringPEIndexSet>&& container,
-        Subcommunicators const& comms,
-        bool const is_sorted_locally = false
-    ) {
+    template <PermutationStringSet StringSet>
+    InputPermutation
+    sort(StringLcpContainer<StringSet>&& container, Subcommunicators const& comms) {
         this->measuring_tool_.setPhase("local_sorting");
 
         auto const strptr = container.make_string_lcp_ptr();
         this->measuring_tool_.add(container.char_size(), "chars_in_set");
 
-        if (!is_sorted_locally) {
-            this->measuring_tool_.start("local_sorting", "sort_locally");
-            tlx::sort_strings_detail::radixsort_CI3(strptr, 0, 0);
-            this->measuring_tool_.stop("local_sorting", "sort_locally", comms.comm_root());
-        }
-        assert(strptr.active().check_order());
+        this->measuring_tool_.start("local_sorting", "sort_locally");
+        tlx::sort_strings_detail::radixsort_CI3(strptr, 0, 0);
+        this->measuring_tool_.stop("local_sorting", "sort_locally", comms.comm_root());
 
         if (comms.comm_root().size() == 1) {
             return Base::write_permutation(strptr.active());
         } else {
             auto const prefixes = Base::run_bloom_filter(strptr, comms, start_depth);
-            auto sorted_container = Base::sort(std::move(container), comms, prefixes);
+            container = Base::sort(std::move(container), comms, prefixes);
 
             this->measuring_tool_.setRound(0);
-            return Base::write_permutation(sorted_container.make_string_set());
+            return Base::write_permutation(container.make_string_set());
         }
     }
 

@@ -5,7 +5,16 @@
 
 #include <cstddef>
 #include <ostream>
+#include <type_traits>
 #include <vector>
+
+#include "strings/stringset.hpp"
+
+namespace dss_mehnert {
+
+template <typename StringSet>
+concept PermutationStringSet = has_member<typename StringSet::String, StringIndex>
+                               && has_member<typename StringSet::String, PEIndex>;
 
 class InputPermutation {
 public:
@@ -16,7 +25,7 @@ public:
 
     explicit InputPermutation() = default;
 
-    template <typename StringSet>
+    template <PermutationStringSet StringSet>
     explicit InputPermutation(StringSet const& ss) : ranks_(ss.size()),
                                                      strings_(ss.size()) {
         size_type i = 0;
@@ -45,7 +54,7 @@ public:
         strings_.insert(strings_.end(), other.strings_.begin(), other.strings_.end());
     }
 
-    template <typename StringSet>
+    template <PermutationStringSet StringSet>
     void append(StringSet const& ss) {
         size_t offset = ranks_.size();
         ranks_.resize(ranks_.size() + ss.size());
@@ -69,3 +78,5 @@ inline std::ostream& operator<<(std::ostream& stream, InputPermutation const& pe
     }
     return stream;
 }
+
+} // namespace dss_mehnert

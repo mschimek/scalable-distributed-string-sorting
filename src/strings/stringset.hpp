@@ -399,10 +399,15 @@ struct StringIndex {
     inline size_t getStringIndex() const { return stringIndex; }
 };
 
-template <typename String, typename... Members>
+template <typename Char_, typename String, typename... Members>
 struct StringData : public Members... {
+    using Char = Char_;
+
     template <typename T>
     static constexpr bool has_member = (std::is_same_v<T, Members> || ...);
+
+    template <typename... NewMembers>
+    using with_members_t = StringData<Char, String, Members..., NewMembers...>;
 
     StringData() = default;
 
@@ -417,28 +422,19 @@ struct StringData : public Members... {
     inline String getChars() const { return string; }
 
     template <typename... NewMembers>
-    inline StringData<String, Members..., NewMembers...> with_members(NewMembers&&... args
-    ) const noexcept {
+    inline with_members_t<NewMembers...> with_members(NewMembers&&... args) const noexcept {
         return {
             this->string,
             static_cast<Members const&>(*this)...,
-            std::forward<NewMembers>(args)...
-        };
+            std::forward<NewMembers>(args)...};
     }
-};
-
-
-template <typename... Members>
-struct StringDataWrapper {
-    template <typename String>
-    using type = StringData<String, Members...>;
 };
 
 template <typename Data, typename T>
 inline constexpr bool has_member = Data::template has_member<T>;
 
-template <typename String, typename... Args>
-std::ostream& operator<<(std::ostream& out, StringData<String, Args...> const& str) {
+template <typename Char, typename String, typename... Args>
+std::ostream& operator<<(std::ostream& out, StringData<Char, String, Args...> const& str) {
     out << "{";
     ((out << Args::name << "=" << static_cast<Args>(str).value() << ", "), ...);
     return out << "}";
@@ -450,33 +446,36 @@ std::ostream& operator<<(std::ostream& out, StringData<String, Args...> const& s
  * Traits class implementing StringSet concept for char* and unsigned char*
  * strings with additional length attribute.
  */
-template <typename CharType, template <typename> typename Data_>
+template <typename String_, template <typename> typename StringSet_>
 class GenericStringSetTraits {
 public:
     //! exported alias for character type
-    using Char = CharType;
+    using Char = String_::Char;
 
     //! String reference: pointer to first character
-    using String = Data_<Char*>;
+    using String = String_;
 
     //! Iterator over string references: pointer over pointers
     using Iterator = String*;
 
     //! iterator of characters in a string
     using CharIterator = Char const*;
+
+    template <typename String>
+    using StringSet = StringSet_<String>;
 };
 
 /*!
  * Class implementing StringSet concept for char* and unsigned char* strings
  * with additional length attribute.
  */
-template <typename CharType, template <typename> typename Data_>
-class GenericStringSet : public GenericStringSetTraits<CharType, Data_>,
+template <typename String_>
+class GenericStringSet : public GenericStringSetTraits<String_, GenericStringSet>,
                          public StringSetBase<
-                             GenericStringSet<CharType, Data_>,
-                             GenericStringSetTraits<CharType, Data_>> {
+                             GenericStringSet<String_>,
+                             GenericStringSetTraits<String_, GenericStringSet>> {
 public:
-    using Traits = GenericStringSetTraits<CharType, Data_>;
+    using Traits = GenericStringSetTraits<String_, GenericStringSet>;
 
     using Char = Traits::Char;
     using String = Traits::String;
@@ -559,7 +558,7 @@ private:
 };
 
 template <typename Char, typename... Members>
-using StringSet = GenericStringSet<Char, StringDataWrapper<Members...>::template type>;
+using StringSet = GenericStringSet<StringData<Char, Char*, Members...>>;
 
 } // namespace dss_schimek
 
@@ -568,25 +567,27 @@ using StringSet = GenericStringSet<Char, StringDataWrapper<Members...>::template
 namespace dss_mehnert {
 
 using dss_schimek::GenericStringSet;
+using dss_schimek::GenericStringSetTraits;
 using dss_schimek::has_member;
 using dss_schimek::Index;
 using dss_schimek::Length;
 using dss_schimek::PEIndex;
 using dss_schimek::StringData;
-using dss_schimek::StringDataWrapper;
 using dss_schimek::StringIndex;
 using dss_schimek::StringSet;
+using dss_schimek::StringSetBase;
 
 /*!
  * Class implementing StringSet concept for compressed representations.
  */
-template <typename CharType, template <typename> typename Data_>
-class GenericCompressedStringSet : public dss_schimek::GenericStringSetTraits<CharType, Data_>,
-                                   public dss_schimek::StringSetBase<
-                                       GenericCompressedStringSet<CharType, Data_>,
-                                       dss_schimek::GenericStringSetTraits<CharType, Data_>> {
+template <typename String_>
+class GenericCompressedStringSet
+    : public GenericStringSetTraits<String_, GenericCompressedStringSet>,
+      public StringSetBase<
+          GenericCompressedStringSet<String_>,
+          GenericStringSetTraits<String_, GenericCompressedStringSet>> {
 public:
-    using Traits = dss_schimek::GenericStringSetTraits<CharType, Data_>;
+    using Traits = dss_schimek::GenericStringSetTraits<String_, GenericCompressedStringSet>;
 
     using Char = Traits::Char;
     using String = Traits::String;
@@ -660,7 +661,6 @@ private:
 };
 
 template <typename Char, typename... Members>
-using CompressedStringSet =
-    GenericCompressedStringSet<Char, StringDataWrapper<Length, Members...>::template type>;
+using CompressedStringSet = GenericCompressedStringSet<StringData<Char, Char*, Length, Members...>>;
 
 } // namespace dss_mehnert

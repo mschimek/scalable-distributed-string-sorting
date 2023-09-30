@@ -30,8 +30,6 @@
 #include "util/measuringTool.hpp"
 
 namespace dss_mehnert {
-
-
 namespace sorter {
 
 template <typename RedistributionPolicy, typename AllToAllStringPolicy, typename PartitionPolicy>
@@ -92,9 +90,9 @@ protected:
         return send_counts;
     }
 
-    template <typename Container, typename ExtraArg>
+    template <typename StringSet, typename ExtraArg>
     auto exchange_and_merge(
-        Container&& container,
+        StringLcpContainer<StringSet>&& container,
         std::vector<size_t> const& send_counts,
         ExtraArg const extra_arg,
         Communicator const& comm
@@ -179,10 +177,12 @@ public:
     using Base::Base;
 
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
-    using StringSet = dss_mehnert::StringSet<CharType, Length>;
 
+    template <typename StringSet>
     StringLcpContainer<StringSet>
-    sort(StringLcpContainer<StringSet>&& container, Subcommunicators const& comms) {
+    sort(StringLcpContainer<StringSet>&& container, Subcommunicators const& comms)
+        requires has_member<typename StringSet::Sring, Length>
+    {
         auto const& comm_root = comms.comm_root();
 
         // todo make phase names consistent
