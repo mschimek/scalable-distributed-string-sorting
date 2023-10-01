@@ -149,6 +149,7 @@ void run_space_efficient_sort(
         RedistributionPolicy,
         AllToAllPolicy,
         PartitionPolicy,
+        PartitionPolicy,
         BloomFilterPolicy>;
 
     using dss_mehnert::measurement::MeasuringTool;
@@ -170,7 +171,9 @@ void run_space_efficient_sort(
     Subcommunicators comms{first_level, args.levels.end(), comm};
     measuring_tool.stop("none", "create_communicators", comm);
 
-    Sorter merge_sort{PartitionPolicy{args.sampling_factor}, args.quantile_size};
+    // todo add CLI options for quantile partition policy
+    PartitionPolicy const partition{args.sampling_factor};
+    Sorter merge_sort{partition, partition, args.quantile_size};
     auto permutation = merge_sort.sort(std::move(input_container), comms);
     measuring_tool.stop("none", "sorting_overall", comm);
 

@@ -22,17 +22,25 @@ namespace sorter {
 // template<typename... T>
 // using SpaceEfficientBase;
 
+// this struct is required to disambiguate between the PartitionPolicy used
+// in sorting and the one use to compute quantiles
+template <typename PartitionPolicy>
+struct QuantilePartitionBase : public PartitionPolicy {};
+
 template <
     typename RedistributionPolicy,
     typename AllToAllStringPolicy,
     typename PartitionPolicy,
+    typename QuantilePolicy,
     typename BloomFilter>
-class SpaceEfficientSort : private BasePrefixDoublingMergeSort<
+class SpaceEfficientSort : private QuantilePartitionBase<QuantilePolicy>,
+                           private BasePrefixDoublingMergeSort<
                                RedistributionPolicy,
                                AllToAllStringPolicy,
                                PartitionPolicy,
                                BloomFilter> {
 public:
+    using QuantilePolicy_ = QuantilePartitionBase<QuantilePolicy>;
     using Base = BasePrefixDoublingMergeSort<
         RedistributionPolicy,
         AllToAllStringPolicy,
@@ -41,8 +49,11 @@ public:
 
     using Subcommunicators = Base::Subcommunicators;
 
-    SpaceEfficientSort(PartitionPolicy partition, size_t const quantile_size)
-        : Base{std::move(partition)},
+    SpaceEfficientSort(
+        PartitionPolicy partition, QuantilePolicy quantile_partition, size_t const quantile_size
+    )
+        : QuantilePolicy_{std::move(quantile_partition)},
+          Base{std::move(partition)},
           quantile_size_{quantile_size} {}
 
     template <typename StringSet>
@@ -126,15 +137,16 @@ private:
     compute_quantiles(StringPtr const& strptr, ExtraArg const arg, Communicator const& comm) {
         this->measuring_tool_.start("compute_num_quantiles");
         size_t const total_size = sample::accumulate_chars(strptr.active(), arg);
+        size_t const local_num_quantiles = tlx::div_ceil(total_size, quantile_size_ + 1);
         size_t const num_quantiles = comm.allreduce_single(
-            kamping::send_buf({tlx::div_ceil(total_size, std::max<size_t>(1, quantile_size_))}),
+            kamping::send_buf(local_num_quantiles),
             kamping::op(kamping::ops::max<>{})
         );
         this->measuring_tool_.stop("compute_num_quantiles");
         this->measuring_tool_.add(num_quantiles, "num_quantiles");
 
         this->measuring_tool_.start("compute_quantile_sizes");
-        auto const sizes = PartitionPolicy::compute_partition(strptr, num_quantiles, arg, comm);
+        auto const sizes = QuantilePolicy_::compute_partition(strptr, num_quantiles, arg, comm);
         std::vector<size_t> offsets(sizes.size());
         std::exclusive_scan(sizes.begin(), sizes.end(), offsets.begin(), size_t{0});
         this->measuring_tool_.stop("compute_quantile_sizes");

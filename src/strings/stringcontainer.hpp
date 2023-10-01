@@ -325,8 +325,6 @@ public:
     }
 
     void extend_prefix(std::span<size_t const> lcps) {
-        static_assert(!StringSet_::is_compressed);
-
         auto const ss = this->make_string_set();
 
         assert_equal(lcps.size(), ss.size());
