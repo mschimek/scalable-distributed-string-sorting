@@ -203,6 +203,7 @@ public:
         make_contiguous(new_buffer);
     }
 
+    // todo consider using insert here
     void make_contiguous(std::vector<Char>& char_buffer) {
         char_buffer.resize(make_string_set().get_sum_length() + size());
 
@@ -324,6 +325,8 @@ public:
     }
 
     void extend_prefix(std::span<size_t const> lcps) {
+        static_assert(!StringSet_::is_compressed);
+
         auto const ss = this->make_string_set();
 
         assert_equal(lcps.size(), ss.size());

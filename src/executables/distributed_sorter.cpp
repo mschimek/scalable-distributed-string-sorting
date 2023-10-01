@@ -188,7 +188,7 @@ void run_merge_sort(
         die_verbose_unless(is_sorted, "output is not sorted or missing characters");
 
         if (args.check_exhaustive) {
-            bool is_complete = checker.check(sorted_str_ptr, true);
+            bool const is_complete = checker.check(sorted_str_ptr, true, comm);
             die_verbose_unless(is_complete, "output is not a permutation of the input");
         }
     }
@@ -256,7 +256,7 @@ void run_prefix_doubling(
     measuring_tool.disableCommVolume();
     if ((args.check || args.check_exhaustive) && comm.size() > 1) {
         auto complete_strings_cont = dss_mehnert::sorter::apply_permutation(
-            StringLcpContainer<StringSet>{checker.getLocalInput()},
+            StringLcpContainer<StringSet>{checker.local_input()},
             permutation,
             comm
         );
@@ -277,7 +277,7 @@ void run_prefix_doubling(
         die_verbose_unless(is_complete_and_sorted, "output is not sorted or missing characters");
 
         if (args.check_exhaustive) {
-            bool const is_sorted = checker.check(sorted_str_ptr, false);
+            bool const is_sorted = checker.check(sorted_str_ptr, false, comm);
             die_verbose_unless(is_sorted, "output is not a permutation of the input");
         }
     }

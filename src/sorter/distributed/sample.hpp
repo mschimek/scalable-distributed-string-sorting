@@ -220,7 +220,8 @@ public:
             auto const sample_len = get_string_len(ss, sample, sample_index, arg);
             auto const sample_chars = ss.get_chars(sample, 0);
 
-            std::copy_n(sample_chars, sample_len, std::back_inserter(result.sample));
+            auto const begin = sample_chars, end = begin + sample_len;
+            result.sample.insert(result.sample.end(), begin, end);
             result.sample.push_back(0);
 
             if constexpr (is_indexed) {
@@ -279,7 +280,8 @@ public:
             auto const sample_len = get_string_len(ss, sample, sample_index, arg);
             auto const sample_chars = ss.get_chars(sample, 0);
 
-            std::copy_n(sample_chars, sample_len, std::back_inserter(result.sample));
+            auto const begin = sample_chars, end = begin + sample_len;
+            result.sample.insert(result.sample.end(), begin, end);
             result.sample.push_back(0);
 
             if constexpr (is_indexed) {
