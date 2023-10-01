@@ -264,8 +264,8 @@ public:
             result.indices.reserve(sample_size);
         }
 
-        auto string = ss.begin(), index = 0;
-        size_t current_chars = 0;
+        auto string = ss.begin();
+        size_t current_chars = 0, index = 0;
         for (size_t i = 0; i < sample_size && string != ss.end(); ++i) {
             auto const next_boundary = sampler.next();
             for (; current_chars < next_boundary && string != ss.end(); ++string, ++index) {

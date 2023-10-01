@@ -10,6 +10,7 @@
 #include <iterator>
 #include <memory>
 #include <numeric>
+#include <span>
 #include <vector>
 
 #include <tlx/logger.hpp>
@@ -301,6 +302,16 @@ public:
         lcps_.resize(this->size(), 0);
     }
 
+    template <typename... Member, typename... InputIt>
+    void update(
+        std::vector<Char>&& raw_strings,
+        std::vector<size_t>&& lcps,
+        Initializer<Member, InputIt>... initializers
+    ) {
+        Base::update(std::move(raw_strings), initializers...);
+        lcps_ = std::move(lcps);
+    }
+
     void delete_lcps() {
         lcps_.clear();
         lcps_.shrink_to_fit();
@@ -312,18 +323,17 @@ public:
         delete_lcps();
     }
 
-    template <typename LcpIt>
-    void extend_prefix(LcpIt const first_lcp, LcpIt const last_lcp) {
+    void extend_prefix(std::span<size_t const> lcps) {
         auto const ss = this->make_string_set();
 
-        assert_equal(std::distance(first_lcp, last_lcp), std::ssize(ss));
-        assert(first_lcp == last_lcp || *first_lcp == 0);
+        assert_equal(lcps.size(), ss.size());
+        assert(lcps.empty() || lcps.front() == 0);
 
-        size_t const L = std::accumulate(first_lcp, last_lcp, size_t{0});
+        size_t const L = std::accumulate(lcps.begin(), lcps.end(), size_t{0});
         std::vector<Char> raw_strings(this->char_size() + L);
         auto prev_chars = raw_strings.begin(), curr_chars = prev_chars;
 
-        for (auto lcp_it = first_lcp; auto& curr_str: ss) {
+        for (auto lcp_it = lcps.begin(); auto& curr_str: ss) {
             auto const curr_lcp = *lcp_it++;
             auto curr_str_begin = ss.get_chars(curr_str, 0);
             auto curr_str_len = ss.get_length(curr_str) + 1;

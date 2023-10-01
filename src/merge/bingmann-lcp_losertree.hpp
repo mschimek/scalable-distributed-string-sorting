@@ -167,7 +167,7 @@ public:
 
 namespace dss_schimek {
 
-typedef uintptr_t lcp_t;
+using lcp_t = size_t;
 
 template <size_t K, typename StringSet>
 class LcpStringLoserTree_ {

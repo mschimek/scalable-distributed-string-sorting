@@ -18,6 +18,10 @@
 namespace dss_mehnert {
 namespace sorter {
 
+// todo
+// template<typename... T>
+// using SpaceEfficientBase;
+
 template <
     typename RedistributionPolicy,
     typename AllToAllStringPolicy,
@@ -97,15 +101,15 @@ public:
 
             // note that this container is not `consistent`, in the sense that
             // it does not own the characters pointed to by its strings
-            StringLcpContainer<StringSet> quantile_cont{
+            StringLcpContainer<StringSet> quantile_container{
                 std::vector<typename StringSet::Char>{},
                 {quantile.active().begin(), quantile.active().end()},
                 {quantile.lcp(), quantile.lcp() + quantile.size()}};
 
             this->measuring_tool_.disable();
-            auto sorted_quantile = Base::sort(std::move(quantile_cont), comms, quantile_prefixes);
+            Base::sort(quantile_container, comms, quantile_prefixes);
+            full_permutation.append(quantile_container.make_string_set());
             this->measuring_tool_.enable();
-            full_permutation.append(sorted_quantile.make_string_set());
         }
 
         this->measuring_tool_.setQuantile(0);

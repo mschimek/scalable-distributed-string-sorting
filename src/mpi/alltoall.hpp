@@ -10,6 +10,7 @@
 #include <cstring>
 #include <iterator>
 #include <numeric>
+#include <span>
 #include <type_traits>
 #include <vector>
 
@@ -206,12 +207,12 @@ namespace dss_mehnert {
 namespace mpi {
 namespace _internal {
 
-template <typename LcpIter, typename IntervalIter>
-void set_interval_start_lcp(LcpIter lcp_it, IntervalIter const begin, IntervalIter const end) {
-    for (auto it = begin; it != end; ++it) {
-        if (*it != 0) {
+template <typename LcpIt>
+inline void set_interval_start_lcp(LcpIt lcp_it, std::span<size_t const> interval_sizes) {
+    for (auto const& interval: interval_sizes) {
+        if (interval != 0) {
             *lcp_it = 0;
-            std::advance(lcp_it, *it);
+            std::advance(lcp_it, interval);
         }
     }
 }
@@ -266,8 +267,9 @@ size_t get_num_send_chars(StringPtr const& strptr) {
     // todo maybe add back optimization for uncompressed string set
     auto const N = strptr.active().get_sum_length();
     if constexpr (compress_prefixes) {
-        auto const lcps = strptr.lcp(), size = strptr.size();
-        auto const L = std::accumulate(lcps, lcps + size, size_t{0});
+        auto const lcp_begin = strptr.lcp();
+        auto const lcp_end = lcp_begin + strptr.size();
+        auto const L = std::accumulate(lcp_begin, lcp_end, size_t{0});
         return strptr.size() + N - L;
     } else {
         return strptr.size() + N;
@@ -278,19 +280,20 @@ template <bool compress_prefixes, typename StringPtr>
 size_t get_num_send_chars(StringPtr const& strptr, std::span<size_t const> prefixes) {
     auto const D = std::accumulate(prefixes.begin(), prefixes.end(), size_t{0});
     if constexpr (compress_prefixes) {
-        auto const lcps = strptr.lcp(), size = strptr.size();
-        auto const L = std::accumulate(lcps, lcps + size, size_t{0});
+        auto const lcp_begin = strptr.lcp();
+        auto const lcp_end = lcp_begin + strptr.size();
+        auto const L = std::accumulate(lcp_begin, lcp_end, size_t{0});
         return strptr.size() + D - L;
     } else {
         return strptr.size() + D;
     }
 }
 
-template <bool compress_prefixes, typename StringPtr>
+template <bool compress_prefixes, typename StringPtr, typename... Prefixes>
 std::pair<std::vector<unsigned char>, std::vector<size_t>> write_send_buf(
-    StringPtr const& strptr, std::vector<size_t> const& send_counts, auto const&... prefixes
+    StringPtr const& strptr, std::vector<size_t> const& send_counts, Prefixes const&... prefixes
 ) {
-    set_interval_start_lcp(strptr.lcp(), send_counts.begin(), send_counts.end());
+    set_interval_start_lcp(strptr.lcp(), send_counts);
 
     auto const num_send_chars = get_num_send_chars<compress_prefixes>(strptr, prefixes...);
 
@@ -345,7 +348,7 @@ inline std::vector<uint64_t> send_u64s(
 template <bool compress_lcps, typename StringSet, typename AllToAllPolicy>
 class StringSetSendImpl {
 public:
-    static StringLcpContainer<StringSet> alltoallv(
+    static void alltoallv(
         StringLcpContainer<StringSet>& container,
         std::vector<unsigned char>& send_buf_char,
         std::vector<size_t> const& send_counts_char,
@@ -375,11 +378,8 @@ public:
         measuring_tool.stop("all_to_all_strings_mpi");
 
         measuring_tool.start("all_to_all_strings_init_container");
-        StringLcpContainer<StringSet> recv_container{
-            std::move(recv_buf_char),
-            std::move(recv_buf_lcp)};
+        container.update(std::move(recv_buf_char), std::move(recv_buf_lcp));
         measuring_tool.stop("all_to_all_strings_init_container");
-        return recv_container;
     }
 };
 
@@ -387,7 +387,7 @@ template <bool compress_lcps, typename StringSet, typename AllToAllPolicy>
     requires(has_permutation_members<StringSet>)
 class StringSetSendImpl<compress_lcps, StringSet, AllToAllPolicy> {
 public:
-    static StringLcpContainer<StringSet> alltoallv(
+    static void alltoallv(
         StringLcpContainer<StringSet>& container,
         std::vector<unsigned char>& send_buf_char,
         std::vector<size_t> const& send_counts_char,
@@ -427,13 +427,13 @@ public:
         measuring_tool.stop("all_to_all_strings_mpi");
 
         measuring_tool.start("all_to_all_strings_init_container");
-        StringLcpContainer<StringSet> recv_container{
+        container.update(
             std::move(recv_buf_char),
             std::move(recv_buf_lcp),
             make_initializer<StringIndex>(std::move(recv_buf_index)),
-            make_initializer<PEIndex>(std::move(recv_buf_rank))};
+            make_initializer<PEIndex>(std::move(recv_buf_rank))
+        );
         measuring_tool.stop("all_to_all_strings_init_container");
-        return recv_container;
     }
 };
 
@@ -445,7 +445,7 @@ public:
     static constexpr bool PrefixCompression = compress_prefixes;
 
     template <typename StringSet>
-    StringLcpContainer<StringSet> alltoallv(
+    void alltoallv(
         StringLcpContainer<StringSet>& container,
         std::vector<size_t> const& send_counts,
         Communicator const& comm
@@ -460,11 +460,11 @@ public:
         measuring_tool.stop("all_to_all_strings_write_send_buf");
 
         using SendImpl = _internal::StringSetSendImpl<compress_lcps, StringSet, AllToAllPolicy>;
-        return SendImpl::alltoallv(container, send_buf_char, send_counts_char, send_counts, comm);
+        SendImpl::alltoallv(container, send_buf_char, send_counts_char, send_counts, comm);
     }
 
     template <typename StringSet>
-    StringLcpContainer<StringSet> alltoallv(
+    void alltoallv(
         StringLcpContainer<StringSet>& container,
         std::vector<size_t> const& send_counts,
         std::span<size_t const> prefixes,
@@ -482,7 +482,7 @@ public:
         measuring_tool.stop("all_to_all_strings_write_send_buf");
 
         using SendImpl = _internal::StringSetSendImpl<compress_lcps, StringSet, AllToAllPolicy>;
-        return SendImpl::alltoallv(container, send_buf_char, send_counts_char, send_counts, comm);
+        SendImpl::alltoallv(container, send_buf_char, send_counts_char, send_counts, comm);
     }
 };
 

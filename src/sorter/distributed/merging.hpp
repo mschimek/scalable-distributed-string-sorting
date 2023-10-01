@@ -9,10 +9,14 @@
 #include <utility>
 #include <vector>
 
+#include <tlx/die/core.hpp>
+
 #include "merge/bingmann-lcp_losertree.hpp"
 #include "strings/stringcontainer.hpp"
+#include "tlx/die.hpp"
 
 namespace dss_mehnert {
+namespace merge {
 
 inline size_t pow2roundup(size_t x) {
     if (x == 0u)
@@ -27,61 +31,70 @@ inline size_t pow2roundup(size_t x) {
     return x + 1;
 }
 
-template <bool is_compressed, typename StringSet>
-struct MergeResult {
-    StringLcpContainer<StringSet> container;
-};
+template <bool is_compressed>
+struct MergeResult {};
 
-template <typename StringSet>
-struct MergeResult<true, StringSet> {
-    StringLcpContainer<StringSet> container;
+template <>
+struct MergeResult<true> {
     std::vector<size_t> saved_lcps;
 };
 
-template <bool is_compressed, size_t K, typename StringLcpPtr>
-static inline MergeResult<is_compressed, typename StringLcpPtr::StringSet> multiway_merge(
-    StringLcpPtr const& input_string_ptr,
+template <bool is_compressed, size_t K, typename StringSet>
+inline MergeResult<is_compressed> multiway_merge(
+    StringLcpContainer<StringSet>& input_strings,
     std::vector<size_t>& interval_offsets,
     std::vector<size_t>& interval_sizes
 ) {
-    assert(K == pow2roundup(interval_sizes.size()));
-    if (input_string_ptr.size() == 0) {
+    assert_equal(K, pow2roundup(interval_sizes.size()));
+    if (input_strings.empty()) {
         return {};
     }
 
     interval_offsets.resize(K, 0);
     interval_sizes.resize(K, 0);
 
-    StringLcpContainer<typename StringLcpPtr::StringSet> sorted_strings(input_string_ptr.size());
-
-    using StringSet = typename StringLcpPtr::StringSet;
     using MergeAdapter = dss_schimek::StringLcpPtrMergeAdapter<StringSet>;
     using LoserTree = dss_schimek::LcpStringLoserTree_<K, StringSet>;
 
-    MergeAdapter in_ptr{input_string_ptr.active(), input_string_ptr.lcp()};
-    MergeAdapter out_ptr{sorted_strings.make_string_set(), sorted_strings.lcp_array()};
+    std::vector<typename StringSet::String> sorted_strings(input_strings.size());
+    StringSet sorted_string_set{
+        sorted_strings.data(),
+        sorted_strings.data() + sorted_strings.size()};
+    std::vector<size_t> sorted_lcps(input_strings.size());
+
+    MergeAdapter in_ptr{input_strings.make_string_set(), input_strings.lcp_array()};
+    MergeAdapter out_ptr{sorted_string_set, sorted_lcps.data()};
     LoserTree loser_tree{in_ptr, interval_offsets, interval_sizes};
 
     if constexpr (is_compressed) {
-        std::vector<size_t> old_lcps;
-        loser_tree.writeElementsToStream(out_ptr, input_string_ptr.size(), old_lcps);
-        return {std::move(sorted_strings), std::move(old_lcps)};
+        std::vector<size_t> saved_lcps;
+        loser_tree.writeElementsToStream(out_ptr, input_strings.size(), saved_lcps);
+        input_strings.set(std::move(sorted_strings));
+        input_strings.set(std::move(sorted_lcps));
+        return {saved_lcps};
     } else {
-        loser_tree.writeElementsToStream(out_ptr, input_string_ptr.size());
-        return {std::move(sorted_strings)};
+        loser_tree.writeElementsToStream(out_ptr, input_strings.size());
+        input_strings.set(std::move(sorted_strings));
+        input_strings.set(std::move(sorted_lcps));
+        return {};
     }
 }
 
-template <bool is_compressed, typename StringLcpPtr>
-static inline MergeResult<is_compressed, typename StringLcpPtr::StringSet> choose_merge(
-    StringLcpPtr const& recv_string_ptr,
+template <bool is_compressed, typename StringSet>
+static inline MergeResult<is_compressed> choose_merge(
+    StringLcpContainer<StringSet>& recv_strings,
     std::vector<size_t>& interval_offsets,
     std::vector<size_t>& interval_sizes
 ) {
     assert(interval_sizes.size() == interval_offsets.size());
     auto merge_k = [&]<size_t K>() {
-        return multiway_merge<is_compressed, K>(recv_string_ptr, interval_offsets, interval_sizes);
+        return multiway_merge<is_compressed, K, StringSet>(
+            recv_strings,
+            interval_offsets,
+            interval_sizes
+        );
     };
+
     switch (pow2roundup(interval_sizes.size())) {
         case 1:
             return merge_k.template operator()<1>();
@@ -115,9 +128,9 @@ static inline MergeResult<is_compressed, typename StringLcpPtr::StringSet> choos
             return merge_k.template operator()<16384>();
         default:
             // todo consider increasing this to 2^15
-            std::cout << "Error in merge: K is not 2^i for i in {0,...,14} " << std::endl;
-            std::abort();
+            tlx_die("Error in merge: K is not 2^i for i in {0,...,14} ");
     }
 }
 
+} // namespace merge
 } // namespace dss_mehnert

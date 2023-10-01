@@ -169,13 +169,13 @@ void run_merge_sort(
     measuring_tool.stop("none", "create_communicators", comm);
 
     MergeSort merge_sort{PartitionPolicy{args.sampling_factor}};
-    auto sorted_container = merge_sort.sort(std::move(input_container), comms);
+    merge_sort.sort(input_container, comms);
     measuring_tool.stop("none", "sorting_overall", comm);
 
     if (args.check || args.check_exhaustive) {
-        auto sorted_str_ptr = sorted_container.make_string_lcp_ptr();
-        auto num_sorted_chars = sorted_container.char_size();
-        auto num_sorted_strs = sorted_container.size();
+        auto sorted_str_ptr = input_container.make_string_lcp_ptr();
+        auto num_sorted_chars = input_container.char_size();
+        auto num_sorted_strs = input_container.size();
 
         bool is_sorted = is_complete_and_sorted(
             sorted_str_ptr,

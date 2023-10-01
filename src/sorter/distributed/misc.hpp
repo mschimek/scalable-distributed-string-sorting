@@ -125,20 +125,16 @@ StringContainer<StringSet> choose_splitters_distributed(
         auto idx_result = comm.allgatherv(kamping::send_buf(splitter_idxs));
         return StringContainer<StringSet>{
             char_result.extract_recv_buffer(),
-            make_initializer<Index>(idx_result.extract_recv_buffer())
-        };
+            make_initializer<Index>(idx_result.extract_recv_buffer())};
     } else {
         return StringContainer<StringSet>{char_result.extract_recv_buffer()};
     }
 }
 
-template <typename LcpIt>
-size_t compute_global_lcp_average(LcpIt const first, LcpIt const last, Communicator const& comm) {
-    size_t const local_lcp_sum = std::accumulate(first, last, size_t{0});
-    size_t const local_num_strs = std::distance(first, last);
-
+inline size_t compute_global_lcp_average(std::span<size_t const> lcps, Communicator const& comm) {
+    size_t const local_lcp_sum = std::accumulate(lcps.begin(), lcps.end(), size_t{0});
     auto result = comm.allreduce(
-        kamping::send_buf({local_lcp_sum, local_num_strs}),
+        kamping::send_buf({local_lcp_sum, lcps.size()}),
         kamping::op(kamping::ops::plus<>{})
     );
 

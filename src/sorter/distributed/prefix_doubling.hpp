@@ -58,8 +58,8 @@ protected:
     }
 
     template <PermutationStringSet StringSet>
-    StringLcpContainer<StringSet> sort(
-        StringLcpContainer<StringSet>&& container,
+    void sort(
+        StringLcpContainer<StringSet>& container,
         Subcommunicators const& comms,
         std::span<size_t const> dist_prefixes
     ) {
@@ -72,51 +72,51 @@ protected:
             auto const& comm = comms.comm_final();
             auto const strptr = container.make_string_lcp_ptr();
             auto const send_counts = Base::compute_sorted_send_counts(strptr, arg, comm);
-            container = Base::exchange_and_merge(std::move(container), send_counts, arg, comm);
+            Base::exchange_and_merge(container, send_counts, arg, comm);
             this->measuring_tool_.stop("sort_globally", "final_sorting", comm_root);
-
-            return container;
+            return;
         }
 
-        // todo maybe add a if constexpr (!is_single_level)
-        size_t round = 0;
-        auto level_it = comms.begin();
-        {
-            // first level of multi-level sort; consider distinguishing prefixes
-            this->measuring_tool_.start("sort_globally", "partial_sorting");
-            sample::DistPrefixes const arg{dist_prefixes};
-            auto const level = *level_it++;
-            auto const& comm = level.comm_exchange;
-            auto const strptr = container.make_string_lcp_ptr();
-            auto const send_counts = Base::compute_sorted_send_counts(strptr, arg, level);
-            container = Base::exchange_and_merge(std::move(container), send_counts, arg, comm);
-            this->measuring_tool_.stop("sort_globally", "partial_sorting", comm_root);
-            this->measuring_tool_.setRound(++round);
+        if constexpr (!Subcommunicators::is_single_level) {
+            size_t round = 0;
+            auto level_it = comms.begin();
+            {
+                // first level of multi-level sort; consider distinguishing prefixes
+                this->measuring_tool_.start("sort_globally", "partial_sorting");
+                sample::DistPrefixes const arg{dist_prefixes};
+                auto const level = *level_it++;
+                auto const strptr = container.make_string_lcp_ptr();
+                auto const send_counts = Base::compute_sorted_send_counts(strptr, arg, level);
+                Base::exchange_and_merge(container, send_counts, arg, level.comm_exchange);
+                this->measuring_tool_.stop("sort_globally", "partial_sorting", comm_root);
+                this->measuring_tool_.setRound(++round);
+            }
+
+            for (; level_it != comms.end(); ++level_it) {
+                // intermediate level of multi-level sort; don't consider distinguishing prefixes
+                this->measuring_tool_.start("sort_globally", "partial_sorting");
+                sample::NoExtraArg const arg;
+                auto const level = *level_it;
+                auto const strptr = container.make_string_lcp_ptr();
+                auto const send_counts = Base::compute_sorted_send_counts(strptr, arg, level);
+                Base::exchange_and_merge(container, send_counts, arg, level.comm_exchange);
+                this->measuring_tool_.stop("sort_globally", "partial_sorting", comm_root);
+                this->measuring_tool_.setRound(++round);
+            }
+
+            {
+                this->measuring_tool_.start("sort_globally", "final_sorting");
+                // final level of multi-level sort; don't consider distinguishing prefixes
+                sample::NoExtraArg const arg;
+                auto const& comm = comms.comm_final();
+                auto const strptr = container.make_string_lcp_ptr();
+                auto const send_counts = Base::compute_sorted_send_counts(strptr, arg, comm);
+                Base::exchange_and_merge(container, send_counts, arg, comm);
+                this->measuring_tool_.stop("sort_globally", "final_sorting", comm_root);
+            }
+        } else {
+            tlx_die("unreachable for for a purely single level implementation");
         }
-
-        for (; level_it != comms.end(); ++level_it) {
-            // intermediate level of multi-level sort; don't consider distinguishing prefixes
-            this->measuring_tool_.start("sort_globally", "partial_sorting");
-            sample::NoExtraArg const arg;
-            auto const level = *level_it;
-            auto const& comm = level.comm_exchange;
-            auto const strptr = container.make_string_lcp_ptr();
-            auto const send_counts = Base::compute_sorted_send_counts(strptr, arg, level);
-            container = Base::exchange_and_merge(std::move(container), send_counts, arg, comm);
-            this->measuring_tool_.stop("sort_globally", "partial_sorting", comm_root);
-            this->measuring_tool_.setRound(++round);
-        }
-
-        this->measuring_tool_.start("sort_globally", "final_sorting");
-        // final level of multi-level sort; don't consider distinguishing prefixes
-        sample::NoExtraArg const arg;
-        auto const& comm = comms.comm_final();
-        auto const strptr = container.make_string_lcp_ptr();
-        auto const send_counts = Base::compute_sorted_send_counts(strptr, arg, comm);
-        container = Base::exchange_and_merge(std::move(container), send_counts, arg, comm);
-        this->measuring_tool_.stop("sort_globally", "final_sorting", comm_root);
-
-        return container;
     }
 
     template <PermutationStringSet StringSet>
@@ -179,7 +179,7 @@ public:
             return Base::write_permutation(strptr.active());
         } else {
             auto const prefixes = Base::run_bloom_filter(strptr, comms, start_depth);
-            container = Base::sort(std::move(container), comms, prefixes);
+            Base::sort(container, comms, prefixes);
 
             this->measuring_tool_.setRound(0);
             return Base::write_permutation(container.make_string_set());
@@ -192,6 +192,7 @@ private:
 
 namespace _internal {
 
+// todo maybe move all this stuff to permutation.hpp
 template <typename StringSet>
 StringLcpContainer<StringSet> receive_strings(
     StringLcpContainer<StringSet>&& container,
