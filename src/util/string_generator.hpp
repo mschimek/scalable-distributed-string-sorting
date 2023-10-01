@@ -11,7 +11,10 @@
 #include <limits>
 #include <random>
 
-#include "mpi/allgather.hpp"
+#include <kamping/collectives/bcast.hpp>
+#include <kamping/named_parameters.hpp>
+
+#include "mpi/communicator.hpp"
 #include "mpi/environment.hpp"
 #include "mpi/read_input.hpp"
 #include "strings/stringcontainer.hpp"
@@ -96,7 +99,8 @@ template <typename StringSet>
 class DNRatioGenerator : public StringLcpContainer<StringSet> {
 public:
     DNRatioGenerator(size_t size, size_t stringLength, double DN_ratio)
-        : StringLcpContainer<StringSet>{get_raw_strings(size, stringLength, DN_ratio, {})} {
+        : StringLcpContainer<StringSet>{
+            get_raw_strings(size, stringLength, DN_ratio, kamping::comm_world())} {
         std::random_device rand;
         std::mt19937 gen{rand()};
 
@@ -113,7 +117,10 @@ private:
     static constexpr unsigned char char_range = max_char - min_char + 1;
 
     std::vector<unsigned char> get_raw_strings(
-        size_t num_strings, size_t len_strings_requested, double DN_ratio, mpi::environment env
+        size_t num_strings,
+        size_t len_strings_requested,
+        double DN_ratio,
+        dss_mehnert::Communicator const& comm
     ) {
         size_t const k = std::max(
             len_strings_requested * std::clamp(DN_ratio, 0.0, 1.0),
@@ -122,15 +129,15 @@ private:
         size_t const len_strings = std::max(len_strings_requested, k);
 
         std::vector<unsigned char> raw_strings;
-        raw_strings.reserve((1.005 * num_strings) * (len_strings + 1) / env.size());
+        raw_strings.reserve((1.005 * num_strings) * (len_strings + 1) / comm.size());
 
-        std::mt19937 gen{get_global_seed(env)};
-        std::uniform_int_distribution<size_t> dist{0, env.size() - 1};
+        std::mt19937 gen{get_global_seed(comm)};
+        std::uniform_int_distribution<size_t> dist{0, comm.size() - 1};
 
         size_t const rand_char = min_char + (gen() % char_range);
         for (size_t i = 0; i < num_strings; ++i) {
             size_t PEIndex = dist(gen);
-            if (PEIndex == env.rank()) {
+            if (PEIndex == comm.rank()) {
                 // only create your own strings
                 raw_strings.resize(raw_strings.size() + k, min_char);
 
@@ -149,13 +156,14 @@ private:
         return raw_strings;
     }
 
-    size_t get_global_seed(mpi::environment env) {
+    size_t get_global_seed(dss_mehnert::Communicator const& comm) {
         size_t seed = 0;
-        if (env.rank() == 0) {
+        if (comm.is_root()) {
             std::random_device rand_seed;
             seed = rand_seed();
         }
-        return mpi::broadcast(seed, env);
+        comm.bcast_single(kamping::send_recv_buf(seed));
+        return seed;
     }
 };
 
@@ -194,26 +202,28 @@ class SkewedRandomStringLcpContainer : public StringLcpContainer<StringSet> {
     using Char = typename StringSet::Char;
 
 public:
-    size_t getSameSeedGlobally(dss_schimek::mpi::environment env) {
+    size_t getSameSeedGlobally(dss_mehnert::Communicator const& comm) {
         size_t seed = 0;
-        if (env.rank() == 0) {
+        if (comm.is_root()) {
             std::random_device rand_seed;
             seed = rand_seed();
         }
-        return dss_schimek::mpi::broadcast(seed, env);
+        comm.bcast_single(kamping::send_recv_buf(seed));
+        return seed;
     }
+
     SkewedRandomStringLcpContainer(
         size_t const size, size_t const min_length = 100, size_t const max_length = 200
     ) {
         std::vector<Char> random_raw_string_data;
         std::random_device rand_seed;
-        dss_schimek::mpi::environment env;
-        size_t const globalSeed = 0;       // getSameSeedGlobally();
-        std::mt19937 rand_gen(globalSeed); // rand_seed());
+        dss_mehnert::Communicator const& comm{kamping::comm_world()};
+        size_t const globalSeed = 0;
+        std::mt19937 rand_gen(globalSeed);
         std::uniform_int_distribution<Char> small_char_dis(65, 70);
         std::uniform_int_distribution<Char> char_dis(65, 90);
 
-        std::uniform_int_distribution<size_t> dist(0, env.size() - 1);
+        std::uniform_int_distribution<size_t> dist(0, comm.size() - 1);
         std::uniform_int_distribution<size_t> normal_length_dis(min_length, max_length);
         std::uniform_int_distribution<size_t> large_length_dis(min_length + 100, max_length + 100);
 
@@ -224,9 +234,7 @@ public:
         random_raw_string_data.reserve(size + 1);
         for (size_t i = 0; i < numLongStrings; ++i) {
             size_t const PEIndex = dist(rand_gen);
-            // std::cout << "rank: " << env.rank() << " PEIndex: " << PEIndex <<
-            // std::endl;
-            bool const takeValue = (PEIndex == env.rank());
+            bool const takeValue = (PEIndex == comm.rank());
             size_t length = large_length_dis(rand_gen);
             for (size_t j = 0; j < length; ++j) {
                 unsigned char generatedChar = small_char_dis(rand_gen);
@@ -235,7 +243,6 @@ public:
                 }
             }
             if (takeValue) {
-                // std::cout << "taken" << std::endl;
                 random_raw_string_data.emplace_back(Char(0));
                 curChars += length + 1;
             }
@@ -243,9 +250,7 @@ public:
 
         for (size_t i = 0; i < numSmallStrings; ++i) {
             size_t const PEIndex = dist(rand_gen);
-            // std::cout << "rank: " << env.rank() << " PEIndex: " << PEIndex <<
-            // std::endl;
-            bool const takeValue = (PEIndex == env.rank());
+            bool const takeValue = (PEIndex == comm.rank());
             size_t length = normal_length_dis(rand_gen);
             for (size_t j = 0; j < length; ++j) {
                 unsigned char const generatedChar = char_dis(rand_gen);
@@ -254,12 +259,10 @@ public:
                 }
             }
             if (takeValue) {
-                // std::cout << "taken" << std::endl;
                 random_raw_string_data.push_back(Char(0));
                 curChars += length + 1;
             }
         }
-        //});
         random_raw_string_data.resize(curChars);
         this->update(std::move(random_raw_string_data));
     }

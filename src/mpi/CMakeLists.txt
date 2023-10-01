@@ -1,6 +1,5 @@
 target_sources(dss_base
     PUBLIC
-        allgather.hpp
         allreduce.hpp
         alltoall.hpp
         big_type.hpp
@@ -8,7 +7,6 @@ target_sources(dss_base
         communicator.hpp
         environment.cpp
         environment.hpp
-        gather.hpp
         is_sorted.hpp
         read_input.hpp
         shift.hpp
