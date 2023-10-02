@@ -4,9 +4,9 @@
 [submodule "ips4o"]
 	path = external/ips4o
 	url = https://github.com/ips4o/ips4o
-[submodule "external/kamping"]
-	path = external/kamping
-	url = git@github.com:kamping-site/kamping.git
 [submodule "external/RBC"]
 	path = external/RBC
 	url = https://github.com/MichaelAxtmann/RBC.git
+[submodule "external/kamping"]
+	path = external/kamping
+	url = git@github.com:kamping-site/kamping.git

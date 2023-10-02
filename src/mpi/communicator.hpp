@@ -18,33 +18,6 @@
 
 namespace dss_mehnert {
 
-/// @brief A plugin providing `allreduce_single`, a simple wrapper around `allreduce`.
-template <typename Comm>
-class AllReduceSinglePlugin : public kamping::plugins::PluginBase<Comm, AllReduceSinglePlugin> {
-public:
-    /// @brief Wrapper for \c kamping::Communicator::allreduce but restricted to a single element.
-    template <typename... Args>
-    auto allreduce_single(Args... args) const {
-        using kamping::internal::ParameterType;
-
-        KAMPING_CHECK_PARAMETERS(
-            Args,
-            KAMPING_REQUIRED_PARAMETERS(send_buf, op),
-            KAMPING_OPTIONAL_PARAMETERS()
-        );
-
-        KASSERT(
-            select_parameter_type<ParameterType::send_recv_buf>(args...).size() == 1u,
-            "The send buffer has to be of size 1 on all ranks.",
-            kamping::assert::light
-        );
-
-        return this->to_communicator()
-            .allreduce(std::forward<Args>(args)...)
-            .extract_recv_buffer()[0];
-    }
-};
-
 template <
     template <typename...>
     typename DefaultContainerType,
@@ -221,6 +194,6 @@ private:
     }
 };
 
-using Communicator = TrackingCommunicator<std::vector, AllReduceSinglePlugin>;
+using Communicator = TrackingCommunicator<std::vector>;
 
 } // namespace dss_mehnert
