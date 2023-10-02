@@ -3,10 +3,13 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <ostream>
 #include <type_traits>
 #include <vector>
+
+#include <tlx/die.hpp>
 
 #include "strings/stringcontainer.hpp"
 #include "strings/stringset.hpp"
@@ -50,6 +53,12 @@ public:
     using index_type = std::size_t;
 
     explicit InputPermutation() = default;
+
+    explicit InputPermutation(std::vector<rank_type> ranks, std::vector<index_type> strings)
+        : ranks_{std::move(ranks)},
+          strings_{std::move(strings)} {
+        assert_equal(ranks.size(), strings.size());
+    }
 
     template <PermutationStringSet StringSet>
     explicit InputPermutation(StringSet const& ss) : ranks_(ss.size()),

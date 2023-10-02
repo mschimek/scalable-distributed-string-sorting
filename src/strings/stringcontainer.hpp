@@ -132,9 +132,9 @@ public:
         _internal::init_strings<StringSet>(*raw_strings_, strings_, initalizers...);
     }
 
-    String operator[](size_t i) { return strings_[i]; }
-    String front() { return strings_.front(); }
-    String back() { return strings_.back(); }
+    String& operator[](size_t i) { return strings_[i]; }
+    String& front() { return strings_.front(); }
+    String& back() { return strings_.back(); }
     String* strings() { return strings_.data(); }
     size_t size() const { return strings_.size(); }
     bool empty() const { return strings_.empty(); }
@@ -152,7 +152,7 @@ public:
     }
 
     std::vector<Char> get_raw_string(int64_t const i) {
-        if (0 <= i && i < std::ssize(this)) {
+        if (0 <= i && i < std::ssize(*this)) {
             auto const& str = strings_[i];
             std::vector<Char> buf(str.length + 1, 0);
             std::copy_n(str.string, str.length, buf.begin());
@@ -217,12 +217,14 @@ public:
         std::swap(*raw_strings_, char_buffer);
     }
 
-    bool is_consistent() const {
+    template <typename _StringSet = StringSet>
+    bool is_consistent() const
+        requires(_StringSet::has_length)
+    {
         auto const begin = &*raw_strings_->begin(), end = &*raw_strings_->end();
 
-        auto const ss = make_string_set();
         return std::all_of(strings_.begin(), strings_.end(), [=](auto const& str) {
-            return begin <= str.getChars() && str.getChars() + ss.get_length(str) < end;
+            return begin <= str.string && str.string + str.length <= end;
         });
     }
 

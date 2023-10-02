@@ -254,9 +254,11 @@ void run_prefix_doubling(
 
     measuring_tool.disable();
     measuring_tool.disableCommVolume();
+
     if ((args.check || args.check_exhaustive) && comm.size() > 1) {
+        StringLcpContainer<StringSet> local_input{checker.local_input()};
         auto complete_strings_cont = dss_mehnert::sorter::apply_permutation(
-            StringLcpContainer<StringSet>{checker.local_input()},
+            local_input.make_string_set(),
             permutation,
             comm
         );
@@ -277,8 +279,10 @@ void run_prefix_doubling(
         die_verbose_unless(is_complete_and_sorted, "output is not sorted or missing characters");
 
         if (args.check_exhaustive) {
-            bool const is_sorted = checker.check(sorted_str_ptr, false, comm);
-            die_verbose_unless(is_sorted, "output is not a permutation of the input");
+            die_verbose_unless(
+                checker.check(sorted_str_ptr, false, comm),
+                "output is not a permutation of the input"
+            );
         }
     }
 

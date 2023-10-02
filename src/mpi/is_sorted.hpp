@@ -3,16 +3,27 @@
 
 #pragma once
 
+#include <algorithm>
+
 #include <kamping/collectives/allgather.hpp>
 #include <kamping/collectives/allreduce.hpp>
+#include <kamping/collectives/exscan.hpp>
+#include <kamping/communicator.hpp>
 #include <kamping/mpi_ops.hpp>
 #include <kamping/named_parameters.hpp>
+#include <kamping/p2p/isend.hpp>
+#include <kamping/p2p/recv.hpp>
+#include <tlx/math.hpp>
+#include <tlx/math/div_ceil.hpp>
 #include <tlx/sort/strings/radix_sort.hpp>
 
 #include "mpi/communicator.hpp"
 #include "mpi/shift.hpp"
+#include "sorter/distributed/permutation.hpp"
+#include "sorter/distributed/prefix_doubling.hpp"
 #include "strings/stringcontainer.hpp"
 #include "strings/stringset.hpp"
+#include "strings/stringtools.hpp"
 
 namespace dss_schimek {
 
@@ -97,10 +108,10 @@ bool is_sorted(StringSet const& ss, dss_mehnert::Communicator const& comm) {
         return ss.check_order();
     }
 
-    auto const own_min_number = ss.empty() ? comm.size() : comm.rank();
-    auto const own_max_number = ss.empty() ? -1 : comm.rank();
-    auto const min_PE_with_data = comm.allreduce_single(send_buf(own_min_number), op(ops::min<>{}));
-    auto const max_PE_with_data = comm.allreduce_single(send_buf(own_max_number), op(ops::max<>{}));
+    int const own_min_number = ss.empty() ? comm.size_signed() : comm.rank_signed();
+    int const own_max_number = ss.empty() ? -1 : comm.rank_signed();
+    int const min_PE_with_data = comm.allreduce_single(send_buf(own_min_number), op(ops::min<>{}));
+    int const max_PE_with_data = comm.allreduce_single(send_buf(own_max_number), op(ops::max<>{}));
 
     auto const front = (ss.empty() ? ss.empty_string() : *ss.begin()).string;
     auto const back = (ss.empty() ? ss.empty_string() : *(ss.end() - 1)).string;
@@ -109,10 +120,10 @@ bool is_sorted(StringSet const& ss, dss_mehnert::Communicator const& comm) {
 
     bool is_sorted = ss.check_order();
     if (!ss.empty()) {
-        if (comm.rank() != min_PE_with_data) {
+        if (comm.rank_signed() != min_PE_with_data) {
             is_sorted &= dss_schimek::scmp(smaller_string.data(), front) <= 0;
         }
-        if (comm.rank() != max_PE_with_data) {
+        if (comm.rank_signed() != max_PE_with_data) {
             is_sorted &= dss_schimek::scmp(back, greater_string.data()) <= 0;
         }
     }
@@ -151,4 +162,194 @@ bool is_complete_and_sorted(
     }
     return is_sorted(strptr.active(), comm);
 }
+
 } // namespace dss_schimek
+
+namespace dss_mehnert {
+
+template <typename Char>
+bool check_global_order(
+    std::vector<Char> const& first_string,
+    std::vector<Char> const& last_string,
+    bool const is_empty,
+    Communicator const& comm
+) {
+    using namespace kamping;
+
+    assert_equal(first_string.back(), 0);
+    assert_equal(last_string.back(), 0);
+
+    auto const comm_reverse = comm.split(0, comm.size() - comm.rank() - 1);
+    auto const predecessor = comm.exscan_single(
+        send_buf(is_empty ? -1 : comm.rank_signed()),
+        op(ops::max<>{}),
+        values_on_rank_0(-1)
+    );
+    auto const successor = comm_reverse.exscan_single(
+        send_buf(is_empty ? comm.size_signed() : comm.rank_signed()),
+        op(ops::min<>{}),
+        values_on_rank_0(comm.size_signed())
+    );
+
+    if (is_empty) {
+        Request req_pred, req_succ;
+        std::vector<Char> pred_string, succ_string;
+
+        if (predecessor != -1) {
+            comm.isend(send_buf(first_string), destination(predecessor), request(req_pred));
+        }
+        if (successor != comm.size_signed()) {
+            comm.issend(send_buf(last_string), destination(successor), request(req_succ));
+        }
+
+        if (predecessor != -1) {
+            comm.recv(recv_buf(pred_string), source(predecessor));
+        }
+        if (successor != comm.size_signed()) {
+            comm.recv(recv_buf(succ_string), source(successor));
+        }
+        req_pred.wait();
+        req_succ.wait();
+
+        auto leq = [](auto const& lhs, auto const& rhs) {
+            return dss_schimek::leq(lhs.data(), rhs.data());
+        };
+        return (predecessor == -1 || leq(pred_string, first_string))
+               && (successor == comm.size_signed() || leq(last_string, succ_string));
+    } else {
+        return true;
+    }
+}
+
+inline bool check_permutation_complete(
+    InputPermutation const& permutation, size_t const local_size, Communicator const& comm
+) {
+    std::vector<int> counts(comm.size());
+    for (auto const& rank: permutation.ranks()) {
+        ++counts[rank];
+    }
+
+    std::vector<int> offsets(counts.size());
+    std::exclusive_scan(counts.begin(), counts.end(), offsets.begin(), 0);
+
+    std::vector<size_t> sorted_indices(permutation.size());
+    for (size_t i = 0; i != permutation.size(); ++i) {
+        sorted_indices[offsets[permutation.rank(i)]++] = permutation.string(i);
+    }
+
+    using namespace kamping;
+    std::vector<size_t> global_indicies;
+    comm.alltoallv(send_buf(sorted_indices), send_counts(counts), recv_buf(global_indicies));
+    std::sort(global_indicies.begin(), global_indicies.end());
+
+    bool is_complete = true;
+    for (size_t i = 0; i != global_indicies.size(); ++i) {
+        is_complete &= (i == global_indicies[i]);
+    }
+    return local_size == global_indicies.size() && is_complete;
+}
+
+template <typename StringSet>
+class SpaceEfficientChecker {
+public:
+    using StringContainer = StringLcpContainer<StringSet>;
+    using Char = StringContainer::Char;
+
+    void store_container(StringContainer const& container) {
+        assert(container.is_consistent());
+        input_container_.set(std::vector{container.get_strings()});
+        input_container_.set(std::vector{container.raw_strings()});
+        input_container_.set(std::vector<size_t>(container.size()));
+
+        auto const d_begin = input_container_.raw_strings().data();
+        auto const begin = container.raw_strings().data();
+
+        auto d_str = input_container_.strings();
+        for (auto const& str: container.get_strings()) {
+            (d_str++)->string = d_begin + (str.string - begin);
+        }
+        assert(input_container_.is_consistent());
+    }
+
+    bool is_sorted(InputPermutation const& permutation, Communicator const& comm) {
+        using namespace kamping;
+
+        auto const num_quantiles = compute_num_quantiles(comm);
+        auto const quantile_size = tlx::div_ceil(permutation.size(), num_quantiles);
+        assert(num_quantiles * quantile_size >= permutation.size());
+
+        bool is_sorted = true;
+        auto const &ranks = permutation.ranks(), &strings = permutation.strings();
+
+        std::vector<Char> lower_bound{0};
+        for (size_t i = 0; i != num_quantiles; ++i) {
+            std::cout << "quantile" << i << std::endl;
+            auto const begin = std::min(permutation.size(), i * quantile_size);
+            auto const end = std::min(begin + quantile_size, permutation.size());
+
+            InputPermutation const quantile_permutation{
+                {ranks.begin() + begin, ranks.begin() + end},
+                {strings.begin() + begin, strings.begin() + end}};
+
+            auto quantile = dss_mehnert::sorter::apply_permutation(
+                input_container_.make_string_set(),
+                quantile_permutation,
+                comm
+            );
+
+            is_sorted &= quantile.make_string_set().check_order();
+            if (!quantile.empty()) {
+                // note that strings are null-terminated at this point
+                is_sorted &= dss_schimek::leq(lower_bound.data(), quantile.front().string);
+                lower_bound = quantile.get_raw_string(quantile.size() - 1);
+            }
+        }
+
+
+        std::vector<Char> first_string{0}, last_string{0};
+        if (!permutation.empty()) {
+            InputPermutation const sentinels{
+                {ranks.front(), ranks.back()},
+                {strings.front(), strings.back()}};
+
+            auto sentinel_strings = dss_mehnert::sorter::apply_permutation(
+                input_container_.make_string_set(),
+                sentinels,
+                comm
+            );
+
+            first_string = sentinel_strings.get_raw_string(0);
+            last_string = sentinel_strings.get_raw_string(1);
+        } else {
+            InputPermutation const sentinels;
+            dss_mehnert::sorter::apply_permutation(
+                input_container_.make_string_set(),
+                InputPermutation{},
+                comm
+            );
+        }
+
+        is_sorted &= check_global_order(first_string, last_string, permutation.empty(), comm);
+        return comm.allreduce_single(send_buf({is_sorted}), op(ops::logical_and<>{}));
+    }
+
+    bool is_complete(InputPermutation const& permutation, Communicator const& comm) {
+        using namespace kamping;
+        auto is_complete = check_permutation_complete(permutation, input_container_.size(), comm);
+        return comm.allreduce_single(send_buf({is_complete}), op(ops::logical_and<>{}));
+    }
+
+private:
+    static constexpr size_t quantile_size = 500 * 1024 * 1024;
+    StringContainer input_container_;
+
+    size_t compute_num_quantiles(Communicator const& comm) {
+        using namespace kamping;
+
+        size_t const total_size = input_container_.make_string_set().get_sum_length();
+        size_t const local_num_quantiles = tlx::div_ceil(total_size, quantile_size + 1);
+        return comm.allreduce_single(send_buf(local_num_quantiles), op(ops::max<>{}));
+    }
+};
+
+} // namespace dss_mehnert

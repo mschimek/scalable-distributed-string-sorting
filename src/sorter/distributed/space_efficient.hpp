@@ -18,14 +18,10 @@
 namespace dss_mehnert {
 namespace sorter {
 
-// todo
-// template<typename... T>
-// using SpaceEfficientBase;
-
 // this struct is required to disambiguate between the PartitionPolicy used
 // in sorting and the one use to compute quantiles
 template <typename PartitionPolicy>
-struct QuantilePartitionBase : public PartitionPolicy {};
+struct QuantilePolicyBase : public PartitionPolicy {};
 
 template <
     typename RedistributionPolicy,
@@ -33,14 +29,14 @@ template <
     typename PartitionPolicy,
     typename QuantilePolicy,
     typename BloomFilter>
-class SpaceEfficientSort : private QuantilePartitionBase<QuantilePolicy>,
+class SpaceEfficientSort : private QuantilePolicyBase<QuantilePolicy>,
                            private BasePrefixDoublingMergeSort<
                                RedistributionPolicy,
                                AllToAllStringPolicy,
                                PartitionPolicy,
                                BloomFilter> {
 public:
-    using QuantilePolicy_ = QuantilePartitionBase<QuantilePolicy>;
+    using QuantilePolicy_ = QuantilePolicyBase<QuantilePolicy>;
     using Base = BasePrefixDoublingMergeSort<
         RedistributionPolicy,
         AllToAllStringPolicy,
@@ -101,6 +97,7 @@ public:
             compute_quantiles(strptr, arg, comms.comm_root());
         this->measuring_tool_.stop("compute_quantiles", "compute_quantiles");
 
+        this->measuring_tool_.start("sort_quantiles", "sort_quantiles");
         InputPermutation full_permutation;
         full_permutation.reserve(strptr.size());
 
@@ -124,6 +121,7 @@ public:
         }
 
         this->measuring_tool_.setQuantile(0);
+        this->measuring_tool_.stop("sort_quantiles", "sort_quantiles");
         return full_permutation;
     }
 

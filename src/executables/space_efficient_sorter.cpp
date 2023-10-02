@@ -23,6 +23,7 @@
 #include "executables/common_cli.hpp"
 #include "mpi/alltoall.hpp"
 #include "mpi/communicator.hpp"
+#include "mpi/is_sorted.hpp"
 #include "mpi/warmup.hpp"
 #include "sorter/distributed/space_efficient.hpp"
 #include "strings/stringset.hpp"
@@ -159,9 +160,12 @@ void run_space_efficient_sort(
 
     measuring_tool.disableCommVolume();
     auto input_container = generate_compressed_strings<StringSet>(args, comm);
-    // auto num_input_chars = input_container.char_size();
-    // auto num_input_strs = input_container.size();
     measuring_tool.enableCommVolume();
+
+    dss_mehnert::SpaceEfficientChecker<StringSet> checker;
+    if (args.check || args.check_exhaustive) {
+        checker.store_container(input_container);
+    }
 
     comm.barrier();
 
@@ -179,6 +183,16 @@ void run_space_efficient_sort(
 
     measuring_tool.disable();
     measuring_tool.disableCommVolume();
+
+    if (args.check) {
+        auto const is_sorted = checker.is_sorted(permutation, comm);
+        die_verbose_unless(is_sorted, "output permutation is not sorted");
+    }
+
+    if (args.check_exhaustive) {
+        auto const is_complete = checker.is_complete(permutation, comm);
+        die_verbose_unless(is_complete, "output permutation is not complete");
+    }
 
     measuring_tool.write_on_root(std::cout, comm);
     measuring_tool.reset();
