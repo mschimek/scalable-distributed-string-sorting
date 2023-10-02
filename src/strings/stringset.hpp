@@ -519,7 +519,6 @@ public:
         return {reinterpret_cast<char const*>(s.string) + depth};
     }
 
-    // todo is this actually returning This?
     //! Subset this string set using iterator range.
     GenericStringSet sub(Iterator const begin, Iterator const end) const { return {begin, end}; }
 

@@ -163,7 +163,7 @@ void run_space_efficient_sort(
     measuring_tool.enableCommVolume();
 
     dss_mehnert::SpaceEfficientChecker<StringSet> checker;
-    if (args.check || args.check_exhaustive) {
+    if (args.check_sorted || args.check_complete) {
         checker.store_container(input_container);
     }
 
@@ -184,12 +184,11 @@ void run_space_efficient_sort(
     measuring_tool.disable();
     measuring_tool.disableCommVolume();
 
-    if (args.check) {
+    if (args.check_sorted) {
         auto const is_sorted = checker.is_sorted(permutation, comm);
         die_verbose_unless(is_sorted, "output permutation is not sorted");
     }
-
-    if (args.check_exhaustive) {
+    if (args.check_complete) {
         auto const is_complete = checker.is_complete(permutation, comm);
         die_verbose_unless(is_complete, "output permutation is not complete");
     }

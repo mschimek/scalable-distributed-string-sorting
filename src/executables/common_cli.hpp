@@ -4,6 +4,7 @@
 #pragma once
 
 #include <filesystem>
+#include <utility>
 
 #include <tlx/cmdline_parser.hpp>
 
@@ -42,8 +43,8 @@ struct CommonArgs {
     bool prefix_doubling = false;
     bool grid_bloomfilter = true;
     size_t num_iterations = 5;
-    bool check = false;
-    bool check_exhaustive = false;
+    bool check_sorted = false;
+    bool check_complete = false;
 
     std::string get_prefix(dss_mehnert::Communicator const& comm) const {
         // clang-format off
@@ -311,16 +312,6 @@ inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
         "redistribution scheme to use for multi-level sort "
         "(0=none, 1=naive, 2=simple-strings, 3=simple-chars, [4]=grid)"
     );
-    cp.add_flag(
-        'v',
-        "verify",
-        args.check,
-        "check if strings/chars were lost and that the result is sorted"
-    );
-    cp.add_flag(
-        'V',
-        "verify-full",
-        args.check_exhaustive,
-        "check that the the output exactly matches the input"
-    );
+    cp.add_flag('v', "check-sorted", args.check_sorted, "check that the result is sorted");
+    cp.add_flag('V', "check-complete", args.check_complete, "check that the result is complete");
 }

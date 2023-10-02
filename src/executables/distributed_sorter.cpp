@@ -136,7 +136,6 @@ void run_merge_sort(
     constexpr bool prefix_compression = PrefixCompression();
 
     using StringSet = dss_mehnert::StringSet<CharType, dss_mehnert::Length>;
-    using StringLcpPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
     using AllToAllPolicy = dss_mehnert::mpi::
         AllToAllStringImpl<lcp_compression, prefix_compression, MPIAllToAllRoutine>;
 
@@ -151,12 +150,10 @@ void run_merge_sort(
 
     measuring_tool.disableCommVolume();
     auto input_container = generate_strings<StringSet>(args, comm);
-    auto num_input_chars = input_container.char_size();
-    auto num_input_strs = input_container.size();
 
-    CheckerWithCompleteExchange<StringLcpPtr> checker;
-    if (args.check || args.check_exhaustive) {
-        checker.storeLocalInput(input_container.raw_strings());
+    dss_mehnert::MergeSortChecker<StringSet> checker;
+    if (args.check_sorted || args.check_complete) {
+        checker.store_container(input_container);
     }
     measuring_tool.enableCommVolume();
 
@@ -172,25 +169,15 @@ void run_merge_sort(
     merge_sort.sort(input_container, comms);
     measuring_tool.stop("none", "sorting_overall", comm);
 
-    if (args.check || args.check_exhaustive) {
-        auto sorted_str_ptr = input_container.make_string_lcp_ptr();
-        auto num_sorted_chars = input_container.char_size();
-        auto num_sorted_strs = input_container.size();
-
-        bool is_sorted = is_complete_and_sorted(
-            sorted_str_ptr,
-            num_input_chars,
-            num_sorted_chars,
-            num_input_strs,
-            num_sorted_strs,
-            comm
-        );
-        die_verbose_unless(is_sorted, "output is not sorted or missing characters");
-
-        if (args.check_exhaustive) {
-            bool const is_complete = checker.check(sorted_str_ptr, true, comm);
-            die_verbose_unless(is_complete, "output is not a permutation of the input");
-        }
+    if (args.check_sorted) {
+        auto const is_sorted = checker.is_sorted(input_container.make_string_set(), comm);
+        die_verbose_unless(is_sorted, "output is not sorted");
+        auto const is_complete = checker.is_complete(input_container, comm);
+        die_verbose_unless(is_complete, "output is missing chars or strings");
+    }
+    if (args.check_complete) {
+        auto const is_exact = checker.check_exhaustive(input_container, comm);
+        die_verbose_unless(is_exact, "output is not a permutation of the input");
     }
 
     measuring_tool.write_on_root(std::cout, comm);
@@ -214,7 +201,6 @@ void run_prefix_doubling(
     constexpr bool prefix_compression = PrefixCompression();
 
     using StringSet = dss_mehnert::StringSet<CharType, dss_mehnert::Length>;
-    using StringLcpPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
     using AllToAllPolicy = dss_mehnert::mpi::
         AllToAllStringImpl<lcp_compression, prefix_compression, MPIAllToAllRoutine>;
 
@@ -232,12 +218,10 @@ void run_prefix_doubling(
 
     measuring_tool.disableCommVolume();
     auto input_container = generate_strings<StringSet>(args, comm);
-    auto num_input_chars = input_container.char_size();
-    auto num_input_strs = input_container.size();
 
-    CheckerWithCompleteExchange<StringLcpPtr> checker;
-    if (args.check || args.check_exhaustive) {
-        checker.storeLocalInput(input_container.raw_strings());
+    dss_mehnert::PrefixDoublingChecker<StringSet> checker;
+    if (args.check_sorted || args.check_complete) {
+        checker.store_container(input_container);
     }
     measuring_tool.enableCommVolume();
 
@@ -255,35 +239,13 @@ void run_prefix_doubling(
     measuring_tool.disable();
     measuring_tool.disableCommVolume();
 
-    if ((args.check || args.check_exhaustive) && comm.size() > 1) {
-        StringLcpContainer<StringSet> local_input{checker.local_input()};
-        auto complete_strings_cont = dss_mehnert::sorter::apply_permutation(
-            local_input.make_string_set(),
-            permutation,
-            comm
-        );
-
-        auto sorted_str_ptr = complete_strings_cont.make_string_lcp_ptr();
-        auto num_sorted_chars = complete_strings_cont.char_size();
-        auto num_sorted_strs = complete_strings_cont.size();
-
-        bool is_complete_and_sorted = dss_schimek::is_complete_and_sorted(
-            sorted_str_ptr,
-            num_input_chars,
-            num_sorted_chars,
-            num_input_strs,
-            num_sorted_strs,
-            comm
-        );
-
-        die_verbose_unless(is_complete_and_sorted, "output is not sorted or missing characters");
-
-        if (args.check_exhaustive) {
-            die_verbose_unless(
-                checker.check(sorted_str_ptr, false, comm),
-                "output is not a permutation of the input"
-            );
-        }
+    if (args.check_sorted) {
+        auto const is_sorted = checker.is_sorted(permutation, comm);
+        die_verbose_unless(is_sorted, "output permutation is not sorted");
+    }
+    if (args.check_complete) {
+        auto const is_complete = checker.is_complete(permutation, comm);
+        die_verbose_unless(is_complete, "output permutation is not complete");
     }
 
     measuring_tool.write_on_root(std::cout, comm);
