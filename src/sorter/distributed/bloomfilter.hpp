@@ -16,6 +16,8 @@
 #include <ips4o.hpp>
 #include <kamping/collectives/allreduce.hpp>
 #include <kamping/collectives/alltoall.hpp>
+#include <kamping/collectives/bcast.hpp>
+#include <kamping/collectives/gather.hpp>
 #include <kamping/named_parameters.hpp>
 #include <tlx/algorithm/multiway_merge.hpp>
 #include <tlx/die.hpp>
@@ -35,7 +37,7 @@ using hash_t = xxh::hash_t<64>;
 
 template <typename T>
 struct hash_less {
-    inline constexpr bool operator()(T const& lhs, T const& rhs) const {
+    inline constexpr bool operator()(T const& lhs, T const& rhs) const noexcept {
         return lhs.hash_value < rhs.hash_value;
     }
 };
@@ -60,7 +62,8 @@ struct HashRank {
 struct SipHasher {
     static constexpr bool supports_hash_reuse = false;
 
-    static inline hash_t hash(unsigned char const* str, size_t length, size_t filter_size) {
+    static inline hash_t
+    hash(unsigned char const* str, size_t length, size_t filter_size) noexcept {
         return tlx::siphash(str, length) % filter_size;
     }
 };
@@ -68,12 +71,14 @@ struct SipHasher {
 struct XXHasher {
     static constexpr bool supports_hash_reuse = true;
 
-    static inline hash_t hash(unsigned char const* str, size_t length, size_t filter_size) {
+    static inline hash_t
+    hash(unsigned char const* str, size_t length, size_t filter_size) noexcept {
         return xxh::xxhash3<64>(str, length) % filter_size;
     }
 
     static inline hash_t
-    hash(unsigned char const* str, size_t length, size_t filter_size, hash_t old_hash) {
+    hash(unsigned char const* str, size_t length, size_t filter_size, hash_t old_hash) noexcept {
+        // todo mabe make filter size constexpr? or remove?
         return (old_hash ^ xxh::xxhash3<64>(str, length)) % filter_size;
     }
 };
@@ -84,8 +89,8 @@ struct HashRange {
 
     HashRange bucket(size_t const idx, size_t const num_buckets) const {
         auto bucket_size = this->bucket_size(num_buckets);
-        auto bucket_lower = lower + idx * bucket_size;
-        auto bucket_upper = lower + (idx + 1) * bucket_size - 1;
+        auto const bucket_lower = lower + idx * bucket_size;
+        auto const bucket_upper = bucket_lower + bucket_size - 1;
 
         if (idx + 1 == num_buckets) {
             return {bucket_lower, upper};
@@ -104,18 +109,24 @@ struct RecvData {
     std::vector<int> global_offsets;
 
     std::vector<HashRank> compute_hash_rank_pairs() const {
-        std::vector<HashRank> hash_pairs(hashes.size());
+        std::vector<HashRank> hash_pairs;
+        hash_pairs.reserve(hashes.size());
 
         auto hash_it = hashes.begin();
-        auto dest_it = hash_pairs.begin();
         for (int rank = 0; auto const& interval: interval_sizes) {
             for (auto const end = hash_it + interval; hash_it != end; ++hash_it) {
-                *dest_it++ = HashRank{{.hash_value = *hash_it}, rank};
+                hash_pairs.push_back({{.hash_value = *hash_it}, rank});
             }
             ++rank;
         }
         return hash_pairs;
     }
+};
+
+struct RemoteDuplicates {
+    std::vector<int> duplicates;
+    std::vector<int> send_counts;
+    std::vector<int> send_displs;
 };
 
 namespace _internal {
@@ -130,8 +141,8 @@ inline std::vector<int> compute_interval_sizes(
 
     // todo not a fan of this loop
     auto current_pos = hashes.begin();
-    for (size_t i = 0; i + 1 < num_intervals; ++i) {
-        hash_t upper_limit = hash_range.lower + (i + 1) * bucket_size - 1;
+    for (size_t i = 1; i < num_intervals; ++i) {
+        hash_t upper_limit = hash_range.lower + i * bucket_size - 1;
         auto pos = std::upper_bound(current_pos, hashes.end(), upper_limit);
         intervals.push_back(pos - current_pos);
         current_pos = pos;
@@ -190,8 +201,8 @@ inline RecvData send_hash_values(
 ) {
     auto interval_sizes = _internal::compute_interval_sizes(hashes, hash_range, comm.size());
 
-    std::vector<int> offsets{interval_sizes};
-    std::exclusive_scan(offsets.begin(), offsets.end(), offsets.begin(), 0);
+    std::vector<int> offsets(interval_sizes.size());
+    std::exclusive_scan(interval_sizes.begin(), interval_sizes.end(), offsets.begin(), 0);
     assert_equal(offsets.back() + interval_sizes.back(), std::ssize(hashes));
 
     auto offset_result = comm.alltoall(kamping::send_buf(offsets));
@@ -202,69 +213,69 @@ inline RecvData send_hash_values(
     );
 
     return {
-        result.extract_recv_buffer(),
-        result.extract_recv_counts(),
-        result.extract_recv_displs(),
-        offset_result.extract_recv_buffer()};
+        .hashes = result.extract_recv_buffer(),
+        .interval_sizes = result.extract_recv_counts(),
+        .local_offsets = result.extract_recv_displs(),
+        .global_offsets = offset_result.extract_recv_buffer()};
 }
 
-inline std::tuple<std::vector<int>, std::vector<int>, std::vector<int>> compute_duplicates(
-    std::vector<HashRank>&& hash_rank_pairs,
+inline RemoteDuplicates compute_duplicates(
+    std::vector<HashRank>& hash_rank_pairs,
     std::vector<int> const& interval_sizes,
-    std::vector<int>&& global_offsets
+    std::vector<int>& counters
 ) {
-    if (hash_rank_pairs.empty()) {
-        auto size = interval_sizes.size();
-        return {{}, std::vector<int>(size), std::vector<int>(size)};
-    }
+    RemoteDuplicates result{
+        .duplicates = {},
+        .send_counts = std::vector<int>(interval_sizes.size()),
+        .send_displs = std::vector<int>(interval_sizes.size()),
+    };
 
-    auto& counters = global_offsets;
+    if (!hash_rank_pairs.empty()) {
+        // find position of the first duplicate hash value
+        auto const begin = hash_rank_pairs.begin(), end = hash_rank_pairs.end();
 
-    // find position of the first duplicate hash value
-    auto const begin = hash_rank_pairs.begin(), end = hash_rank_pairs.end();
-    auto first_dup = std::adjacent_find(begin, end, [](auto const& lhs, auto const& rhs) {
-        return lhs.hash_value == rhs.hash_value;
-    });
+        // remove all non-duplicate hash_values (similar to std::unique)
+        auto dest = begin;
+        auto is_duplicate = false;
+        for (auto it = begin; it < end - 1; ++it) {
+            auto const &curr = *it, &next = *(it + 1);
 
-    // remove all non-duplicate hash_values (similar to std::unique)
-    auto dest = begin;
-    auto is_duplicate = false;
-    for (auto it = first_dup; it < end - 1; ++it) {
-        auto const &curr = *it, &next = *(it + 1);
+            auto const global_index = counters[curr.rank]++;
+            if (curr.hash_value == next.hash_value) {
+                *dest++ = HashRank{{.global_index = global_index}, curr.rank};
+                is_duplicate = true;
+            } else if (is_duplicate) {
+                *dest++ = HashRank{{.global_index = global_index}, curr.rank};
+                is_duplicate = false;
+            }
+        }
+        if (is_duplicate) {
+            auto const rank = hash_rank_pairs.back().rank;
+            *dest++ = HashRank{{.global_index = counters[rank]}, rank};
+        }
 
-        auto global_idx = counters[curr.rank]++;
-        if (curr.hash_value == next.hash_value) {
-            *dest++ = HashRank{{.global_index = global_idx}, curr.rank};
-            is_duplicate = true;
-        } else if (is_duplicate) {
-            *dest++ = HashRank{{.global_index = global_idx}, curr.rank};
-            is_duplicate = false;
+        // `global_index` is now the active member for [dups_begin, dups_end)
+        std::span const duplicates{hash_rank_pairs.begin(), dest};
+
+        // finally compute offsets and write duplicates into a new array
+        for (auto const& dup: duplicates) {
+            result.send_counts[dup.rank]++;
+        }
+
+        std::exclusive_scan(
+            result.send_counts.begin(),
+            result.send_counts.end(),
+            result.send_displs.begin(),
+            size_t{0}
+        );
+
+        std::vector<int> offsets{result.send_displs};
+        result.duplicates.resize(duplicates.size());
+        for (auto const& dup: duplicates) {
+            result.duplicates[offsets[dup.rank]++] = dup.global_index;
         }
     }
-    if (is_duplicate) {
-        auto rank = hash_rank_pairs.back().rank;
-        *dest++ = HashRank{{.global_index = counters[rank]}, rank};
-    }
-
-    // `global_index` is now the active member for [dups_begin, dups_end)
-    auto const dups_begin = hash_rank_pairs.begin(), dups_end = dest;
-
-    // finally compute offsets and write duplicates into a new array
-    std::vector<int> send_counts(interval_sizes.size());
-    for (auto it = dups_begin; it != dups_end; ++it) {
-        send_counts[it->rank]++;
-    }
-
-    std::vector<int> offsets{send_counts};
-    std::exclusive_scan(offsets.begin(), offsets.end(), offsets.begin(), size_t{0});
-    std::vector<int> send_displs{offsets};
-
-    std::vector<int> duplicates(std::distance(dups_begin, dups_end));
-    for (auto it = dups_begin; it != dups_end; ++it) {
-        duplicates[offsets[it->rank]++] = it->global_index;
-    }
-
-    return {std::move(duplicates), std::move(send_counts), std::move(send_displs)};
+    return result;
 }
 
 inline std::optional<std::vector<int>> send_duplicates(
@@ -306,6 +317,7 @@ public:
     explicit BloomFilter(size_t size)
         : hash_values_((HashPolicy::supports_hash_reuse) ? size : 0) {}
 
+    // todo rename
     template <typename StringPtr, typename Subcommunicators>
     std::vector<size_t> compute_distinguishing_prefixes(
         StringPtr const& strptr, Subcommunicators const& comms, size_t const start_depth
@@ -334,6 +346,8 @@ public:
             candidates = filter(strptr, i, results, candidates);
         }
 
+        assert(check_prefixes_unique(ss, results, comms.comm_root()));
+
         measuring_tool_.setRound(0);
         return results;
     }
@@ -357,17 +371,15 @@ public:
         measuring_tool_.stop("bloomfilter_find_local_duplicates");
 
         measuring_tool_.start("bloomfilter_find_remote_duplicates");
-        auto remote_dups = static_cast<Derived*>(this)->find_remote_duplicates(
-            hash_idx_pairs,
-            HashRange{0, filter_size}
-        );
+        auto const remote_dups = static_cast<Derived&>(*this)
+                                     .find_remote_duplicates(hash_idx_pairs, {0, filter_size})
+                                     .value_or(std::vector<int>{});
         measuring_tool_.stop("bloomfilter_find_remote_duplicates");
 
         measuring_tool_.start("bloomfilter_merge_duplicates");
-        auto& local_lcp_dups = hash_pairs.lcp_duplicates;
-        auto remote_dups_ =
-            prune_remote_duplicates(remote_dups.value_or(std::vector<int>{}), hash_idx_pairs);
-        auto final_duplicates = merge_duplicates(local_hash_dups, local_lcp_dups, remote_dups_);
+        auto& lcp_dups = hash_pairs.lcp_duplicates;
+        auto pruned_dups = prune_remote_duplicates(remote_dups, hash_idx_pairs);
+        auto const final_duplicates = merge_duplicates(local_hash_dups, lcp_dups, pruned_dups);
         measuring_tool_.stop("bloomfilter_merge_duplicates");
 
         measuring_tool_.start("bloomfilter_write_depth");
@@ -391,119 +403,108 @@ private:
     };
 
     template <typename StringSet, typename LcpIter>
+    GeneratedHashPairs
+    generate_hash_pairs(StringSet const& ss, size_t const depth, LcpIter const lcps) {
+        GeneratedHashPairs result;
+        if (!ss.empty()) {
+            result.eos_candidates.reserve(ss.size());
+            result.hash_idx_pairs.reserve(ss.size());
+            result.lcp_duplicates.reserve(ss.size());
+
+            for (size_t candidate = 0; candidate != ss.size(); ++candidate) {
+                auto const& str = ss.at(candidate);
+
+                if (depth > ss.get_length(str)) {
+                    result.eos_candidates.push_back(candidate);
+                } else if (lcps[candidate] >= depth) {
+                    result.lcp_duplicates.push_back(candidate);
+                    if (result.hash_idx_pairs.back().string_index + 1 == candidate) {
+                        result.hash_idx_pairs.back().is_lcp_root = true;
+                    }
+                } else {
+                    auto const curr_chars = ss.get_chars(str, 0);
+                    hash_t hash = HashPolicy::hash(curr_chars, depth, filter_size);
+                    result.hash_idx_pairs.emplace_back(hash, candidate);
+                    if constexpr (HashPolicy::supports_hash_reuse) {
+                        hash_values_[candidate] = hash;
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
+    template <typename StringSet, typename LcpIter>
     GeneratedHashPairs generate_hash_pairs(
         StringSet const& ss,
         std::vector<size_t> const& candidates,
         size_t const depth,
         LcpIter const lcps
     ) {
-        if (candidates.empty()) {
-            return {};
-        }
+        GeneratedHashPairs result;
+        if (!candidates.empty()) {
+            size_t const half_depth = depth / 2;
 
-        std::vector<HashStringIndex> hash_idx_pairs;
-        std::vector<size_t> eos_candidates;
-        std::vector<size_t> lcp_dups;
-        eos_candidates.reserve(candidates.size());
-        hash_idx_pairs.reserve(candidates.size());
-        lcp_dups.reserve(candidates.size());
+            result.eos_candidates.reserve(candidates.size());
+            result.hash_idx_pairs.reserve(candidates.size());
+            result.lcp_duplicates.reserve(candidates.size());
 
-        for (auto prev = candidates.front(); auto const& curr: candidates) {
-            auto const& curr_str = ss[ss.begin() + curr];
+            for (auto prev = candidates.front(); auto const& curr: candidates) {
+                auto const& curr_str = ss.at(curr);
 
-            if (depth > ss.get_length(curr_str)) {
-                eos_candidates.push_back(curr);
-            } else if (prev + 1 == curr && lcps[curr] >= depth) {
-                lcp_dups.push_back(curr);
-                if (hash_idx_pairs.back().string_index + 1 == curr) {
-                    hash_idx_pairs.back().is_lcp_root = true;
-                }
-            } else {
-                hash_t hash = HashPolicy::hash(ss.get_chars(curr_str, 0), depth, filter_size);
-                hash_idx_pairs.emplace_back(hash, curr);
-                if constexpr (HashPolicy::supports_hash_reuse) {
-                    hash_values_[curr] = hash;
-                }
-            }
-            prev = curr;
-        }
-        return {std::move(hash_idx_pairs), std::move(lcp_dups), std::move(eos_candidates)};
-    }
-
-    template <typename StringSet, typename LcpIter>
-    GeneratedHashPairs
-    generate_hash_pairs(StringSet const& ss, size_t const depth, LcpIter const lcps) {
-        if (ss.empty()) {
-            return {};
-        }
-
-        size_t const half_depth = depth / 2;
-
-        std::vector<HashStringIndex> hash_idx_pairs;
-        std::vector<size_t> lcp_dups;
-        std::vector<size_t> eos_candidates;
-        eos_candidates.reserve(ss.size());
-        hash_idx_pairs.reserve(ss.size());
-        lcp_dups.reserve(ss.size());
-
-        for (size_t candidate = 0; candidate != ss.size(); ++candidate) {
-            auto const& str = ss[ss.begin() + candidate];
-
-            if (depth > ss.get_length(str)) {
-                eos_candidates.push_back(candidate);
-            } else if (lcps[candidate] >= depth) {
-                lcp_dups.push_back(candidate);
-                if (hash_idx_pairs.back().string_index + 1 == candidate) {
-                    hash_idx_pairs.back().is_lcp_root = true;
-                }
-            } else {
-                if constexpr (HashPolicy::supports_hash_reuse) {
-                    auto hash = HashPolicy::hash(
-                        ss.get_chars(str, half_depth),
-                        half_depth,
-                        filter_size,
-                        hash_values_[candidate]
-                    );
-                    hash_idx_pairs.emplace_back(hash, candidate);
-                    hash_values_[candidate] = hash;
+                if (depth > ss.get_length(curr_str)) {
+                    result.eos_candidates.push_back(curr);
+                } else if (prev + 1 == curr && lcps[curr] >= depth) {
+                    result.lcp_duplicates.push_back(curr);
+                    if (result.hash_idx_pairs.back().string_index + 1 == curr) {
+                        result.hash_idx_pairs.back().is_lcp_root = true;
+                    }
                 } else {
-                    auto hash = HashPolicy::hash(ss.get_chars(str, 0), depth, filter_size);
-                    hash_idx_pairs.emplace_back(hash, candidate);
+                    if constexpr (HashPolicy::supports_hash_reuse) {
+                        auto const half_chars = ss.get_chars(curr_str, half_depth);
+                        auto& cached_hash = hash_values_[curr];
+                        auto hash =
+                            HashPolicy::hash(half_chars, half_depth, filter_size, cached_hash);
+                        result.hash_idx_pairs.emplace_back(hash, curr);
+                        cached_hash = hash;
+                    } else {
+                        auto hash = HashPolicy::hash(ss.get_chars(curr_str, 0), depth, filter_size);
+                        result.hash_idx_pairs.emplace_back(hash, curr);
+                    }
                 }
+                prev = curr;
             }
         }
-        return {std::move(hash_idx_pairs), std::move(lcp_dups), {std::move(eos_candidates)}};
+        return result;
     }
 
     static std::vector<size_t> get_local_duplicates(std::vector<HashStringIndex>& local_values) {
-        if (local_values.empty()) {
-            return {};
-        }
-
         std::vector<size_t> local_duplicates;
-        for (auto it = local_values.begin(); it < local_values.end() - 1;) {
-            auto& pivot = *it++;
-            if (it->hash_value == pivot.hash_value) {
-                pivot.is_local_dup = true;
-                pivot.send_anyway = true;
-                local_duplicates.push_back(pivot.string_index);
+        if (!local_values.empty()) {
+            for (auto it = local_values.begin(); it < local_values.end() - 1;) {
+                auto& pivot = *it++;
+                if (it->hash_value == pivot.hash_value) {
+                    pivot.is_local_dup = true;
+                    pivot.send_anyway = true;
+                    local_duplicates.push_back(pivot.string_index);
 
-                do {
-                    it->is_local_dup = true;
-                    local_duplicates.push_back(it->string_index);
-                } while (++it != local_values.end() && it->hash_value == pivot.hash_value);
+                    do {
+                        it->is_local_dup = true;
+                        local_duplicates.push_back(it->string_index);
+                    } while (++it != local_values.end() && it->hash_value == pivot.hash_value);
 
-            } else if (pivot.is_lcp_root) {
+                } else if (pivot.is_lcp_root) {
+                    pivot.is_local_dup = true;
+                    pivot.send_anyway = true;
+                    local_duplicates.push_back(pivot.string_index);
+                }
+            }
+            if (local_values.back().is_lcp_root) {
+                auto& pivot = local_values.back();
                 pivot.is_local_dup = true;
                 pivot.send_anyway = true;
                 local_duplicates.push_back(pivot.string_index);
             }
-        }
-        if (local_values.back().is_lcp_root) {
-            auto& pivot = local_values.back();
-            pivot.is_local_dup = true;
-            pivot.send_anyway = true;
-            local_duplicates.push_back(pivot.string_index);
         }
         return local_duplicates;
     }
@@ -515,8 +516,7 @@ private:
         pruned_duplicates.reserve(duplicates.size());
 
         for (auto const& duplicate: duplicates) {
-            auto const& orig_pair = hash_idx_pairs[duplicate];
-            if (!orig_pair.send_anyway) {
+            if (auto const& orig_pair = hash_idx_pairs[duplicate]; !orig_pair.send_anyway) {
                 pruned_duplicates.push_back(orig_pair.string_index);
             }
         }
@@ -537,14 +537,15 @@ private:
             {{local_hash_dups.begin(), local_hash_dups.end()},
              {local_lcp_dups.begin(), local_lcp_dups.end()},
              {remote_dups.begin(), remote_dups.end()}}};
-        size_t total_elems = local_hash_dups.size() + local_lcp_dups.size() + remote_dups.size();
+        size_t const num_merged_elems =
+            local_hash_dups.size() + local_lcp_dups.size() + remote_dups.size();
 
-        std::vector<size_t> merged_elems(total_elems);
+        std::vector<size_t> merged_elems(num_merged_elems);
         tlx::multiway_merge(
             iter_pairs.begin(),
             iter_pairs.end(),
             merged_elems.begin(),
-            total_elems
+            num_merged_elems
         );
         return merged_elems;
     }
@@ -559,7 +560,7 @@ private:
         std::fill(results.begin(), results.end(), depth);
 
         for (auto const& candidate: eos_candidates) {
-            results[candidate] = ss.get_length(ss[ss.begin() + candidate]);
+            results[candidate] = ss.get_length(ss.at(candidate));
         }
     }
 
@@ -571,18 +572,49 @@ private:
         std::vector<size_t> const& eos_candidates,
         std::vector<size_t>& results
     ) {
-        using std::begin;
-
         for (auto const& candidate: candidates) {
             results[candidate] = depth;
         }
 
         for (auto const& candidate: eos_candidates) {
-            results[candidate] = ss.get_length(ss[ss.begin() + candidate]);
+            results[candidate] = ss.get_length(ss.at(candidate));
         }
     }
 
     static bool should_send(HashStringIndex const& v) { return !v.is_local_dup || v.send_anyway; }
+
+    template <typename StringSet>
+    bool check_prefixes_unique(
+        StringSet const& ss, std::span<size_t const> prefixes, Communicator const& comm
+    ) {
+        auto const global_max = comm.allreduce_single(
+            kamping::send_buf(*std::max_element(prefixes.begin(), prefixes.end())),
+            kamping::op(kamping::ops::max<>{})
+        );
+
+        bool is_unique = true;
+        for (size_t n = 8; n <= global_max; n *= 2) {
+            std::vector<hash_t> local_hashes, global_hashes;
+            for (size_t i = 0; i != ss.size(); ++i) {
+                auto const& str = ss.at(i);
+                auto const str_chars = ss.get_chars(str, 0);
+                auto const str_prefix = prefixes[i];
+                if (str_prefix == n) {
+                    local_hashes.push_back(HashPolicy::hash(str_chars, str_prefix, filter_size));
+                }
+            }
+
+            comm.gatherv(kamping::send_buf(local_hashes), kamping::recv_buf(global_hashes));
+            auto const begin = global_hashes.begin(), end = global_hashes.end();
+            std::sort(begin, end);
+            if (comm.is_root()) {
+                is_unique &= std::adjacent_find(begin, end) == end;
+            }
+        }
+
+        comm.bcast_single(kamping::send_recv_buf(is_unique));
+        return is_unique;
+    }
 };
 
 template <typename HashPolicy>
@@ -616,17 +648,22 @@ private:
         measuring_tool.stop("bloomfilter_send_hashes");
 
         measuring_tool.start("bloomfilter_compute_remote_duplicates");
-        auto [duplicates, send_counts, send_displs] = _internal::compute_duplicates(
-            std::move(hash_rank_pairs),
+        auto result = _internal::compute_duplicates(
+            hash_rank_pairs,
             recv_data.interval_sizes,
-            std::move(recv_data.global_offsets)
+            recv_data.global_offsets
         );
-        measuring_tool.add(duplicates.size(), "bloomfilter_remote_duplicates");
+        measuring_tool.add(result.duplicates.size(), "bloomfilter_remote_duplicates");
         measuring_tool.stop("bloomfilter_compute_remote_duplicates");
 
         measuring_tool.start("bloomfilter_send_indices");
-        auto remote_dups =
-            _internal::send_duplicates(duplicates, send_counts, send_displs, comm_, comm_);
+        auto remote_dups = _internal::send_duplicates(
+            result.duplicates,
+            result.send_counts,
+            result.send_displs,
+            comm_,
+            comm_
+        );
         measuring_tool.stop("bloomfilter_send_indices");
 
         return remote_dups;
@@ -690,19 +727,19 @@ private:
             measuring_tool.stop("bloomfilter_send_hashes");
 
             measuring_tool.start("bloomfilter_compute_remote_duplicates");
-            auto [duplicates, send_counts, send_displs] = _internal::compute_duplicates(
-                std::move(hash_rank_pairs),
+            auto result = _internal::compute_duplicates(
+                hash_rank_pairs,
                 recv_data.interval_sizes,
-                std::move(recv_data.global_offsets)
+                recv_data.global_offsets
             );
-            measuring_tool.add(duplicates.size(), "bloomfilter_remote_duplicates");
+            measuring_tool.add(result.duplicates.size(), "bloomfilter_remote_duplicates");
             measuring_tool.stop("bloomfilter_compute_remote_duplicates");
 
             measuring_tool.start("bloomfilter_send_indices");
             return _internal::send_duplicates(
-                duplicates,
-                send_counts,
-                send_displs,
+                result.duplicates,
+                result.send_counts,
+                result.send_displs,
                 comm,
                 comm_root_
             );
