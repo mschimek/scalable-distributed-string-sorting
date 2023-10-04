@@ -41,6 +41,7 @@ struct SorterArgs : public CommonArgs {
     size_t step = 1;
     size_t len_strings = 500;
     size_t difference_cover = 3;
+    bool shuffle = false;
     std::string path;
     size_t quantile_size = 100 * 1024 * 1024;
     size_t iteration = 0;
@@ -105,6 +106,12 @@ auto generate_compressed_strings(SorterArgs const& args, dss_mehnert::Communicat
         }
         tlx_die("invalid string generator");
     }();
+
+    if (args.shuffle) {
+        std::random_device rd;
+        std::mt19937 gen{rd()};
+        std::shuffle(input_strings.begin(), input_strings.end(), gen);
+    }
 
     dss_mehnert::StringLcpContainer<StringSet> input_container{
         std::move(input_chars),
@@ -235,6 +242,7 @@ int main(int argc, char* argv[]) {
     cp.add_size_t('N', "num-chars", args.num_chars, "number of chars per rank");
     cp.add_size_t('T', "step", args.step, "characters to skip between strings");
     cp.add_size_t('D', "difference-cover", args.difference_cover, "size of difference cover");
+    cp.add_flag('r', "shuffle", args.shuffle, "shuffle the generated strings");
     cp.add_string('y', "path", args.path, "path to input file");
     cp.add_bytes(
         'q',

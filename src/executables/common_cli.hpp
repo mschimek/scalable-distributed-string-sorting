@@ -41,7 +41,7 @@ struct CommonArgs {
     bool prefix_compression = false;
     bool lcp_compression = false;
     bool prefix_doubling = false;
-    bool grid_bloomfilter = true;
+    bool grid_bloomfilter = false;
     size_t num_iterations = 5;
     bool check_sorted = false;
     bool check_complete = false;
