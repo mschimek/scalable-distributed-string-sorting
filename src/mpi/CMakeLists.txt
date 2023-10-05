@@ -2,7 +2,6 @@ target_sources(dss_base
     PUBLIC
         alltoall_combined.hpp
         alltoall_strings.hpp
-        allreduce.hpp
         big_type.hpp
         byte_encoder.hpp
         communicator.hpp

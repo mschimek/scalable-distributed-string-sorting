@@ -8,9 +8,10 @@
 #include <algorithm>
 #include <cstdint>
 
+#include <kamping/collectives/allreduce.hpp>
+#include <kamping/mpi_ops.hpp>
 #include <mpi.h>
 
-#include "mpi/allreduce.hpp"
 #include "mpi/environment.hpp"
 #include "mpi/type_mapper.hpp"
 #include "strings/stringtools.hpp"
@@ -274,7 +275,11 @@ get_shift_recv_counts(DataType const& send_data, environment env, bool is_empty 
     if (env.size() == 1)
         return {send_data, is_empty};
 
-    bool const is_overall_empty = dss_schimek::mpi::allreduce_and(is_empty, env);
+    kamping::BasicCommunicator comm{env.communicator(), false};
+    bool const is_overall_empty = comm.allreduce_single(
+        kamping::send_buf({is_empty}),
+        kamping::op(kamping::ops::max<>{}, kamping::ops::commutative)
+    );
     if (is_overall_empty)
         return {send_data, true};
 
