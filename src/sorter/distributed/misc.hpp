@@ -28,24 +28,14 @@ namespace dss_mehnert {
 namespace _internal {
 
 struct LocalSplitterInterval {
-    size_t local_sample_size;
-    size_t global_prefix;
-    size_t num_splitters;
-    size_t splitter_dist;
+    size_t const global_prefix;
+    size_t const splitter_dist;
+    size_t const local_begin;
+    size_t const local_end;
 
-    size_t size() const { return end() - begin(); }
+    size_t size() const { return local_end - local_begin; }
 
-    size_t begin() const { return std::max<size_t>(1, tlx::div_ceil(minimum(), splitter_dist)); }
-    size_t end() const { return std::max<size_t>(1, tlx::div_ceil(maximum(), splitter_dist)); }
-
-    size_t minimum() const { return global_prefix; }
-    size_t maximum() const { return global_prefix + local_sample_size; }
-
-    size_t local_index(size_t const global_index) const { return global_index - global_prefix; }
-
-    bool contains(size_t const global_index) const {
-        return minimum() <= global_index && global_index < maximum();
-    }
+    size_t to_local_index(size_t const global_index) const { return global_index - global_prefix; }
 };
 
 inline LocalSplitterInterval compute_splitter_interval(
@@ -62,7 +52,12 @@ inline LocalSplitterInterval compute_splitter_interval(
     size_t const num_splitters = std::min(num_partitions - 1, total_size);
     size_t const splitter_dist = total_size / (num_splitters + 1);
 
-    return {local_sample_size, global_prefix, num_splitters, splitter_dist};
+    auto clamp = [=](auto const x) { return std::clamp<size_t>(x, 1, num_partitions); };
+    size_t const local_begin = clamp(tlx::div_ceil(global_prefix, splitter_dist));
+    size_t const local_end = clamp(tlx::div_ceil(global_prefix + local_sample_size, splitter_dist));
+
+    assert(comm.is_same_on_all_ranks(splitter_dist));
+    return {global_prefix, splitter_dist, local_begin, local_end};
 }
 
 } // namespace _internal
@@ -102,16 +97,15 @@ StringContainer<StringSet> choose_splitters_distributed(
         splitter_idxs.reserve(splitter_interval.size());
     }
 
-    for (size_t i = splitter_interval.begin(); i < splitter_interval.end(); ++i) {
+    for (size_t i = splitter_interval.local_begin; i < splitter_interval.local_end; ++i) {
         size_t const global_idx = i * splitter_interval.splitter_dist;
-        size_t const local_idx = splitter_interval.local_index(global_idx);
-        assert(splitter_interval.contains(global_idx));
+        size_t const local_idx = splitter_interval.to_local_index(global_idx);
         assert(local_idx < ss.size());
 
         auto const& str = ss.at(local_idx);
         auto const length = ss.get_length(str);
         auto const chars = ss.get_chars(str, 0);
-        std::copy_n(chars, length, std::back_inserter(splitter_chars));
+        splitter_chars.insert(splitter_chars.end(), chars, chars + length);
         splitter_chars.emplace_back(0);
 
         if constexpr (StringSet::is_indexed) {
