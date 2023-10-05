@@ -9,14 +9,35 @@
 #include <numeric>
 #include <vector>
 
+#include <kamping/mpi_datatype.hpp>
 #include <mpi.h>
 #include <tlx/die/core.hpp>
 
 #include "mpi/environment.hpp"
-#include "mpi/shift.hpp"
-#include "mpi/type_mapper.hpp"
 
 namespace dss_schimek {
+
+template <typename T>
+static inline std::vector<T>
+shift_left(T* send_data, size_t const send_count, dss_mehnert::Communicator const& comm) {
+    int source = comm.rank() + 1 < comm.size() ? comm.rank() + 1 : 0;
+    int dest = comm.rank() > 0 ? comm.rank() - 1 : comm.size() - 1;
+
+    size_t recv_count = 0;
+
+    // clang-format off
+    MPI_Sendrecv(&send_count, 1, kamping::mpi_datatype<size_t>(), dest,   0,
+                 &recv_count, 1, kamping::mpi_datatype<size_t>(), source, MPI_ANY_TAG,
+                 comm.mpi_communicator(), MPI_STATUS_IGNORE);
+
+    std::vector<T> recv_data(recv_count);
+    MPI_Sendrecv(send_data,        send_count, kamping::mpi_datatype<T>(), dest,   0,
+                 recv_data.data(), recv_count, kamping::mpi_datatype<T>(), source, MPI_ANY_TAG,
+                 comm.mpi_communicator(), MPI_STATUS_IGNORE);
+    // clang-format on
+
+    return recv_data;
+}
 
 inline size_t get_file_size(std::string const& path) {
     std::ifstream in{path, std::ifstream::ate | std::ifstream::binary};
@@ -56,31 +77,32 @@ distribute_file(std::string const& input_path, size_t max_size = 0, mpi::environ
         mpi_file,
         result.data(),
         local_slice_size,
-        mpi::type_mapper<unsigned char>::type(),
+        kamping::mpi_datatype<unsigned char>(),
         MPI_STATUS_IGNORE
     );
     return result;
 }
 
-inline std::vector<unsigned char>
-distribute_lines(std::string const& input_path, size_t max_size = 0, mpi::environment env = {}) {
-    auto result = distribute_file(input_path, max_size, env);
+inline std::vector<unsigned char> distribute_lines(
+    std::string const& input_path, size_t max_size = 0, dss_mehnert::Communicator const& comm = {}
+) {
+    auto result = distribute_file(input_path, max_size, comm);
     auto first_newline = std::find(result.begin(), result.end(), '\n') - result.begin();
 
     std::replace(result.begin(), result.end(), '\n', static_cast<char>(0));
 
     // Shift the first string to the previous PE, so that each PE ends with complete string.
     // This is still not perfect, e.g. if a string spans multiple PEs ¯\_(ツ)_/¯.
-    auto shifted_string = mpi::shift_left(result.data(), first_newline + 1, env);
+    auto shifted_string = shift_left(result.data(), first_newline + 1, comm);
 
-    if (env.rank() + 1 < env.size()) {
+    if (comm.rank() + 1 < comm.size()) {
         std::copy(shifted_string.begin(), shifted_string.end(), std::back_inserter(result));
     }
     if (!result.empty() && result.back() != 0) {
         result.emplace_back(0);
     }
 
-    if (env.rank() > 0) {
+    if (comm.rank() > 0) {
         result.erase(result.begin(), result.begin() + first_newline + 1);
     }
 

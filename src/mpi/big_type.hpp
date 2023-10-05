@@ -13,9 +13,8 @@
 #include <cstdint>
 #include <limits>
 
+#include <kamping/mpi_datatype.hpp>
 #include <mpi.h>
-
-#include "mpi/type_mapper.hpp"
 
 namespace dss_schimek::mpi {
 
@@ -29,15 +28,15 @@ MPI_Datatype get_big_type(const size_t size) {
 
     MPI_Datatype block_type;
     MPI_Datatype blocks_type;
-    MPI_Type_contiguous(mpi_max_int, type_mapper<DataType>::type(), &block_type);
+    MPI_Type_contiguous(mpi_max_int, kamping::mpi_datatype<DataType>(), &block_type);
     MPI_Type_contiguous(nr_blocks, block_type, &blocks_type);
 
     if (left_elements) {
         MPI_Datatype leftover_type;
-        MPI_Type_contiguous(left_elements, type_mapper<DataType>::type(), &leftover_type);
+        MPI_Type_contiguous(left_elements, kamping::mpi_datatype<DataType>(), &leftover_type);
 
         MPI_Aint lb, extent;
-        MPI_Type_get_extent(type_mapper<DataType>::type(), &lb, &extent);
+        MPI_Type_get_extent(kamping::mpi_datatype<DataType>(), &lb, &extent);
         MPI_Aint displ = nr_blocks * mpi_max_int * extent;
         MPI_Aint displs[2] = {0, displ};
         std::int32_t blocklen[2] = {1, 1};

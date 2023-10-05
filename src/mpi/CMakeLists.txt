@@ -10,6 +10,4 @@ target_sources(dss_base
         is_sorted.hpp
         plugin_helpers.hpp
         read_input.hpp
-        shift.hpp
-        type_mapper.hpp
 )
