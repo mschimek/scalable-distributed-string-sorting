@@ -329,10 +329,6 @@ void sortRec(
     swap(local_strings, buffers.merge_strings);
     assert(local_strings.make_string_set().check_order());
 
-    if (!local_strings.make_string_set().check_order()) {
-        local_strings.make_string_set().print();
-    }
-
     tracker.merge_t.stop();
 
     if (nprocs >= 4) {
