@@ -12,8 +12,9 @@
 #include <kamping/named_parameter_check.hpp>
 #include <kamping/named_parameter_selection.hpp>
 #include <kamping/named_parameter_types.hpp>
-#include <kamping/plugin_helpers.hpp>
 
+#include "mpi/alltoall_combined.hpp"
+#include "mpi/alltoall_strings.hpp"
 #include "util/measuringTool.hpp"
 
 namespace dss_mehnert {
@@ -194,6 +195,7 @@ private:
     }
 };
 
-using Communicator = TrackingCommunicator<std::vector>;
+using Communicator =
+    TrackingCommunicator<std::vector, mpi::AlltoallvCombinedPlugin, mpi::AlltoallStringsPlugin>;
 
 } // namespace dss_mehnert

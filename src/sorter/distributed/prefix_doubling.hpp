@@ -17,7 +17,6 @@
 #include <tlx/sort/strings/radix_sort.hpp>
 #include <tlx/sort/strings/string_ptr.hpp>
 
-#include "mpi/alltoall.hpp"
 #include "mpi/communicator.hpp"
 #include "sorter/distributed/merge_sort.hpp"
 #include "sorter/distributed/permutation.hpp"
@@ -28,17 +27,14 @@ namespace dss_mehnert {
 namespace sorter {
 
 template <
+    AlltoallStringsConfig config,
     typename RedistributionPolicy,
-    typename AllToAllStringPolicy,
     typename PartitionPolicy,
     typename BloomFilter>
-class BasePrefixDoublingMergeSort : protected BaseDistributedMergeSort<
-                                        RedistributionPolicy,
-                                        AllToAllStringPolicy,
-                                        PartitionPolicy> {
+class BasePrefixDoublingMergeSort
+    : protected BaseDistributedMergeSort<config, RedistributionPolicy, PartitionPolicy> {
 public:
-    using Base =
-        BaseDistributedMergeSort<RedistributionPolicy, AllToAllStringPolicy, PartitionPolicy>;
+    using Base = BaseDistributedMergeSort<config, RedistributionPolicy, PartitionPolicy>;
 
     using Base::Base;
 
@@ -131,21 +127,18 @@ protected:
 };
 
 template <
+    AlltoallStringsConfig config,
     typename RedistributionPolicy,
-    typename AllToAllStringPolicy,
     typename PartitionPolicy,
     typename BloomFilter>
 class PrefixDoublingMergeSort : private BasePrefixDoublingMergeSort<
+                                    config,
                                     RedistributionPolicy,
-                                    AllToAllStringPolicy,
                                     PartitionPolicy,
                                     BloomFilter> {
 public:
-    using Base = BasePrefixDoublingMergeSort<
-        RedistributionPolicy,
-        AllToAllStringPolicy,
-        PartitionPolicy,
-        BloomFilter>;
+    using Base =
+        BasePrefixDoublingMergeSort<config, RedistributionPolicy, PartitionPolicy, BloomFilter>;
 
     using Base::Base;
 
@@ -227,11 +220,9 @@ StringLcpContainer<StringSet> receive_strings(
         }
     }
 
-    using MPIAlltoall = dss_schimek::mpi::AllToAllvSmall;
-    using MPIRoutine = dss_schimek::mpi::AllToAllvCombined<MPIAlltoall>;
-    auto recv_chars = MPIRoutine::alltoallv(raw_strs.data(), raw_str_sizes, comm);
-
-    return StringLcpContainer<StringSet>{std::move(recv_chars)};
+    constexpr auto alltoall_kind = mpi::AlltoallvCombinedKind::native;
+    auto recv_buf_char = comm.template alltoallv_combined<alltoall_kind>(raw_strs, raw_str_sizes);
+    return StringLcpContainer<StringSet>{std::move(recv_buf_char)};
 }
 
 template <typename StringSet>

@@ -24,6 +24,7 @@
 #include <tlx/sort/strings/radix_sort.hpp>
 #include <tlx/sort/strings/string_ptr.hpp>
 
+#include "mpi/alltoall_strings.hpp"
 #include "sorter/distributed/merging.hpp"
 #include "sorter/distributed/multi_level.hpp"
 #include "sorter/distributed/sample.hpp"
@@ -32,8 +33,10 @@
 namespace dss_mehnert {
 namespace sorter {
 
-template <typename RedistributionPolicy, typename AllToAllStringPolicy, typename PartitionPolicy>
-class BaseDistributedMergeSort : protected AllToAllStringPolicy, protected PartitionPolicy {
+using mpi::AlltoallStringsConfig;
+
+template <AlltoallStringsConfig config, typename RedistributionPolicy, typename PartitionPolicy>
+class BaseDistributedMergeSort : protected PartitionPolicy {
 public:
     explicit BaseDistributedMergeSort(PartitionPolicy partition)
         : PartitionPolicy{std::move(partition)} {}
@@ -97,6 +100,7 @@ protected:
         ExtraArg const extra_arg,
         Communicator const& comm
     ) {
+        assert_equal(send_counts.size(), comm.size());
         measuring_tool_.start("sort_globally", "exchange_and_merge");
 
         measuring_tool_.setPhase("string_exchange");
@@ -104,9 +108,9 @@ protected:
         auto recv_counts = comm.alltoall(kamping::send_buf(send_counts)).extract_recv_buffer();
 
         if constexpr (std::is_same_v<sample::DistPrefixes, ExtraArg>) {
-            AllToAllStringPolicy::alltoallv(container, send_counts, extra_arg.prefixes, comm);
+            comm.template alltoall_strings<config>(container, send_counts, extra_arg.prefixes);
         } else {
-            AllToAllStringPolicy::alltoallv(container, send_counts, comm);
+            comm.template alltoall_strings<config>(container, send_counts);
         };
         measuring_tool_.stop("all_to_all_strings");
 
@@ -131,7 +135,7 @@ protected:
         measuring_tool_.stop("compute_ranges");
 
         measuring_tool_.start("merge_ranges");
-        constexpr bool is_compressed = AllToAllStringPolicy::PrefixCompression;
+        constexpr bool is_compressed = config.compress_prefixes;
         auto const result = merge::choose_merge<is_compressed>(container, offsets, recv_counts);
         measuring_tool_.stop("merge_ranges");
 
@@ -146,14 +150,11 @@ protected:
     }
 };
 
-template <typename RedistributionPolicy, typename AllToAllStringPolicy, typename PartitionPolicy>
-class DistributedMergeSort : private BaseDistributedMergeSort<
-                                 RedistributionPolicy,
-                                 AllToAllStringPolicy,
-                                 PartitionPolicy> {
+template <AlltoallStringsConfig config, typename RedistributionPolicy, typename PartitionPolicy>
+class DistributedMergeSort
+    : private BaseDistributedMergeSort<config, RedistributionPolicy, PartitionPolicy> {
 public:
-    using Base =
-        BaseDistributedMergeSort<RedistributionPolicy, AllToAllStringPolicy, PartitionPolicy>;
+    using Base = BaseDistributedMergeSort<config, RedistributionPolicy, PartitionPolicy>;
 
     using Base::Base;
 

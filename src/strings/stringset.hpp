@@ -39,6 +39,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <iostream>
 #include <memory>
 #include <numeric>
 #include <vector>
@@ -289,8 +290,9 @@ public:
         while (ss.is_equal(s1, c1, s2, c2))
             ++c1, ++c2;
 
-        if (!ss.is_leq(s1, c1, s2, c2))
+        if (!ss.is_leq(s1, c1, s2, c2)) {
             return false;
+        }
 
         return true;
     }
@@ -392,7 +394,7 @@ struct PEIndex {
 struct StringIndex {
     using underlying_t = size_t;
 
-    static constexpr std::string_view name{"str_index"};
+    static constexpr std::string_view name{"string"};
 
     size_t stringIndex;
     size_t value() const { return stringIndex; }
@@ -436,7 +438,7 @@ inline constexpr bool has_member = Data::template has_member<T>;
 template <typename Char, typename String, typename... Args>
 std::ostream& operator<<(std::ostream& out, StringData<Char, String, Args...> const& str) {
     out << "{";
-    ((out << Args::name << "=" << static_cast<Args>(str).value() << ", "), ...);
+    ((out << Args::name << "=" << str.Args::value() << ", "), ...);
     return out << "}";
 }
 

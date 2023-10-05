@@ -9,11 +9,10 @@
 #include <utility>
 #include <vector>
 
-#include <tlx/die/core.hpp>
+#include <tlx/die.hpp>
 
 #include "merge/bingmann-lcp_losertree.hpp"
 #include "strings/stringcontainer.hpp"
-#include "tlx/die.hpp"
 
 namespace dss_mehnert {
 namespace merge {

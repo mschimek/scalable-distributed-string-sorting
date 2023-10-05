@@ -1,15 +1,16 @@
 target_sources(dss_base
     PUBLIC
+        alltoall_combined.hpp
+        alltoall_strings.hpp
         allreduce.hpp
-        alltoall.hpp
         big_type.hpp
         byte_encoder.hpp
         communicator.hpp
         environment.cpp
         environment.hpp
         is_sorted.hpp
+        plugin_helpers.hpp
         read_input.hpp
         shift.hpp
         type_mapper.hpp
-        warmup.hpp
 )

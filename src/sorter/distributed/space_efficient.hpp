@@ -24,24 +24,21 @@ template <typename PartitionPolicy>
 struct QuantilePolicyBase : public PartitionPolicy {};
 
 template <
+    AlltoallStringsConfig config,
     typename RedistributionPolicy,
-    typename AllToAllStringPolicy,
     typename PartitionPolicy,
     typename QuantilePolicy,
     typename BloomFilter>
 class SpaceEfficientSort : private QuantilePolicyBase<QuantilePolicy>,
                            private BasePrefixDoublingMergeSort<
+                               config,
                                RedistributionPolicy,
-                               AllToAllStringPolicy,
                                PartitionPolicy,
                                BloomFilter> {
 public:
     using QuantilePolicy_ = QuantilePolicyBase<QuantilePolicy>;
-    using Base = BasePrefixDoublingMergeSort<
-        RedistributionPolicy,
-        AllToAllStringPolicy,
-        PartitionPolicy,
-        BloomFilter>;
+    using Base =
+        BasePrefixDoublingMergeSort<config, RedistributionPolicy, PartitionPolicy, BloomFilter>;
 
     using Subcommunicators = Base::Subcommunicators;
 
@@ -78,7 +75,7 @@ public:
 
         this->measuring_tool_.start("local_sorting", "sort_locally");
         tlx::sort_strings_detail::radixsort_CI3(strptr, 0, 0);
-        this->measuring_tool_.stop("local_sorting", "sort_locally", comms.comm_root());
+        this->measuring_tool_.stop("local_sorting", "sort_locally", comm_root);
 
         if (comm_root.size() == 1) {
             this->measuring_tool_.start("write_permutation");
@@ -93,19 +90,18 @@ public:
 
         this->measuring_tool_.start("compute_quantiles", "compute_quantiles");
         sample::DistPrefixes const arg{prefixes};
-        auto const [quantile_sizes, quantile_offsets] =
-            compute_quantiles(strptr, arg, comms.comm_root());
+        auto const quantile_sizes = compute_quantiles(strptr, arg, comm_root);
         this->measuring_tool_.stop("compute_quantiles", "compute_quantiles");
 
         this->measuring_tool_.start("sort_quantiles", "sort_quantiles");
         InputPermutation full_permutation;
         full_permutation.reserve(strptr.size());
 
-        for (size_t i = 0; i != quantile_sizes.size(); ++i) {
+        for (size_t i = 0, offset = 0; i != quantile_sizes.size(); ++i) {
             this->measuring_tool_.setQuantile(i);
-            auto const offset = quantile_offsets[i], size = quantile_sizes[i];
+            auto const size = quantile_sizes[i];
             auto const quantile = strptr.sub(offset, size);
-            auto const quantile_prefixes = std::span{prefixes}.subspan(offset, size);
+            std::span const quantile_prefixes{prefixes.begin() + offset, size};
 
             // note that this container is not `consistent`, in the sense that
             // it does not own the characters pointed to by its strings
@@ -118,10 +114,13 @@ public:
             Base::sort(quantile_container, comms, quantile_prefixes);
             full_permutation.append(quantile_container.make_string_set());
             this->measuring_tool_.enable();
+
+            offset += size;
         }
 
         this->measuring_tool_.setQuantile(0);
         this->measuring_tool_.stop("sort_quantiles", "sort_quantiles");
+
         return full_permutation;
     }
 
@@ -131,7 +130,7 @@ private:
     size_t quantile_size_;
 
     template <typename StringPtr, typename ExtraArg>
-    std::pair<std::vector<size_t>, std::vector<size_t>>
+    std::vector<size_t>
     compute_quantiles(StringPtr const& strptr, ExtraArg const arg, Communicator const& comm) {
         this->measuring_tool_.start("compute_num_quantiles");
         size_t const total_size = sample::accumulate_chars(strptr.active(), arg);
@@ -145,11 +144,9 @@ private:
 
         this->measuring_tool_.start("compute_quantile_sizes");
         auto const sizes = QuantilePolicy_::compute_partition(strptr, num_quantiles, arg, comm);
-        std::vector<size_t> offsets(sizes.size());
-        std::exclusive_scan(sizes.begin(), sizes.end(), offsets.begin(), size_t{0});
         this->measuring_tool_.stop("compute_quantile_sizes");
 
-        return {std::move(sizes), std::move(offsets)};
+        return sizes;
     }
 };
 
