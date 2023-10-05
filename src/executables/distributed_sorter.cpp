@@ -146,7 +146,7 @@ void run_merge_sort(
     using dss_mehnert::measurement::MeasuringTool;
     auto& measuring_tool = MeasuringTool::measuringTool();
     measuring_tool.setPrefix(prefix);
-    measuring_tool.setVerbose(false);
+    measuring_tool.setVerbose(args.verbose);
 
     measuring_tool.disableCommVolume();
     auto input_container = generate_strings<StringSet>(args, comm);
@@ -214,7 +214,7 @@ void run_prefix_doubling(
     using dss_mehnert::measurement::MeasuringTool;
     auto& measuring_tool = MeasuringTool::measuringTool();
     measuring_tool.setPrefix(prefix);
-    measuring_tool.setVerbose(false);
+    measuring_tool.setVerbose(args.verbose);
 
     measuring_tool.disableCommVolume();
     auto input_container = generate_strings<StringSet>(args, comm);

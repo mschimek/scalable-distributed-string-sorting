@@ -30,7 +30,7 @@
 #include "util/measuringTool.hpp"
 #include "util/string_generator.hpp"
 
-enum class CharGenerator { file = 0, random, sentinel };
+enum class CharGenerator { random = 0, file, sentinel };
 
 enum class StringGenerator { suffix = 0, window, difference_cover, sentinel };
 
@@ -163,7 +163,7 @@ void run_space_efficient_sort(
     using dss_mehnert::measurement::MeasuringTool;
     auto& measuring_tool = MeasuringTool::measuringTool();
     measuring_tool.setPrefix(prefix);
-    measuring_tool.setVerbose(false);
+    measuring_tool.setVerbose(args.verbose);
 
     measuring_tool.disableCommVolume();
     auto input_container = generate_compressed_strings<StringSet>(args, comm);

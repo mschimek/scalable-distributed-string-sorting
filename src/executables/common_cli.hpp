@@ -45,6 +45,7 @@ struct CommonArgs {
     size_t num_iterations = 5;
     bool check_sorted = false;
     bool check_complete = false;
+    bool verbose = false;
 
     std::string get_prefix(dss_mehnert::Communicator const& comm) const {
         // clang-format off
@@ -314,4 +315,5 @@ inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
     );
     cp.add_flag('v', "check-sorted", args.check_sorted, "check that the result is sorted");
     cp.add_flag('V', "check-complete", args.check_complete, "check that the result is complete");
+    cp.add_flag("verbose", args.verbose, "print some debug output");
 }
