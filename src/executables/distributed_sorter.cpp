@@ -22,10 +22,8 @@
 #include <tlx/sort/strings/string_ptr.hpp>
 
 #include "executables/common_cli.hpp"
-#include "mpi/alltoall.hpp"
 #include "mpi/communicator.hpp"
 #include "mpi/is_sorted.hpp"
-#include "mpi/warmup.hpp"
 #include "options.hpp"
 #include "sorter/distributed/merge_sort.hpp"
 #include "sorter/distributed/prefix_doubling.hpp"
@@ -121,27 +119,18 @@ auto generate_strings(SorterArgs const& args, dss_mehnert::Communicator const& c
 
 template <
     typename CharType,
+    typename AlltoallConfig,
     typename PartitionPolicy,
-    typename MPIAllToAllRoutine,
     typename RedistributionPolicy,
-    typename LcpCompression,
-    typename PrefixCompression,
     typename BloomFilterPolicy>
 void run_merge_sort(
     SorterArgs const& args, std::string prefix, dss_mehnert::Communicator const& comm
 ) {
-    using namespace dss_schimek;
-
-    constexpr bool lcp_compression = LcpCompression();
-    constexpr bool prefix_compression = PrefixCompression();
-
+    constexpr auto alltoall_config = AlltoallConfig();
     using StringSet = dss_mehnert::StringSet<CharType, dss_mehnert::Length>;
-    using AllToAllPolicy = dss_mehnert::mpi::
-        AllToAllStringImpl<lcp_compression, prefix_compression, MPIAllToAllRoutine>;
-
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
     using MergeSort = dss_mehnert::sorter::
-        DistributedMergeSort<RedistributionPolicy, AllToAllPolicy, PartitionPolicy>;
+        DistributedMergeSort<alltoall_config, RedistributionPolicy, PartitionPolicy>;
 
     using dss_mehnert::measurement::MeasuringTool;
     auto& measuring_tool = MeasuringTool::measuringTool();
@@ -186,28 +175,19 @@ void run_merge_sort(
 
 template <
     typename CharType,
+    typename AlltoallConfig,
     typename PartitionPolicy,
-    typename MPIAllToAllRoutine,
     typename RedistributionPolicy,
-    typename LcpCompression,
-    typename PrefixCompression,
     typename BloomFilterPolicy>
 void run_prefix_doubling(
     SorterArgs const& args, std::string prefix, dss_mehnert::Communicator const& comm
 ) {
-    using namespace dss_schimek;
-
-    constexpr bool lcp_compression = LcpCompression();
-    constexpr bool prefix_compression = PrefixCompression();
-
+    constexpr auto alltoall_config = AlltoallConfig();
     using StringSet = dss_mehnert::StringSet<CharType, dss_mehnert::Length>;
-    using AllToAllPolicy = dss_mehnert::mpi::
-        AllToAllStringImpl<lcp_compression, prefix_compression, MPIAllToAllRoutine>;
-
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
     using MergeSort = dss_mehnert::sorter::PrefixDoublingMergeSort<
+        alltoall_config,
         RedistributionPolicy,
-        AllToAllPolicy,
         PartitionPolicy,
         BloomFilterPolicy>;
 
@@ -326,8 +306,7 @@ int main(int argc, char* argv[]) {
 
     // todo does this make sense? maybe discard first round instead?
     measuring_tool.disableCommVolume();
-    auto num_bytes = std::min<size_t>(args.num_strings * 5, 100000u);
-    dss_schimek::mpi::randomDataAllToAllExchange(num_bytes);
+    mpi_warmup(std::min<size_t>(args.num_strings * 5, 100000u), kamping::comm_world());
     measuring_tool.enableCommVolume();
 
 

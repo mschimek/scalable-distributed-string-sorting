@@ -365,7 +365,7 @@ struct RandomCharGenerator : public std::vector<typename StringSet::Char> {
     RandomCharGenerator(size_t const num_chars) : std::vector<Char>(num_chars) {
         std::random_device rand_seed;
         std::mt19937 gen(rand_seed());
-        std::uniform_int_distribution<Char> dist{65, 90};
+        std::uniform_int_distribution<Char> dist{'A', 'Z'};
         std::generate(this->begin(), this->end(), [&] { return dist(gen); });
     }
 };

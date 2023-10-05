@@ -24,8 +24,7 @@ public:
     template <typename Communicator>
     MeasuringTool(Communicator const& comm) : is_root_(comm.is_root()) {}
 
-    // todo
-    // explicit MeasuringTool(MeasuringTool const& measuring_tool):
+    explicit MeasuringTool(MeasuringTool const& measuring_tool) = delete;
 
     static MeasuringTool& measuringTool() {
         static MeasuringTool measuringTool{kamping::comm_world()};

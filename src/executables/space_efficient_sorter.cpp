@@ -21,10 +21,8 @@
 #include <tlx/sort/strings/string_ptr.hpp>
 
 #include "executables/common_cli.hpp"
-#include "mpi/alltoall.hpp"
 #include "mpi/communicator.hpp"
 #include "mpi/is_sorted.hpp"
-#include "mpi/warmup.hpp"
 #include "sorter/distributed/space_efficient.hpp"
 #include "strings/stringset.hpp"
 #include "util/measuringTool.hpp"
@@ -132,30 +130,24 @@ auto generate_compressed_strings(SorterArgs const& args, dss_mehnert::Communicat
 
 template <
     typename CharType,
+    typename AlltoallConfig,
     typename PartitionPolicy,
-    typename MPIAllToAllRoutine,
     typename RedistributionPolicy,
-    typename LcpCompression,
-    typename PrefixCompression,
     typename BloomFilterPolicy>
 void run_space_efficient_sort(
     SorterArgs const& args, std::string prefix, dss_mehnert::Communicator const& comm
 ) {
     using namespace dss_schimek;
 
-    constexpr bool lcp_compression = LcpCompression();
-    constexpr bool prefix_compression = PrefixCompression();
+    constexpr auto alltoall_config = AlltoallConfig();
 
-    using AllToAllPolicy = dss_mehnert::mpi::
-        AllToAllStringImpl<lcp_compression, prefix_compression, MPIAllToAllRoutine>;
 
     using StringSet = dss_mehnert::CompressedStringSet<CharType>;
-
     // todo maybe use separate sample policies
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
     using Sorter = dss_mehnert::sorter::SpaceEfficientSort<
+        alltoall_config,
         RedistributionPolicy,
-        AllToAllPolicy,
         PartitionPolicy,
         PartitionPolicy,
         BloomFilterPolicy>;
@@ -271,7 +263,7 @@ int main(int argc, char* argv[]) {
 
     // todo does this make sense? maybe discard first round instead?
     measuring_tool.disableCommVolume();
-    dss_schimek::mpi::randomDataAllToAllExchange(100000u);
+    mpi_warmup(std::min<size_t>(100000u, args.num_chars), kamping::comm_world());
     measuring_tool.enableCommVolume();
 
     for (size_t i = 0; i < args.num_iterations; ++i) {

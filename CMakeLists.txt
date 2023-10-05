@@ -51,6 +51,9 @@ list(APPEND
   # todo remove vla usages
   "-Wno-vla"
 
+  # todo remove if possible
+  "-Wno-pessimizing-move"
+
   # todo produce too much noise with existing code
   # "-Wshadow"
   # "-Wconversion"

@@ -3,17 +3,19 @@
 
 #pragma once
 
+#include <algorithm>
 #include <filesystem>
+#include <type_traits>
 #include <utility>
 
+#include <kamping/collectives/alltoall.hpp>
 #include <tlx/cmdline_parser.hpp>
+#include <tlx/die/core.hpp>
 
-#include "mpi/alltoall.hpp"
 #include "options.hpp"
 #include "sorter/distributed/bloomfilter.hpp"
 #include "sorter/distributed/partition.hpp"
 #include "sorter/distributed/redistribution.hpp"
-#include "tlx/die/core.hpp"
 
 inline void check_path_exists(std::string const& path) {
     tlx_die_verbose_unless(std::filesystem::exists(path), "file not found: " << path);
@@ -101,26 +103,6 @@ void arg7(Callback cb, CommonArgs const& args) {
 
 template <typename Callback, typename... Args>
 void arg6(Callback cb, CommonArgs const& args) {
-    using namespace dss_schimek;
-
-    if (args.prefix_compression) {
-        arg7<Callback, Args..., std::true_type>(cb, args);
-    } else {
-        arg7<Callback, Args..., std::false_type>(cb, args);
-    }
-}
-
-template <typename Callback, typename... Args>
-void arg5(Callback cb, CommonArgs const& args) {
-    if (args.lcp_compression) {
-        arg6<Callback, Args..., std::true_type>(cb, args);
-    } else {
-        arg6<Callback, Args..., std::false_type>(cb, args);
-    }
-}
-
-template <typename Callback, typename... Args>
-void arg4(Callback cb, CommonArgs const& args) {
     using namespace dss_mehnert::redistribution;
     using dss_mehnert::Communicator;
 
@@ -128,23 +110,23 @@ void arg4(Callback cb, CommonArgs const& args) {
     if constexpr (CliOptions::enable_redistribution) {
         switch (redistribution) {
             case Redistribution::none: {
-                arg5<Callback, Args..., NoRedistribution<Communicator>>(cb, args);
+                arg7<Callback, Args..., NoRedistribution<Communicator>>(cb, args);
                 return;
             }
             case Redistribution::naive: {
-                arg5<Callback, Args..., NaiveRedistribution<Communicator>>(cb, args);
+                arg7<Callback, Args..., NaiveRedistribution<Communicator>>(cb, args);
                 return;
             };
             case Redistribution::simple_strings: {
-                arg5<Callback, Args..., SimpleStringRedistribution<Communicator>>(cb, args);
+                arg7<Callback, Args..., SimpleStringRedistribution<Communicator>>(cb, args);
                 return;
             };
             case Redistribution::simple_chars: {
-                arg5<Callback, Args..., SimpleCharRedistribution<Communicator>>(cb, args);
+                arg7<Callback, Args..., SimpleCharRedistribution<Communicator>>(cb, args);
                 return;
             };
             case Redistribution::grid: {
-                arg5<Callback, Args..., GridwiseRedistribution<Communicator>>(cb, args);
+                arg7<Callback, Args..., GridwiseRedistribution<Communicator>>(cb, args);
                 return;
             }
             case Redistribution::sentinel: {
@@ -154,48 +136,15 @@ void arg4(Callback cb, CommonArgs const& args) {
         tlx_die("unknown redistribution policy");
     } else {
         if (redistribution == Redistribution::grid) {
-            arg5<Callback, Args..., GridwiseRedistribution<Communicator>>(cb, args);
+            arg7<Callback, Args..., GridwiseRedistribution<Communicator>>(cb, args);
         } else {
             die_with_feature("CLI_ENABLE_REDISTRIBUTION");
         }
     }
 }
 
-// todo remove this or make small the default
-template <typename Callback, typename... Args>
-void arg3(Callback cb, CommonArgs const& args) {
-    using namespace dss_schimek::mpi;
-
-    switch (clamp_enum_value<MPIRoutineAllToAll>(args.alltoall_routine)) {
-        case MPIRoutineAllToAll::small: {
-            if constexpr (CliOptions::enable_alltoall) {
-                arg4<Callback, Args..., AllToAllvSmall>(cb, args);
-            } else {
-                die_with_feature("CLI_ENABLE_ALLTOALL");
-            }
-            return;
-        }
-        case MPIRoutineAllToAll::direct: {
-            if constexpr (CliOptions::enable_alltoall) {
-                arg4<Callback, Args..., AllToAllvDirectMessages>(cb, args);
-            } else {
-                die_with_feature("CLI_ENABLE_ALLTOALL");
-            }
-            return;
-        }
-        case MPIRoutineAllToAll::combined: {
-            arg4<Callback, Args..., AllToAllvCombined<AllToAllvSmall>>(cb, args);
-            return;
-        }
-        case MPIRoutineAllToAll::sentinel: {
-            break;
-        }
-    }
-    tlx_die("unknown MPI routine");
-}
-
-template <typename Callback, typename CharType, typename Sampler>
-void arg2(Callback cb, CommonArgs const& args) {
+template <typename Callback, typename CharType, typename AlltoallConfig, typename Sampler>
+void arg5(Callback cb, CommonArgs const& args) {
     using namespace dss_mehnert::partition;
 
     constexpr bool is_indexed = Sampler::is_indexed;
@@ -207,37 +156,40 @@ void arg2(Callback cb, CommonArgs const& args) {
 
     if (args.rquick_v1) {
         if constexpr (CliOptions::enable_rquick_v1) {
-            using Splitter = RQuickV1<CharType, is_indexed>;
-            arg3<Callback, CharType, PartitionPolicy<Sampler, Splitter>>(cb, args);
+            using SplitterPolicy = RQuickV1<CharType, is_indexed>;
+            using PartitionPolicy = PartitionPolicy<Sampler, SplitterPolicy>;
+            arg6<Callback, CharType, AlltoallConfig, PartitionPolicy>(cb, args);
         } else {
             die_with_feature("CLI_ENABLE_RQUICK_V1");
         }
     } else {
         if (args.rquick_lcp) {
             if constexpr (CliOptions::enable_rquick_lcp) {
-                using Splitter = RQuickV2<CharType, is_indexed, true>;
-                arg3<Callback, CharType, PartitionPolicy<Sampler, Splitter>>(cb, args);
+                using SplitterPolicy = RQuickV2<CharType, is_indexed, true>;
+                using PartitionPolicy = PartitionPolicy<Sampler, SplitterPolicy>;
+                arg6<Callback, CharType, AlltoallConfig, PartitionPolicy>(cb, args);
             } else {
                 die_with_feature("CLI_ENABLE_RQUICK_LCP");
             }
         } else {
-            using Splitter = RQuickV2<CharType, is_indexed, false>;
-            arg3<Callback, CharType, PartitionPolicy<Sampler, Splitter>>(cb, args);
+            using SplitterPolicy = RQuickV2<CharType, is_indexed, false>;
+            using PartitionPolicy = PartitionPolicy<Sampler, SplitterPolicy>;
+            arg6<Callback, CharType, AlltoallConfig, PartitionPolicy>(cb, args);
         }
     }
 }
 
 template <typename Callback, typename... Args>
-void arg1(Callback cb, CommonArgs const& args) {
+void arg4(Callback cb, CommonArgs const& args) {
     using namespace dss_mehnert::sample;
 
     // todo this could/should use type erasure
 
     auto with_random = [=]<bool indexed, bool random> {
         if (args.sample_chars) {
-            arg2<Callback, Args..., CharBasedSampling<indexed, random>>(cb, args);
+            arg5<Callback, Args..., CharBasedSampling<indexed, random>>(cb, args);
         } else {
-            arg2<Callback, Args..., StringBasedSampling<indexed, random>>(cb, args);
+            arg5<Callback, Args..., StringBasedSampling<indexed, random>>(cb, args);
         }
     };
 
@@ -254,6 +206,75 @@ void arg1(Callback cb, CommonArgs const& args) {
     } else {
         with_indexed.template operator()<false>();
     }
+}
+
+template <
+    typename Callback,
+    typename CharType,
+    typename AlltoallvCombinedKind,
+    typename LcpCompression,
+    typename PrefixCompression>
+void arg3b(Callback cb, CommonArgs const& args) {
+    using dss_mehnert::mpi::AlltoallStringsConfig;
+    constexpr AlltoallStringsConfig config{
+        .alltoall_kind = AlltoallvCombinedKind(),
+        .compress_lcps = LcpCompression(),
+        .compress_prefixes = PrefixCompression(),
+    };
+    arg4<Callback, CharType, std::integral_constant<AlltoallStringsConfig, config>>(cb, args);
+}
+
+template <typename Callback, typename... Args>
+void arg3(Callback cb, CommonArgs const& args) {
+    using namespace dss_schimek;
+
+    if (args.prefix_compression) {
+        arg3b<Callback, Args..., std::true_type>(cb, args);
+    } else {
+        arg3b<Callback, Args..., std::false_type>(cb, args);
+    }
+}
+
+template <typename Callback, typename... Args>
+void arg2(Callback cb, CommonArgs const& args) {
+    if (args.lcp_compression) {
+        arg3<Callback, Args..., std::true_type>(cb, args);
+    } else {
+        arg3<Callback, Args..., std::false_type>(cb, args);
+    }
+}
+
+// todo remove this or make small the default
+template <typename Callback, typename... Args>
+void arg1(Callback cb, CommonArgs const& args) {
+    switch (clamp_enum_value<MPIRoutineAllToAll>(args.alltoall_routine)) {
+        using Kind = dss_mehnert::mpi::AlltoallvCombinedKind;
+
+        case MPIRoutineAllToAll::small: {
+            if constexpr (CliOptions::enable_alltoall) {
+                arg2<Callback, Args..., std::integral_constant<Kind, Kind::native>>(cb, args);
+            } else {
+                die_with_feature("CLI_ENABLE_ALLTOALL");
+            }
+            return;
+        }
+        case MPIRoutineAllToAll::direct: {
+            if constexpr (CliOptions::enable_alltoall) {
+                arg2<Callback, Args..., std::integral_constant<Kind, Kind::direct>>(cb, args);
+            } else {
+                die_with_feature("CLI_ENABLE_ALLTOALL");
+            }
+            return;
+        }
+        case MPIRoutineAllToAll::combined: {
+            arg2<Callback, Args..., std::integral_constant<Kind, Kind::combined>>(cb, args);
+            return;
+        }
+        case MPIRoutineAllToAll::sentinel: {
+            break;
+        }
+    }
+    tlx_die("unknown MPI routine");
 }
 
 template <typename Callback>
@@ -316,4 +337,18 @@ inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
     cp.add_flag('v', "check-sorted", args.check_sorted, "check that the result is sorted");
     cp.add_flag('V', "check-complete", args.check_complete, "check that the result is complete");
     cp.add_flag("verbose", args.verbose, "print some debug output");
+}
+
+inline size_t mpi_warmup(size_t const bytes_per_PE, dss_mehnert::Communicator const& comm) {
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<unsigned char> dist{'A', 'Z'};
+
+    std::vector<unsigned char> random_data(bytes_per_PE * comm.size());
+    std::generate(random_data.begin(), random_data.end(), [&] { return dist(gen); });
+
+    auto recv_data = comm.alltoall(kamping::send_buf(random_data)).extract_recv_buffer();
+
+    auto volatile sum = std::accumulate(recv_data.begin(), recv_data.end(), size_t{0});
+    return sum;
 }
