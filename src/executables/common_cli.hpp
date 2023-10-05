@@ -21,7 +21,7 @@ inline void check_path_exists(std::string const& path) {
     tlx_die_verbose_unless(std::filesystem::exists(path), "file not found: " << path);
 };
 
-enum class MPIRoutineAllToAll { small = 0, direct, combined, sentinel };
+enum class MPIRoutineAllToAll { native = 0, direct, combined, sentinel };
 
 enum class Redistribution { none = 0, naive, simple_strings, simple_chars, grid, sentinel };
 
@@ -36,7 +36,7 @@ struct CommonArgs {
     bool sample_indexed = false;
     bool sample_random = false;
     size_t sampling_factor = 2;
-    size_t alltoall_routine = static_cast<size_t>(MPIRoutineAllToAll::combined);
+    size_t alltoall_routine = static_cast<size_t>(MPIRoutineAllToAll::native);
     bool rquick_v1 = false;
     bool rquick_lcp = false;
     size_t redistribution = static_cast<size_t>(Redistribution::grid);
@@ -250,12 +250,8 @@ void arg1(Callback cb, CommonArgs const& args) {
     switch (clamp_enum_value<MPIRoutineAllToAll>(args.alltoall_routine)) {
         using Kind = dss_mehnert::mpi::AlltoallvCombinedKind;
 
-        case MPIRoutineAllToAll::small: {
-            if constexpr (CliOptions::enable_alltoall) {
-                arg2<Callback, Args..., std::integral_constant<Kind, Kind::native>>(cb, args);
-            } else {
-                die_with_feature("CLI_ENABLE_ALLTOALL");
-            }
+        case MPIRoutineAllToAll::native: {
+            arg2<Callback, Args..., std::integral_constant<Kind, Kind::native>>(cb, args);
             return;
         }
         case MPIRoutineAllToAll::direct: {
@@ -267,7 +263,11 @@ void arg1(Callback cb, CommonArgs const& args) {
             return;
         }
         case MPIRoutineAllToAll::combined: {
-            arg2<Callback, Args..., std::integral_constant<Kind, Kind::combined>>(cb, args);
+            if constexpr (CliOptions::enable_alltoall) {
+                arg2<Callback, Args..., std::integral_constant<Kind, Kind::combined>>(cb, args);
+            } else {
+                die_with_feature("CLI_ENABLE_ALLTOALL");
+            }
             return;
         }
         case MPIRoutineAllToAll::sentinel: {
