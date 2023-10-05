@@ -411,12 +411,9 @@ struct CompressedDifferenceCoverGenerator : public std::vector<typename StringSe
     using Char = StringSet::Char;
 
     CompressedDifferenceCoverGenerator(std::vector<Char>& chars, size_t const size) {
-        // pad with sentinels to ensure that all strings are created
-        chars.resize(chars.size() + size - 1, 0);
-
         for (auto const& k: get_difference_cover(size)) {
-            for (auto it = chars.begin() + k; it + size <= chars.end(); it += size) {
-                this->emplace_back(&*it, Length{size});
+            for (auto it = chars.begin() + k; it < chars.end(); it += size) {
+                this->emplace_back(&*it, Length{std::min<size_t>(size, chars.end() - it)});
             }
         }
     }
