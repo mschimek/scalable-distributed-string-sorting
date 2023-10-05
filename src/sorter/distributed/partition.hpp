@@ -60,15 +60,14 @@ public:
         auto splitter_set = chosen_splitters.make_string_set();
         std::vector<size_t> interval_sizes;
         if constexpr (SamplePolicy::is_indexed) {
-            // todo this is being computed redundantly multiple times
-            auto local_offset = sample::get_local_offset(strptr.size(), comm);
             interval_sizes =
-                compute_interval_binary_index(strptr.active(), splitter_set, local_offset);
+                compute_interval_binary_index(strptr.active(), splitter_set, sample.local_offset);
         } else {
             interval_sizes = compute_interval_binary(strptr.active(), splitter_set);
         }
         measuring_tool.stop("compute_intervals");
 
+        assert_equal(interval_sizes.size(), num_partitions);
         return interval_sizes;
     }
 };
@@ -96,6 +95,7 @@ public:
         auto chosen_splitters = Derived::choose_splitters(sample_set, num_partitions, comm);
         measuring_tool.stop("choose_splitters");
 
+        assert_equal(chosen_splitters.size(), num_partitions - 1);
         return chosen_splitters;
     }
 };

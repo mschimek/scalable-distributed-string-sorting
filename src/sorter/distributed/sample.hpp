@@ -100,6 +100,7 @@ template <typename Char>
 struct SampleResult<Char, true> {
     std::vector<Char> sample;
     std::vector<uint64_t> indices;
+    size_t local_offset;
 };
 
 namespace _internal {
@@ -204,19 +205,19 @@ public:
         Communicator const& comm
     ) const {
         size_t const sample_size = get_sample_size(ss.size(), num_partitions, sampling_factor_);
-        size_t const local_offset = is_indexed ? get_local_offset(ss.size(), comm) : 0;
 
         _internal::StringIndexSampler<is_random> sampler{ss.size(), sample_size};
 
         Result<StringSet> result;
         result.sample.reserve(sample_size * (100 + 1u)); // todo
         if constexpr (is_indexed) {
+            result.local_offset = get_local_offset(ss.size(), comm);
             result.indices.resize(sample_size);
         }
 
         for (size_t i = 0; i < sample_size; ++i) {
             auto const sample_index = sampler.get_sample(i + 1); // todo ???? convert to next
-            auto const sample = ss[ss.begin() + sample_index];
+            auto const sample = ss.at(sample_index);
             auto const sample_len = get_string_len(ss, sample, sample_index, arg);
             auto const sample_chars = ss.get_chars(sample, 0);
 
@@ -225,7 +226,7 @@ public:
             result.sample.push_back(0);
 
             if constexpr (is_indexed) {
-                result.indices[i] = local_offset + sample_index;
+                result.indices[i] = result.local_offset + sample_index;
             }
         }
         return result;
@@ -255,13 +256,13 @@ public:
     ) const {
         size_t const num_chars = accumulate_chars(ss, arg);
         size_t const sample_size = get_sample_size(ss.size(), num_partitions, sampling_factor_);
-        size_t const local_offset = is_indexed ? get_local_offset(ss.size(), comm) : 0;
 
         _internal::CharIndexSampler<is_random> sampler{num_chars, sample_size};
 
         Result<StringSet> result;
         result.sample.reserve((num_chars / std::max<size_t>(1, ss.size()) + 1) * sample_size);
         if constexpr (is_indexed) {
+            result.local_offset = get_local_offset(ss.size(), comm);
             result.indices.reserve(sample_size);
         }
 
@@ -285,7 +286,7 @@ public:
             result.sample.push_back(0);
 
             if constexpr (is_indexed) {
-                result.indices.emplace_back(local_offset + sample_index);
+                result.indices.emplace_back(result.local_offset + sample_index);
             }
         }
         return result;
