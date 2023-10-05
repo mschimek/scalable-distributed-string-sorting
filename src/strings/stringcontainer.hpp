@@ -154,8 +154,9 @@ public:
     std::vector<Char> get_raw_string(int64_t const i) {
         if (0 <= i && i < std::ssize(*this)) {
             auto const& str = strings_[i];
-            std::vector<Char> buf(str.length + 1, 0);
-            std::copy_n(str.string, str.length, buf.begin());
+            auto const length = make_string_set().get_length(str);
+            std::vector<Char> buf(length + 1, 0);
+            std::copy_n(str.string, length, buf.begin());
             return buf;
         } else {
             return std::vector<Char>(1, 0);
@@ -207,10 +208,11 @@ public:
     void make_contiguous(std::vector<Char>& char_buffer) {
         char_buffer.resize(make_string_set().get_sum_length() + size());
 
+        auto const ss = make_string_set();
         for (auto dest = char_buffer.begin(); auto& str: strings_) {
-            auto const chars = str.getChars();
-            str.setChars(&*dest);
-            dest = std::copy_n(chars, str.length, dest);
+            auto const chars = std::exchange(str.string, &*dest);
+            auto const length = ss.get_length(str);
+            dest = std::copy_n(chars, length, dest);
             *dest++ = 0;
         }
 
@@ -236,7 +238,8 @@ protected:
 template <typename StringSet_>
 class StringLcpContainer : public StringContainer<StringSet_> {
 public:
-    using Base = StringContainer<StringSet_>;
+    using StringSet = StringSet_;
+    using Base = StringContainer<StringSet>;
     using Char = Base::Char;
     using String = Base::String;
 
@@ -326,7 +329,10 @@ public:
         delete_lcps();
     }
 
-    void extend_prefix(std::span<size_t const> lcps) {
+    template <typename _StringSet = StringSet_>
+    void extend_prefix(std::span<size_t const> lcps)
+        requires(_StringSet::has_length)
+    {
         auto const ss = this->make_string_set();
 
         assert_equal(lcps.size(), ss.size());
@@ -338,14 +344,14 @@ public:
 
         for (auto lcp_it = lcps.begin(); auto& curr_str: ss) {
             auto const curr_lcp = *lcp_it++;
-            auto curr_str_begin = ss.get_chars(curr_str, 0);
-            auto curr_str_len = ss.get_length(curr_str) + 1;
+            auto const curr_str_begin = ss.get_chars(curr_str, 0);
+            auto const curr_str_len = curr_str.length + 1;
 
             curr_str.string = &(*curr_chars);
             curr_str.length = curr_str_len + curr_lcp - 1;
 
             // copy common prefix from previous string
-            auto lcp_chars = std::exchange(prev_chars, curr_chars);
+            auto const lcp_chars = std::exchange(prev_chars, curr_chars);
             curr_chars = std::copy_n(lcp_chars, curr_lcp, curr_chars);
 
             // copy remaining (distinct) characters
