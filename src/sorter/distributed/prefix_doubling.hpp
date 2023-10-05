@@ -70,6 +70,7 @@ protected:
             auto const send_counts = Base::compute_sorted_send_counts(strptr, arg, comm);
             Base::exchange_and_merge(container, send_counts, arg, comm);
             this->measuring_tool_.stop("sort_globally", "final_sorting", comm_root);
+            this->measuring_tool_.setRound(0);
             return;
         }
 
@@ -109,6 +110,7 @@ protected:
                 auto const send_counts = Base::compute_sorted_send_counts(strptr, arg, comm);
                 Base::exchange_and_merge(container, send_counts, arg, comm);
                 this->measuring_tool_.stop("sort_globally", "final_sorting", comm_root);
+                this->measuring_tool_.setRound(0);
             }
         } else {
             tlx_die("unreachable for for a purely single level implementation");
