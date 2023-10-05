@@ -22,22 +22,6 @@
 #include "sorter/distributed/prefix_doubling.hpp"
 #include "strings/stringcontainer.hpp"
 #include "strings/stringtools.hpp"
-#include "tlx/sort/strings/string_ptr.hpp"
-
-namespace dss_schimek {
-
-template <typename StringSet>
-std::vector<unsigned char> make_contiguous(StringSet const& ss) {
-    std::vector<unsigned char> raw_strings;
-    for (auto const& str: ss) {
-        auto chars = ss.get_chars(str, 0);
-        auto length = ss.get_length(str);
-        std::copy_n(chars, length + 1, std::back_inserter(raw_strings));
-    }
-    return raw_strings;
-}
-
-} // namespace dss_schimek
 
 namespace dss_mehnert {
 
@@ -65,7 +49,7 @@ bool check_global_order(
         values_on_rank_0(comm.size_signed())
     );
 
-    if (is_empty) {
+    if (!is_empty) {
         Request req_pred, req_succ;
         std::vector<Char> pred_string, succ_string;
 
@@ -82,12 +66,12 @@ bool check_global_order(
         if (successor != comm.size_signed()) {
             comm.recv(recv_buf(succ_string), source(successor));
         }
-        req_pred.wait();
-        req_succ.wait();
+        req_pred.wait(), req_succ.wait();
 
         auto leq = [](auto const& lhs, auto const& rhs) {
             return dss_schimek::leq(lhs.data(), rhs.data());
         };
+
         return (predecessor == -1 || leq(pred_string, first_string))
                && (successor == comm.size_signed() || leq(last_string, succ_string));
     } else {
@@ -173,17 +157,24 @@ public:
     bool is_sorted(StringSet const& ss, Communicator const& comm) {
         using namespace kamping;
 
-        bool is_sorted = ss.check_order();
+        bool is_sorted = true;
+        if (!ss.check_order()) {
+            std::cout << "strings are not sorted locally\n";
+            is_sorted = false;
+        }
 
         std::vector<Char> first_string{0}, last_string{0};
         if (!ss.empty()) {
             auto const &fst = *ss.begin(), lst = *(ss.end() - 1);
-            std::copy_n(fst.string, ss.get_length(fst), std::back_inserter(first_string));
-            std::copy_n(lst.string, ss.get_length(lst), std::back_inserter(last_string));
+            auto const fst_length = ss.get_length(fst), lst_length = ss.get_length(lst);
+            first_string.insert(first_string.end(), fst.string, fst.string + fst_length);
+            last_string.insert(last_string.end(), lst.string, lst.string + lst_length);
             first_string.push_back(0), last_string.push_back(0);
         }
-        check_global_order(first_string, last_string, ss.empty(), comm);
-
+        if (!check_global_order(first_string, last_string, ss.empty(), comm)) {
+            std::cout << "strings are not sorted globally\n";
+            is_sorted = false;
+        }
         return comm.allreduce_single(send_buf({is_sorted}), op(ops::logical_and<>{}));
     }
 
@@ -228,6 +219,7 @@ public:
         std::vector<size_t> sorted_lcps;
         comm.gatherv(send_buf(sorted_container.lcps()), recv_buf(sorted_lcps));
 
+        bool overall_correct = true;
         if (comm.is_root()) {
             StringLcpContainer<StringSet> container(std::move(global_input_chars));
             auto const strptr = container.make_string_lcp_ptr();
@@ -236,12 +228,9 @@ public:
 
             bool const lcps_correct = check_lcps(container.lcps(), sorted_lcps, comm);
             bool const sorted_correctly = global_sorted_chars == container.raw_strings();
-            bool const overallCorrect = lcps_correct && sorted_correctly;
-
-            return comm.allreduce_single(send_buf({overallCorrect}), op(ops::logical_and<>{}));
-        } else {
-            return comm.allreduce_single(send_buf({true}), op(ops::logical_and<>{}));
+            overall_correct = lcps_correct && sorted_correctly;
         }
+        return comm.allreduce_single(send_buf({overall_correct}), op(ops::logical_and<>{}));
     }
 
 private:
@@ -289,7 +278,7 @@ public:
     using StringContainer = StringLcpContainer<StringSet>;
     using Char = StringContainer::Char;
 
-    void store_container(StringContainer const& container) {
+    void store_container(StringContainer& container) {
         copy_container(container, input_container_);
     }
 
@@ -318,16 +307,26 @@ public:
                 comm
             );
 
-            is_sorted &= quantile.make_string_set().check_order();
+            if (!quantile.make_string_set().check_order()) {
+                std::cout << "quantile is not sorted\n";
+                is_sorted = false;
+            }
+
             if (!quantile.empty()) {
                 // note that strings are null-terminated at this point
-                is_sorted &= dss_schimek::leq(lower_bound.data(), quantile.front().string);
+                if (!dss_schimek::leq(lower_bound.data(), quantile.front().string)) {
+                    std::cout << "quantiles are not lexicographically increasing\n";
+                    is_sorted = false;
+                };
                 lower_bound = quantile.get_raw_string(quantile.size() - 1);
             }
         }
 
-        is_sorted &=
-            check_permutation_global_order(input_container_.make_string_set(), permutation, comm);
+        auto const ss = input_container_.make_string_set();
+        if (!check_permutation_global_order(ss, permutation, comm)) {
+            std::cout << "strings are not distributed to the correct PEs\n";
+            is_sorted = false;
+        }
         return comm.allreduce_single(send_buf({is_sorted}), op(ops::logical_and<>{}));
     }
 
