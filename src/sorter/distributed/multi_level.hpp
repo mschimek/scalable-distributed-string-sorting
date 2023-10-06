@@ -32,7 +32,7 @@ struct Level {
 template <typename Impl, typename Communicator>
 struct LevelIter {
     using iterator = LevelIter<Impl, Communicator>;
-    using iterator_category = std::forward_iterator_tag;
+    using iterator_category = std::bidirectional_iterator_tag;
     using value_type = Level<Communicator>;
     using difference_type = std::ptrdiff_t;
     using pointer = Level<Communicator>*;
@@ -48,8 +48,19 @@ struct LevelIter {
     }
 
     iterator operator++(int) {
-        iterator tmp{*this};
+        iterator tmp = *this;
         ++level_;
+        return tmp;
+    }
+
+    iterator& operator--() {
+        --level_;
+        return *this;
+    }
+
+    iterator operator--(int) {
+        iterator tmp = *this;
+        --level_;
         return tmp;
     }
 
@@ -153,6 +164,7 @@ class RowwiseSplit {
 public:
     using Communicator = Communicator_;
     using iterator = LevelIter<RowwiseSplit<Communicator>, Communicator>;
+    using reverse_iterator = std::reverse_iterator<iterator>;
 
     static constexpr bool is_single_level = false;
 
@@ -163,6 +175,8 @@ public:
 
     iterator begin() const { return {*this, 0}; }
     iterator end() const { return {*this, rows_.comms.size() - 1}; }
+    reverse_iterator rbegin() const { return std::reverse_iterator(end()); }
+    reverse_iterator rend() const { return std::reverse_iterator(begin()); }
 
     Communicator const& comm_root() const { return rows_.comms.front(); }
     Communicator const& comm_final() const { return rows_.comms.back(); }
