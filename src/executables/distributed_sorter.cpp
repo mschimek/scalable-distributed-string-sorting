@@ -90,14 +90,14 @@ auto generate_strings(SorterArgs const& args, dss_mehnert::Communicator const& c
             }
             case StringGenerator::file: {
                 check_path_exists(path);
-                return FileDistributer<StringSet>{path};
+                return FileDistributer<StringSet>{path, comm};
             }
             case StringGenerator::skewed_dn_ratio: {
                 return SkewedDNRatioGenerator<StringSet>{num_strings, len_strings, DN_ratio};
             }
             case StringGenerator::suffix: {
                 check_path_exists(path);
-                return SuffixGenerator<StringSet>{path};
+                return SuffixGenerator<StringSet>{path, comm};
             }
             case StringGenerator::sentinel: {
                 break;

@@ -325,7 +325,7 @@ inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
         "alltoall-routine",
         args.alltoall_routine,
         "All-To-All routine to use during string exchange "
-        "(0=small, 1=direct, [2]=combined)"
+        "([0]=native, 1=direct, 2=combined)"
     );
     cp.add_size_t(
         't',

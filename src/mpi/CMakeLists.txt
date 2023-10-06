@@ -5,8 +5,6 @@ target_sources(dss_base
         big_type.hpp
         byte_encoder.hpp
         communicator.hpp
-        environment.cpp
-        environment.hpp
         is_sorted.hpp
         plugin_helpers.hpp
         read_input.hpp

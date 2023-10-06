@@ -15,7 +15,6 @@
 #include <kamping/named_parameters.hpp>
 
 #include "mpi/communicator.hpp"
-#include "mpi/environment.hpp"
 #include "mpi/read_input.hpp"
 #include "strings/stringcontainer.hpp"
 
@@ -24,8 +23,8 @@ namespace dss_schimek {
 template <typename StringSet>
 class FileDistributer : public StringLcpContainer<StringSet> {
 public:
-    FileDistributer(std::string const& path)
-        : StringLcpContainer<StringSet>{distribute_lines(path)} {}
+    FileDistributer(std::string const& path, dss_mehnert::Communicator const& comm)
+        : StringLcpContainer<StringSet>{distribute_lines(path, 0, comm)} {}
 
     static std::string getName() { return "FileDistributer"; }
 };
@@ -55,22 +54,22 @@ private:
         return rawStrings;
     }
 
-    auto distributeSuffixes(std::vector<unsigned char> const& text) {
-        dss_schimek::mpi::environment env;
-
+    auto distributeSuffixes(
+        std::vector<unsigned char> const& text, dss_mehnert::Communicator const& comm
+    ) {
         size_t const textSize = text.size();
         size_t const estimatedTotalCharCount = textSize * (textSize + 1) / 2 + textSize;
-        size_t const estimatedCharCount = estimatedTotalCharCount / env.size();
+        size_t const estimatedCharCount = estimatedTotalCharCount / comm.size();
         size_t const globalSeed = 0;
         std::mt19937 randGen(globalSeed);
-        std::uniform_int_distribution<size_t> dist(0, env.size() - 1);
+        std::uniform_int_distribution<size_t> dist(0, comm.size() - 1);
         std::vector<unsigned char> rawStrings;
         rawStrings.reserve(estimatedCharCount);
 
         size_t numGenStrings = 0;
         for (size_t i = 0; i < textSize; ++i) {
             size_t PEIndex = dist(randGen);
-            if (PEIndex == env.rank()) {
+            if (PEIndex == comm.rank()) {
                 // only create your own strings
                 ++numGenStrings;
                 std::copy(text.begin() + i, text.end(), std::back_inserter(rawStrings));
@@ -82,9 +81,9 @@ private:
     }
 
 public:
-    SuffixGenerator(std::string const& path) {
+    SuffixGenerator(std::string const& path, dss_mehnert::Communicator const& comm) {
         std::vector<unsigned char> text = readFile(path);
-        auto [rawStrings, genStrings] = distributeSuffixes(text);
+        auto [rawStrings, genStrings] = distributeSuffixes(text, comm);
         this->update(std::move(rawStrings));
         String* begin = this->strings();
         std::random_device rand;
@@ -117,9 +116,9 @@ private:
     static constexpr unsigned char char_range = max_char - min_char + 1;
 
     std::vector<unsigned char> get_raw_strings(
-        size_t num_strings,
-        size_t len_strings_requested,
-        double DN_ratio,
+        size_t const num_strings,
+        size_t const len_strings_requested,
+        double const DN_ratio,
         dss_mehnert::Communicator const& comm
     ) {
         size_t const k = std::max(
@@ -175,13 +174,13 @@ public:
     RandomStringLcpContainer(
         size_t const size, size_t const min_length = 10, size_t const max_length = 20
     ) {
-        dss_schimek::mpi::environment env;
+        dss_mehnert::Communicator comm;
         std::vector<Char> random_raw_string_data;
         std::random_device rand_seed;
         std::mt19937 rand_gen(rand_seed());
         std::uniform_int_distribution<Char> char_dis(65, 90);
 
-        size_t effectiveSize = size / env.size();
+        size_t effectiveSize = size / comm.size();
         std::cout << "effective size: " << effectiveSize << std::endl;
         std::uniform_int_distribution<size_t> length_dis(min_length, max_length);
         random_raw_string_data.reserve(effectiveSize + 1);
@@ -279,7 +278,7 @@ class SkewedDNRatioGenerator : public StringLcpContainer<StringSet> {
         size_t numStrings,
         size_t desiredStringLength,
         double dToN,
-        dss_schimek::mpi::environment env = dss_schimek::mpi::environment()
+        dss_mehnert::Communicator const& comm = {}
     ) {
         size_t const minInternChar = 65;
         size_t const maxInternChar = 90;
@@ -291,12 +290,12 @@ class SkewedDNRatioGenerator : public StringLcpContainer<StringSet> {
         );
         size_t const stringLength = std::max(desiredStringLength, k);
         std::vector<unsigned char> rawStrings; //(numStrings * (stringLength + 1), minInternChar);
-        rawStrings.reserve(numStrings * (stringLength + 1) / env.size());
+        rawStrings.reserve(numStrings * (stringLength + 1) / comm.size());
 
         size_t const globalSeed = 0;
         std::mt19937 randGen(globalSeed);
         size_t const randomChar = minInternChar + (randGen() % numberInternChars);
-        std::uniform_int_distribution<size_t> dist(0, env.size() - 1);
+        std::uniform_int_distribution<size_t> dist(0, comm.size() - 1);
 
         size_t numGenStrings = 0;
         size_t curOffset = 0;
@@ -304,7 +303,7 @@ class SkewedDNRatioGenerator : public StringLcpContainer<StringSet> {
         size_t const longStringLength = stringLength * 3;
         for (size_t i = 0; i < numStrings; ++i) {
             size_t PEIndex = dist(randGen);
-            if (PEIndex == env.rank()) {
+            if (PEIndex == comm.rank()) {
                 // only create your own strings
                 ++numGenStrings;
                 size_t curIndex = i;

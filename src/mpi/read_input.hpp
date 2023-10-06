@@ -13,7 +13,7 @@
 #include <mpi.h>
 #include <tlx/die/core.hpp>
 
-#include "mpi/environment.hpp"
+#include "mpi/communicator.hpp"
 
 namespace dss_schimek {
 
@@ -45,12 +45,12 @@ inline size_t get_file_size(std::string const& path) {
     return in.tellg();
 }
 
-inline std::vector<unsigned char>
-distribute_file(std::string const& input_path, size_t max_size = 0, mpi::environment env = {}) {
+inline std::vector<unsigned char> distribute_file(
+    std::string const& input_path, size_t max_size = 0, dss_mehnert::Communicator const& comm = {}
+) {
     MPI_File mpi_file;
-
     MPI_File_open(
-        env.communicator(),
+        comm.mpi_communicator(),
         input_path.c_str(),
         MPI_MODE_RDONLY,
         MPI_INFO_NULL,
@@ -63,12 +63,12 @@ distribute_file(std::string const& input_path, size_t max_size = 0, mpi::environ
         global_file_size = std::min(max_size, static_cast<size_t>(global_file_size));
     }
 
-    size_t local_slice_size = global_file_size / env.size();
-    uint32_t remaining = global_file_size % env.size();
+    size_t local_slice_size = global_file_size / comm.size();
 
     // leftover characters are distributed to the first `remaining` PEs
-    size_t offset = env.rank() * local_slice_size + std::min(env.rank(), remaining);
-    local_slice_size += (env.rank() < remaining);
+    size_t const remaining = global_file_size % comm.size();
+    size_t const offset = comm.rank() * local_slice_size + std::min(comm.rank(), remaining);
+    local_slice_size += (comm.rank() < remaining);
 
     MPI_File_seek(mpi_file, offset, MPI_SEEK_SET);
 
@@ -84,7 +84,7 @@ distribute_file(std::string const& input_path, size_t max_size = 0, mpi::environ
 }
 
 inline std::vector<unsigned char> distribute_lines(
-    std::string const& input_path, size_t max_size = 0, dss_mehnert::Communicator const& comm = {}
+    std::string const& input_path, size_t const max_size, dss_mehnert::Communicator const& comm
 ) {
     auto result = distribute_file(input_path, max_size, comm);
     auto first_newline = std::find(result.begin(), result.end(), '\n') - result.begin();
