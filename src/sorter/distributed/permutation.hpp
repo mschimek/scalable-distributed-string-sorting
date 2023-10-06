@@ -9,6 +9,8 @@
 #include <type_traits>
 #include <vector>
 
+#include <kamping/collectives/alltoall.hpp>
+#include <kamping/collectives/exscan.hpp>
 #include <tlx/die.hpp>
 
 #include "strings/stringcontainer.hpp"
@@ -94,15 +96,39 @@ public:
 
     template <PermutationStringSet StringSet>
     void append(StringSet const& ss) {
-        size_t offset = ranks_.size();
+        size_type offset = ranks_.size();
         ranks_.resize(ranks_.size() + ss.size());
         strings_.resize(strings_.size() + ss.size());
 
-        size_t i = offset;
+        size_type i = offset;
         for (auto it = ss.begin(); it != ss.end(); ++it, ++i) {
             ranks_[i] = ss[it].getPEIndex();
             strings_[i] = ss[it].getStringIndex();
         }
+    }
+
+    std::vector<index_type> to_global_permutation(Communicator const& comm) const {
+        namespace kmp = kamping;
+
+        std::vector<int> counts(comm.size()), offsets(comm.size());
+        std::for_each(ranks_.begin(), ranks_.end(), [&](auto const rank) { ++counts[rank]; });
+        std::exclusive_scan(counts.begin(), counts.end(), offsets.begin(), 0);
+
+        index_type const local_offset =
+            comm.exscan_single(kmp::send_buf(size()), kmp::op(std::plus<>{}));
+
+        std::vector<std::array<index_type, 2>> send_buf(size()), recv_buf;
+        for (size_type i = 0; i != size(); ++i) {
+            send_buf[offsets[ranks_[i]]++] = {strings_[i], local_offset + i};
+        }
+
+        comm.alltoallv(kmp::send_buf(send_buf), kmp::send_counts(counts), kmp::recv_buf(recv_buf));
+
+        std::vector<index_type> final_permutation(recv_buf.size());
+        for (auto const& [local_index, global_index]: recv_buf) {
+            final_permutation[local_index] = global_index;
+        }
+        return final_permutation;
     }
 
 private:
