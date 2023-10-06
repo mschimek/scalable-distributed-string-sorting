@@ -92,12 +92,12 @@ get_first_level(std::vector<size_t> const& levels, dss_mehnert::Communicator con
 
 template <typename Callback, typename... Args>
 void arg7(Callback cb, CommonArgs const& args) {
-    namespace bloomfilter = dss_mehnert::bloomfilter;
+    using namespace dss_mehnert::bloomfilter;
 
     if (args.grid_bloomfilter) {
-        cb.template operator()<Args..., bloomfilter::MultiLevel<bloomfilter::XXHasher>>();
+        cb.template operator()<Args..., MultiLevel<true, XXHasher>>();
     } else {
-        cb.template operator()<Args..., bloomfilter::SingleLevel<bloomfilter::XXHasher>>();
+        cb.template operator()<Args..., SingleLevel<true, XXHasher>>();
     }
 }
 

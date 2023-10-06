@@ -60,26 +60,14 @@ struct HashRank {
 };
 
 struct SipHasher {
-    static constexpr bool supports_hash_reuse = false;
-
-    static inline hash_t
-    hash(unsigned char const* str, size_t length, size_t filter_size) noexcept {
-        return tlx::siphash(str, length) % filter_size;
+    static inline hash_t hash(unsigned char const* str, size_t length) noexcept {
+        return tlx::siphash(str, length);
     }
 };
 
 struct XXHasher {
-    static constexpr bool supports_hash_reuse = true;
-
-    static inline hash_t
-    hash(unsigned char const* str, size_t length, size_t filter_size) noexcept {
-        return xxh::xxhash3<64>(str, length) % filter_size;
-    }
-
-    static inline hash_t
-    hash(unsigned char const* str, size_t length, size_t filter_size, hash_t old_hash) noexcept {
-        // todo mabe make filter size constexpr? or remove?
-        return (old_hash ^ xxh::xxhash3<64>(str, length)) % filter_size;
+    static inline hash_t hash(unsigned char const* str, size_t length) noexcept {
+        return xxh::xxhash3<64>(str, length);
     }
 };
 
@@ -305,17 +293,14 @@ inline std::optional<std::vector<int>> send_duplicates(
 } // namespace _internal
 
 
-template <typename HashPolicy, typename Derived>
+template <bool reuse_hash_values, typename HashPolicy, typename Derived>
 class BloomFilter {
     template <typename StringSet>
     using StringLcpPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
     using GridCommunicator = multi_level::GridCommunicators<Communicator>;
 
 public:
-    static constexpr size_t filter_size = std::numeric_limits<uint64_t>::max();
-
-    explicit BloomFilter(size_t size)
-        : hash_values_((HashPolicy::supports_hash_reuse) ? size : 0) {}
+    explicit BloomFilter(size_t size) : hash_values_(reuse_hash_values ? size : 0) {}
 
     // todo rename
     template <typename StringPtr, typename Subcommunicators>
@@ -371,8 +356,9 @@ public:
         measuring_tool_.stop("bloomfilter_find_local_duplicates");
 
         measuring_tool_.start("bloomfilter_find_remote_duplicates");
+        HashRange const hash_range{0, std::numeric_limits<hash_t>::max()};
         auto const remote_dups = static_cast<Derived&>(*this)
-                                     .find_remote_duplicates(hash_idx_pairs, {0, filter_size})
+                                     .find_remote_duplicates(hash_idx_pairs, hash_range)
                                      .value_or(std::vector<int>{});
         measuring_tool_.stop("bloomfilter_find_remote_duplicates");
 
@@ -411,22 +397,24 @@ private:
             result.hash_idx_pairs.reserve(ss.size());
             result.lcp_duplicates.reserve(ss.size());
 
-            for (size_t candidate = 0; candidate != ss.size(); ++candidate) {
-                auto const& str = ss.at(candidate);
-
-                if (depth > ss.get_length(str)) {
+            hash_t curr_hash = 0;
+            size_t candidate = 0;
+            for (auto it = ss.begin(); it != ss.end(); ++it, ++candidate) {
+                if (depth > ss.get_length(ss[it])) {
                     result.eos_candidates.push_back(candidate);
-                } else if (lcps[candidate] >= depth) {
-                    result.lcp_duplicates.push_back(candidate);
-                    if (result.hash_idx_pairs.back().string_index + 1 == candidate) {
-                        result.hash_idx_pairs.back().is_lcp_root = true;
-                    }
                 } else {
-                    auto const curr_chars = ss.get_chars(str, 0);
-                    hash_t hash = HashPolicy::hash(curr_chars, depth, filter_size);
-                    result.hash_idx_pairs.emplace_back(hash, candidate);
-                    if constexpr (HashPolicy::supports_hash_reuse) {
-                        hash_values_[candidate] = hash;
+                    if (lcps[candidate] >= depth) {
+                        // running hash value does not have to be updated here
+                        result.lcp_duplicates.push_back(candidate);
+                        if (result.hash_idx_pairs.back().string_index + 1 == candidate) {
+                            result.hash_idx_pairs.back().is_lcp_root = true;
+                        }
+                    } else {
+                        curr_hash = HashPolicy::hash(ss.get_chars(ss[it], 0), depth);
+                        result.hash_idx_pairs.emplace_back(curr_hash, candidate);
+                    }
+                    if constexpr (reuse_hash_values) {
+                        hash_values_[candidate] = curr_hash;
                     }
                 }
             }
@@ -449,30 +437,33 @@ private:
             result.hash_idx_pairs.reserve(candidates.size());
             result.lcp_duplicates.reserve(candidates.size());
 
+            hash_t curr_hash = 0;
             for (auto prev = candidates.front(); auto const& curr: candidates) {
                 auto const& curr_str = ss.at(curr);
 
                 if (depth > ss.get_length(curr_str)) {
                     result.eos_candidates.push_back(curr);
-                } else if (prev + 1 == curr && lcps[curr] >= depth) {
-                    result.lcp_duplicates.push_back(curr);
-                    if (result.hash_idx_pairs.back().string_index + 1 == curr) {
-                        result.hash_idx_pairs.back().is_lcp_root = true;
-                    }
                 } else {
-                    if constexpr (HashPolicy::supports_hash_reuse) {
-                        auto const half_chars = ss.get_chars(curr_str, half_depth);
-                        auto& cached_hash = hash_values_[curr];
-                        auto hash =
-                            HashPolicy::hash(half_chars, half_depth, filter_size, cached_hash);
-                        result.hash_idx_pairs.emplace_back(hash, curr);
-                        cached_hash = hash;
+                    if (prev + 1 == curr && lcps[curr] >= depth) {
+                        // running hash value does not have to be updated here
+                        result.lcp_duplicates.push_back(curr);
+                        if (result.hash_idx_pairs.back().string_index + 1 == curr) {
+                            result.hash_idx_pairs.back().is_lcp_root = true;
+                        }
                     } else {
-                        auto hash = HashPolicy::hash(ss.get_chars(curr_str, 0), depth, filter_size);
-                        result.hash_idx_pairs.emplace_back(hash, curr);
+                        if constexpr (reuse_hash_values) {
+                            auto const chars = ss.get_chars(curr_str, half_depth);
+                            curr_hash = hash_values_[curr] ^ HashPolicy::hash(chars, half_depth);
+                        } else {
+                            curr_hash = HashPolicy::hash(ss.get_chars(curr_str, 0), depth);
+                        }
+                        result.hash_idx_pairs.emplace_back(curr_hash, curr);
                     }
+                    if constexpr (reuse_hash_values) {
+                        hash_values_[curr] = curr_hash;
+                    }
+                    prev = curr;
                 }
-                prev = curr;
             }
         }
         return result;
@@ -587,8 +578,9 @@ private:
     bool check_prefixes_unique(
         StringSet const& ss, std::span<size_t const> prefixes, Communicator const& comm
     ) {
+        auto const max = std::max_element(prefixes.begin(), prefixes.end());
         auto const global_max = comm.allreduce_single(
-            kamping::send_buf(*std::max_element(prefixes.begin(), prefixes.end())),
+            kamping::send_buf(max == prefixes.end() ? 0 : *max),
             kamping::op(kamping::ops::max<>{})
         );
 
@@ -600,7 +592,7 @@ private:
                 auto const str_chars = ss.get_chars(str, 0);
                 auto const str_prefix = prefixes[i];
                 if (str_prefix == n) {
-                    local_hashes.push_back(HashPolicy::hash(str_chars, str_prefix, filter_size));
+                    local_hashes.push_back(HashPolicy::hash(str_chars, str_prefix));
                 }
             }
 
@@ -617,9 +609,11 @@ private:
     }
 };
 
-template <typename HashPolicy>
-class SingleLevel : public BloomFilter<HashPolicy, SingleLevel<HashPolicy>> {
-    using BloomFilterBase = BloomFilter<HashPolicy, SingleLevel<HashPolicy>>;
+template <bool reuse_hashes, typename HashPolicy>
+class SingleLevel
+    : public BloomFilter<reuse_hashes, HashPolicy, SingleLevel<reuse_hashes, HashPolicy>> {
+    using BloomFilterBase =
+        BloomFilter<reuse_hashes, HashPolicy, SingleLevel<reuse_hashes, HashPolicy>>;
     friend BloomFilterBase;
 
 public:
@@ -670,9 +664,11 @@ private:
     }
 };
 
-template <typename HashPolicy>
-class MultiLevel : public BloomFilter<HashPolicy, MultiLevel<HashPolicy>> {
-    using BloomFilterBase = BloomFilter<HashPolicy, MultiLevel<HashPolicy>>;
+template <bool reuse_hashes, typename HashPolicy>
+class MultiLevel
+    : public BloomFilter<reuse_hashes, HashPolicy, MultiLevel<reuse_hashes, HashPolicy>> {
+    using BloomFilterBase =
+        BloomFilter<reuse_hashes, HashPolicy, MultiLevel<reuse_hashes, HashPolicy>>;
     friend BloomFilterBase;
 
 public:
