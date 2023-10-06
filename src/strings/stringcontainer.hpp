@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstring>
 #include <iostream>
 #include <iterator>
 #include <memory>
@@ -333,29 +334,30 @@ public:
     void extend_prefix(std::span<size_t const> lcps)
         requires(_StringSet::has_length)
     {
-        auto const ss = this->make_string_set();
-
-        assert_equal(lcps.size(), ss.size());
+        assert_equal(lcps.size(), this->size());
         assert(lcps.empty() || lcps.front() == 0);
 
         size_t const L = std::accumulate(lcps.begin(), lcps.end(), size_t{0});
         std::vector<Char> raw_strings(this->char_size() + L);
         auto prev_chars = raw_strings.begin(), curr_chars = prev_chars;
 
-        for (auto lcp_it = lcps.begin(); auto& curr_str: ss) {
+        for (auto lcp_it = lcps.begin(); auto& curr_str: this->strings_) {
             auto const curr_lcp = *lcp_it++;
-            auto const curr_str_begin = ss.get_chars(curr_str, 0);
+            auto const curr_str_begin = curr_str.string;
             auto const curr_str_len = curr_str.length + 1;
 
-            curr_str.string = &(*curr_chars);
+            assert_equal(curr_str_begin[curr_str_len - 1], 0);
+            curr_str.string = &*curr_chars;
             curr_str.length = curr_str_len + curr_lcp - 1;
 
             // copy common prefix from previous string
             auto const lcp_chars = std::exchange(prev_chars, curr_chars);
-            curr_chars = std::copy_n(lcp_chars, curr_lcp, curr_chars);
+            memcpy(&*curr_chars, &*lcp_chars, curr_lcp);
 
             // copy remaining (distinct) characters
-            curr_chars = std::copy_n(curr_str_begin, curr_str_len, curr_chars);
+            memcpy(&*curr_chars + curr_lcp, curr_str_begin, curr_str_len);
+
+            curr_chars += curr_lcp + curr_str_len;
         }
 
         raw_strings.erase(curr_chars, raw_strings.end());
