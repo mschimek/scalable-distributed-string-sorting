@@ -98,9 +98,9 @@ selectMedian(StringSet const& ss, std::mt19937_64& async_gen, RandomBitStore& bi
     if (!ss.empty()) {
         if (ss.size() % 2 == 0) {
             auto shift = bit_gen.getNextBit(async_gen);
-            return ss[ss.begin() + ((ss.size() / 2) - shift)];
+            return ss.at((ss.size() / 2) - shift);
         } else {
-            return ss[ss.begin() + (ss.size() / 2)];
+            return ss.at(ss.size() / 2);
         }
     } else {
         return StringSet::empty_string();

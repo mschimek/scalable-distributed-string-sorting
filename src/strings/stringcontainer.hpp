@@ -170,10 +170,7 @@ public:
 
     void resize_strings(size_t const count) {
         // for some reason GCC detects a potential null dereference here
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wnull-dereference"
-        strings_.resize(count);
-#pragma GCC diagnostic pop
+        strings_.resize(count, String{});
     }
 
     void delete_raw_strings() {
@@ -214,8 +211,8 @@ public:
             auto const length = ss.get_length(str);
             memcpy(&*dest, str.string, length);
             str.string = &*dest;
-            dest += length;
-            *dest++ = 0;
+            *(dest + length) = 0;
+            dest += (length + 1);
         }
         std::swap(*raw_strings_, char_buffer);
     }

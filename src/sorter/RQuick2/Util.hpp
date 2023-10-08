@@ -116,11 +116,12 @@ public:
 
         auto char_dest = this->raw_strs.begin();
         for (size_t i = 0; auto& str: ss) {
-            char_dest = std::copy_n(str.getChars(), str.getLength(), char_dest);
-            *char_dest++ = 0;
+            memcpy(&*char_dest, str.string, str.length);
+            *(char_dest + str.length) = 0;
+            char_dest += (str.length + 1);
 
             if constexpr (has_index) {
-                this->indices[i++] = str.getIndex();
+                this->indices[i++] = str.index;
             }
         }
 

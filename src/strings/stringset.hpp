@@ -379,7 +379,7 @@ struct Length {
 
     static constexpr std::string_view name{"length"};
 
-    size_t length;
+    size_t length = 0;
     size_t value() const { return length; }
     inline size_t getLength() const { return length; }
 };
@@ -389,7 +389,7 @@ struct Index {
 
     static constexpr std::string_view name{"index"};
 
-    uint64_t index;
+    uint64_t index = 0;
     uint64_t value() const { return index; }
     inline uint64_t getIndex() const { return index; }
 };
@@ -399,7 +399,7 @@ struct PEIndex {
 
     static constexpr std::string_view name{"rank"};
 
-    size_t PEIndex;
+    size_t PEIndex = 0;
     size_t value() const { return PEIndex; }
     inline size_t getPEIndex() const { return PEIndex; }
 };
@@ -409,7 +409,7 @@ struct StringIndex {
 
     static constexpr std::string_view name{"string"};
 
-    size_t stringIndex;
+    size_t stringIndex = 0;
     size_t value() const { return stringIndex; }
     inline size_t getStringIndex() const { return stringIndex; }
 };

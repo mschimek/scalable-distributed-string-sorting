@@ -37,6 +37,7 @@
 #pragma once
 
 #include <cassert>
+#include <cstring>
 
 #include <stdint.h>
 
