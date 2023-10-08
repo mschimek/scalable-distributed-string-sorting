@@ -211,12 +211,12 @@ public:
 
         auto const ss = make_string_set();
         for (auto dest = char_buffer.begin(); auto& str: strings_) {
-            auto const chars = std::exchange(str.string, &*dest);
             auto const length = ss.get_length(str);
-            dest = std::copy_n(chars, length, dest);
+            memcpy(&*dest, str.string, length);
+            str.string = &*dest;
+            dest += length;
             *dest++ = 0;
         }
-
         std::swap(*raw_strings_, char_buffer);
     }
 

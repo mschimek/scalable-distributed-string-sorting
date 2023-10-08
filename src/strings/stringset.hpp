@@ -134,6 +134,19 @@ public:
         return ss.is_end(a, ai) || (!ss.is_end(a, ai) && !ss.is_end(b, bi) && *ai <= *bi);
     }
 
+    std::strong_ordering
+    scmp(typename Traits::String const& a, typename Traits::String const& b) const {
+        StringSet const& ss = *static_cast<StringSet const*>(this);
+
+        typename StringSet::CharIterator ai = ss.get_chars(a, 0);
+        typename StringSet::CharIterator bi = ss.get_chars(b, 0);
+
+        while (ss.is_equal(a, ai, b, bi))
+            ++ai, ++bi;
+
+        return ss.cmp(a, ai, b, bi);
+    }
+
     //! \}
 
     size_t get_sum_length() const {
@@ -516,6 +529,12 @@ public:
     //! Returns true if CharIterator is at end of the given String
     bool is_end(String const&, CharIterator const& i) const { return (*i == 0); }
 
+    //! Compares the given positions of the two given Strings
+    std::strong_ordering
+    cmp(String const& a, CharIterator const& ai, String const& b, CharIterator const& bi) const {
+        return *ai <=> *bi;
+    }
+
     //! Return complete string (for debugging purposes)
     std::string get_string(String const& s, size_t const depth = 0) const {
         return {reinterpret_cast<char const*>(s.string) + depth};
@@ -632,6 +651,16 @@ public:
 
     //! Returns true if CharIterator is at end of the given String
     bool is_end(String const& s, CharIterator const& i) const { return i == (s.string + s.length); }
+
+    //! Compares the given positions of the two given Strings
+    std::strong_ordering
+    cmp(String const& a, CharIterator const& ai, String const& b, CharIterator const& bi) const {
+        if (is_end(a, ai)) {
+            return is_end(b, bi) ? std::strong_ordering::equal : std::strong_ordering::less;
+        } else {
+            return is_end(b, bi) ? std::strong_ordering::greater : (*ai <=> *bi);
+        }
+    }
 
     //! Return complete string (for debugging purposes)
     std::string get_string(String const& s, size_t depth = 0) const {

@@ -137,13 +137,12 @@ inline size_t compute_global_lcp_average(std::span<size_t const> lcps, Communica
 }
 
 template <typename StringSet>
-inline size_t binary_search(StringSet const& ss, typename StringSet::CharIterator const value) {
+inline size_t binary_search(StringSet const& ss, typename StringSet::String const& value) {
     auto left = ss.begin(), right = ss.end();
 
     while (left != right) {
         size_t const dist = (right - left) / 2;
-        auto const& current = ss[left + dist];
-        int ord = dss_schimek::scmp(ss.get_chars(current, 0), value);
+        auto const ord = ss.scmp(ss[left + dist], value);
         if (ord < 0) {
             left = left + dist + 1;
         } else if (ord == 0) {
@@ -158,21 +157,21 @@ inline size_t binary_search(StringSet const& ss, typename StringSet::CharIterato
 template <typename StringSet>
 inline size_t binary_search_indexed(
     StringSet const& ss,
-    typename StringSet::CharIterator const value,
+    typename StringSet::String const& value,
     uint64_t const index,
     uint64_t const local_offset
 ) {
-    auto scmp_indexed = [=, &ss](auto const other) {
+    auto scmp_indexed = [&](auto const other) {
         auto const other_index = other - ss.begin() + local_offset;
-        auto const ord = dss_schimek::scmp(ss.get_chars(ss[other], 0), value);
-        return ord == 0 ? other_index - index : ord;
+        auto const ord = ss.scmp(ss[other], value);
+        return ord == 0 ? other_index <=> index : ord;
     };
 
     auto left = ss.begin(), right = ss.end();
 
     while (left != right) {
         size_t const dist = (right - left) / 2;
-        int const ord = scmp_indexed(left + dist);
+        auto const ord = scmp_indexed(left + dist);
         if (ord < 0) {
             left = left + dist + 1;
         } else if (ord == 0) {
@@ -218,11 +217,17 @@ inline std::vector<size_t> compute_interval_sizes(
 template <typename StringSet, typename SplitterSet>
 inline std::vector<size_t>
 compute_interval_binary(StringSet const& ss, SplitterSet const& splitters) {
+    // todo this restriction could be relaxed if desired
+    static_assert(StringSet::has_length);
+
+    using String = StringSet::String;
+
     std::vector<size_t> intervals;
     intervals.reserve(splitters.size() + 1);
 
     for (auto const& splitter: splitters) {
-        intervals.emplace_back(binary_search(ss, splitters.get_chars(splitter, 0)));
+        String const splitter_{splitter.string, Length{splitter.length}};
+        intervals.emplace_back(binary_search(ss, splitter_));
     }
     intervals.emplace_back(ss.size());
 
@@ -234,13 +239,17 @@ template <typename StringSet, typename SplitterSet>
 inline std::vector<size_t> compute_interval_binary_index(
     StringSet const& ss, SplitterSet const& splitters, uint64_t const local_offset
 ) {
+    // todo this restriction could be relaxed if desired
+    static_assert(StringSet::has_length);
+
+    using String = StringSet::String;
+
     std::vector<size_t> intervals;
     intervals.reserve(splitters.size() + 1);
 
     for (auto const& splitter: splitters) {
-        auto const chars = splitters.get_chars(splitter, 0);
-        auto const index = splitter.getIndex();
-        intervals.emplace_back(binary_search_indexed(ss, chars, index, local_offset));
+        String const splitter_{splitter.string, Length{splitter.length}};
+        intervals.emplace_back(binary_search_indexed(ss, splitter_, splitter.index, local_offset));
     }
     intervals.emplace_back(ss.size());
 
