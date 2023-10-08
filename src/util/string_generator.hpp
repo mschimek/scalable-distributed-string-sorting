@@ -18,12 +18,12 @@
 #include "mpi/read_input.hpp"
 #include "strings/stringcontainer.hpp"
 
-namespace dss_schimek {
+namespace dss_mehnert {
 
 template <typename StringSet>
 class FileDistributer : public StringLcpContainer<StringSet> {
 public:
-    FileDistributer(std::string const& path, dss_mehnert::Communicator const& comm)
+    FileDistributer(std::string const& path, Communicator const& comm)
         : StringLcpContainer<StringSet>{distribute_lines(path, 0, comm)} {}
 
     static std::string getName() { return "FileDistributer"; }
@@ -35,7 +35,6 @@ class SuffixGenerator : public StringLcpContainer<StringSet> {
 
 private:
     std::vector<unsigned char> readFile(std::string const& path) {
-        using dss_schimek::RawStringsLines;
         RawStringsLines data;
         size_t const fileSize = get_file_size(path);
         std::ifstream in(path);
@@ -54,9 +53,7 @@ private:
         return rawStrings;
     }
 
-    auto distributeSuffixes(
-        std::vector<unsigned char> const& text, dss_mehnert::Communicator const& comm
-    ) {
+    auto distributeSuffixes(std::vector<unsigned char> const& text, Communicator const& comm) {
         size_t const textSize = text.size();
         size_t const estimatedTotalCharCount = textSize * (textSize + 1) / 2 + textSize;
         size_t const estimatedCharCount = estimatedTotalCharCount / comm.size();
@@ -81,7 +78,7 @@ private:
     }
 
 public:
-    SuffixGenerator(std::string const& path, dss_mehnert::Communicator const& comm) {
+    SuffixGenerator(std::string const& path, Communicator const& comm) {
         std::vector<unsigned char> text = readFile(path);
         auto [rawStrings, genStrings] = distributeSuffixes(text, comm);
         this->update(std::move(rawStrings));
@@ -97,9 +94,9 @@ public:
 template <typename StringSet>
 class DNRatioGenerator : public StringLcpContainer<StringSet> {
 public:
-    DNRatioGenerator(size_t size, size_t stringLength, double DN_ratio)
+    DNRatioGenerator(size_t const num_strings, size_t const len_strings, double const DN_ratio)
         : StringLcpContainer<StringSet>{
-            get_raw_strings(size, stringLength, DN_ratio, kamping::comm_world())} {
+            get_raw_strings(num_strings, len_strings, DN_ratio, kamping::comm_world())} {
         std::random_device rand;
         std::mt19937 gen{rand()};
 
@@ -119,7 +116,7 @@ private:
         size_t const num_strings,
         size_t const len_strings_requested,
         double const DN_ratio,
-        dss_mehnert::Communicator const& comm
+        Communicator const& comm
     ) {
         size_t const k = std::max(
             len_strings_requested * std::clamp(DN_ratio, 0.0, 1.0),
@@ -155,7 +152,7 @@ private:
         return raw_strings;
     }
 
-    size_t get_global_seed(dss_mehnert::Communicator const& comm) {
+    size_t get_global_seed(Communicator const& comm) {
         size_t seed = 0;
         if (comm.is_root()) {
             std::random_device rand_seed;
@@ -174,7 +171,7 @@ public:
     RandomStringLcpContainer(
         size_t const size, size_t const min_length = 10, size_t const max_length = 20
     ) {
-        dss_mehnert::Communicator comm;
+        Communicator comm;
         std::vector<Char> random_raw_string_data;
         std::random_device rand_seed;
         std::mt19937 rand_gen(rand_seed());
@@ -201,7 +198,7 @@ class SkewedRandomStringLcpContainer : public StringLcpContainer<StringSet> {
     using Char = typename StringSet::Char;
 
 public:
-    size_t getSameSeedGlobally(dss_mehnert::Communicator const& comm) {
+    size_t getSameSeedGlobally(Communicator const& comm) {
         size_t seed = 0;
         if (comm.is_root()) {
             std::random_device rand_seed;
@@ -216,7 +213,7 @@ public:
     ) {
         std::vector<Char> random_raw_string_data;
         std::random_device rand_seed;
-        dss_mehnert::Communicator const& comm{kamping::comm_world()};
+        Communicator const& comm{kamping::comm_world()};
         size_t const globalSeed = 0;
         std::mt19937 rand_gen(globalSeed);
         std::uniform_int_distribution<Char> small_char_dis(65, 70);
@@ -275,10 +272,7 @@ class SkewedDNRatioGenerator : public StringLcpContainer<StringSet> {
     std::tuple<std::vector<unsigned char>, size_t, size_t>
 
     getRawStringsTimoStyle(
-        size_t numStrings,
-        size_t desiredStringLength,
-        double dToN,
-        dss_mehnert::Communicator const& comm = {}
+        size_t numStrings, size_t desiredStringLength, double dToN, Communicator const& comm = {}
     ) {
         size_t const minInternChar = 65;
         size_t const maxInternChar = 90;
@@ -353,10 +347,6 @@ public:
     static std::string getName() { return "SkewedDNRatioGenerator"; }
 };
 
-} // namespace dss_schimek
-
-namespace dss_mehnert {
-
 template <typename StringSet>
 struct RandomCharGenerator : public std::vector<typename StringSet::Char> {
     using Char = StringSet::Char;
@@ -373,8 +363,18 @@ template <typename StringSet>
 struct FileCharGenerator : public std::vector<typename StringSet::Char> {
     using Char = StringSet::Char;
 
-    FileCharGenerator(std::string const& path)
-        : std::vector<Char>{dss_schimek::distribute_file(path)} {}
+    FileCharGenerator(std::string const& path, Communicator const& comm)
+        : std::vector<Char>{distribute_file(path, 0, comm)} {}
+};
+
+template <typename StringSet>
+struct FileSegmentCharGenerator : public std::vector<typename StringSet::Char> {
+    using Char = StringSet::Char;
+
+    FileSegmentCharGenerator(
+        std::string const& path, size_t const segment_size, Communicator const& comm
+    )
+        : std::vector<Char>{distribute_random_file_segments(path, segment_size, comm)} {}
 };
 
 template <typename StringSet>

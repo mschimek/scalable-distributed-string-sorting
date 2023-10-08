@@ -61,7 +61,6 @@ public:
         return sort(std::move(augmented_container), comms);
     }
 
-
     template <PermutationStringSet StringSet>
     InputPermutation
     sort(StringLcpContainer<StringSet>&& container, Subcommunicators const& comms) {
@@ -109,6 +108,9 @@ public:
                 std::vector<typename StringSet::Char>{},
                 {quantile.active().begin(), quantile.active().end()},
                 {quantile.lcp(), quantile.lcp() + quantile.size()}};
+
+            auto const quantile_size_chars = quantile.active().get_sum_length();
+            this->measuring_tool_.add(quantile_size_chars, "quantile_size");
 
             this->measuring_tool_.disable();
             Base::sort(quantile_container, comms, quantile_prefixes);

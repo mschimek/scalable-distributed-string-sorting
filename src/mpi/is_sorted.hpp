@@ -253,12 +253,17 @@ public:
         auto const ss = input_container_.make_string_set();
 
         bool is_sorted = true;
-        {
-            auto sorted_strings = dss_mehnert::sorter::apply_permutation(ss, permutation, comm);
-            is_sorted &= sorted_strings.make_string_set().check_order();
+        auto sorted_strings = dss_mehnert::sorter::apply_permutation(ss, permutation, comm);
+        if (!sorted_strings.make_string_set().check_order()) {
+            sorted_strings.make_string_set().print();
+            std::cout << "the permutation is not sorted locally\n";
+            is_sorted = false;
         }
 
-        is_sorted &= check_permutation_global_order(ss, permutation, comm);
+        if (!check_permutation_global_order(ss, permutation, comm)) {
+            std::cout << "strings are not lexicographically increasing\n";
+            is_sorted = false;
+        }
         return comm.allreduce_single(send_buf({is_sorted}), op(ops::logical_and<>{}));
     }
 

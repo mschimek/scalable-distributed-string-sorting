@@ -28,7 +28,7 @@
 #include "util/measuringTool.hpp"
 #include "util/string_generator.hpp"
 
-enum class CharGenerator { random = 0, file, sentinel };
+enum class CharGenerator { random = 0, file, file_segment, sentinel };
 
 enum class StringGenerator { suffix = 0, window, difference_cover, sentinel };
 
@@ -73,7 +73,10 @@ auto generate_compressed_strings(SorterArgs const& args, dss_mehnert::Communicat
                 return RandomCharGenerator<StringSet>{args.num_chars};
             }
             case CharGenerator::file: {
-                return FileCharGenerator<StringSet>{args.path};
+                return FileCharGenerator<StringSet>{args.path, comm};
+            }
+            case CharGenerator::file_segment: {
+                return FileSegmentCharGenerator<StringSet>{args.path, args.num_chars, comm};
             }
             case CharGenerator::sentinel: {
                 break;
@@ -221,7 +224,7 @@ int main(int argc, char* argv[]) {
         "char-generator",
         args.char_gen,
         "char generator to use "
-        "([0]=random, 1=file)"
+        "([0]=random, 1=file, 2=file-segment)"
     );
     cp.add_size_t(
         's',

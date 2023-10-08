@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iostream>
 #include <numeric>
+#include <random>
 #include <vector>
 
 #include <kamping/mpi_datatype.hpp>
@@ -15,7 +16,7 @@
 
 #include "mpi/communicator.hpp"
 
-namespace dss_schimek {
+namespace dss_mehnert {
 
 template <typename T>
 static inline std::vector<T>
@@ -45,9 +46,43 @@ inline size_t get_file_size(std::string const& path) {
     return in.tellg();
 }
 
-inline std::vector<unsigned char> distribute_file(
-    std::string const& input_path, size_t max_size = 0, dss_mehnert::Communicator const& comm = {}
+inline std::vector<unsigned char> distribute_random_file_segments(
+    std::string const& input_path, size_t segment_size, Communicator const& comm
 ) {
+    MPI_File mpi_file;
+    MPI_File_open(
+        comm.mpi_communicator(),
+        input_path.c_str(),
+        MPI_MODE_RDONLY,
+        MPI_INFO_NULL,
+        &mpi_file
+    );
+
+    MPI_Offset file_size = 0;
+    MPI_File_get_size(mpi_file, &file_size);
+    segment_size = std::min(segment_size, static_cast<size_t>(file_size));
+
+    std::random_device rd;
+    std::mt19937_64 gen{rd()};
+    std::uniform_int_distribution<size_t> dist{0, file_size - segment_size};
+    size_t const offset = dist(gen);
+    assert(offset + segment_size <= static_cast<size_t>(file_size));
+
+    MPI_File_seek(mpi_file, offset, MPI_SEEK_SET);
+
+    std::vector<unsigned char> result(segment_size);
+    MPI_File_read(
+        mpi_file,
+        result.data(),
+        segment_size,
+        kamping::mpi_datatype<unsigned char>(),
+        MPI_STATUS_IGNORE
+    );
+    return result;
+}
+
+inline std::vector<unsigned char>
+distribute_file(std::string const& input_path, size_t const max_size, Communicator const& comm) {
     MPI_File mpi_file;
     MPI_File_open(
         comm.mpi_communicator(),
@@ -83,9 +118,8 @@ inline std::vector<unsigned char> distribute_file(
     return result;
 }
 
-inline std::vector<unsigned char> distribute_lines(
-    std::string const& input_path, size_t const max_size, dss_mehnert::Communicator const& comm
-) {
+inline std::vector<unsigned char>
+distribute_lines(std::string const& input_path, size_t const max_size, Communicator const& comm) {
     auto result = distribute_file(input_path, max_size, comm);
     auto first_newline = std::find(result.begin(), result.end(), '\n') - result.begin();
 
@@ -129,4 +163,4 @@ inline RawStringsLines read_file(std::string const& path) {
     return data;
 }
 
-} // namespace dss_schimek
+} // namespace dss_mehnert
