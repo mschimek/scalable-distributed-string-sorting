@@ -18,7 +18,7 @@
 namespace dss_mehnert {
 namespace sorter {
 
-// this struct is required to disambiguate between the PartitionPolicy used
+// this struct is required to disambiguate the PartitionPolicy used
 // in sorting and the one use to compute quantiles
 template <typename PartitionPolicy>
 struct QuantilePolicyBase : public PartitionPolicy {};
@@ -92,12 +92,13 @@ public:
         auto const quantile_sizes = compute_quantiles(strptr, arg, comm_root);
         this->measuring_tool_.stop("compute_quantiles", "compute_quantiles");
 
-        this->measuring_tool_.start("sort_quantiles", "sort_quantiles");
+        this->measuring_tool_.start("sort_quantiles", "sort_quantiles_overall");
         InputPermutation full_permutation;
         full_permutation.reserve(strptr.size());
 
         for (size_t i = 0, offset = 0; i != quantile_sizes.size(); ++i) {
             this->measuring_tool_.setQuantile(i);
+            this->measuring_tool_.start("sort_globally", "sort_quantile");
             auto const size = quantile_sizes[i];
             auto const quantile = strptr.sub(offset, size);
             std::span const quantile_prefixes{prefixes.begin() + offset, size};
@@ -117,11 +118,12 @@ public:
             full_permutation.append(quantile_container.make_string_set());
             this->measuring_tool_.enable();
 
+            this->measuring_tool_.stop("sort_globally", "sort_quantile");
             offset += size;
         }
 
         this->measuring_tool_.setQuantile(0);
-        this->measuring_tool_.stop("sort_quantiles", "sort_quantiles");
+        this->measuring_tool_.stop("sort_quantiles", "sort_quantiles_overall");
 
         return full_permutation;
     }
