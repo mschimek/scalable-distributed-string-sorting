@@ -73,7 +73,7 @@ public:
         this->measuring_tool_.add(container.char_size(), "chars_in_set");
 
         this->measuring_tool_.start("local_sorting", "sort_locally");
-        tlx::sort_strings_detail::radixsort_CI3(strptr, 0, 0);
+        tlx::sort_strings_detail::radixsort_CI2(strptr, 0, 0);
         this->measuring_tool_.stop("local_sorting", "sort_locally", comm_root);
 
         if (comm_root.size() == 1) {
