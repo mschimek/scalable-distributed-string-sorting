@@ -18,6 +18,7 @@
 #include "util/measuringTool.hpp"
 
 namespace dss_mehnert {
+namespace mpi {
 
 template <
     template <typename...>
@@ -197,5 +198,9 @@ private:
 
 using Communicator =
     TrackingCommunicator<std::vector, mpi::AlltoallvCombinedPlugin, mpi::AlltoallStringsPlugin>;
+
+} // namespace mpi
+
+using mpi::Communicator;
 
 } // namespace dss_mehnert

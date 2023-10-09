@@ -361,7 +361,7 @@ public:
         *this->raw_strings_ = std::move(raw_strings);
     }
 
-private:
+protected:
     std::vector<size_t> lcps_;
 };
 

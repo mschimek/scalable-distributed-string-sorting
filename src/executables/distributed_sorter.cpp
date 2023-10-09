@@ -67,15 +67,14 @@ struct SorterArgs : public CommonArgs {
 
 template <typename StringSet>
 auto generate_strings(SorterArgs const& args, dss_mehnert::Communicator const& comm) {
-    using dss_mehnert::measurement::MeasuringTool;
-    auto& measuring_tool = MeasuringTool::measuringTool();
+    using namespace dss_mehnert;
+
+    auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
     comm.barrier();
     measuring_tool.start("generate_strings");
 
-    auto input_container = [=]() -> dss_mehnert::StringLcpContainer<StringSet> {
-        using namespace dss_schimek;
-
+    auto input_container = [=]() -> StringLcpContainer<StringSet> {
         auto const num_strings = (args.strong_scaling ? 1 : comm.size()) * args.num_strings;
         auto const len_strings = args.len_strings;
         auto const DN_ratio = args.DN_ratio;

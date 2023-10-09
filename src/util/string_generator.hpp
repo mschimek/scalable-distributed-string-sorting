@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <iterator>
 #include <limits>
 #include <random>
 
@@ -17,8 +18,24 @@
 #include "mpi/communicator.hpp"
 #include "mpi/read_input.hpp"
 #include "strings/stringcontainer.hpp"
+#include "tlx/math/div_ceil.hpp"
 
 namespace dss_mehnert {
+
+namespace _internal {
+
+inline size_t get_global_seed(Communicator const& comm) {
+    size_t seed = 0;
+    if (comm.is_root()) {
+        std::random_device rand_seed;
+        seed = rand_seed();
+    }
+    comm.bcast_single(kamping::send_recv_buf(seed));
+    return seed;
+}
+
+} // namespace _internal
+
 
 template <typename StringSet>
 class FileDistributer : public StringLcpContainer<StringSet> {
@@ -127,7 +144,7 @@ private:
         std::vector<unsigned char> raw_strings;
         raw_strings.reserve((1.005 * num_strings) * (len_strings + 1) / comm.size());
 
-        std::mt19937 gen{get_global_seed(comm)};
+        std::mt19937 gen{_internal::get_global_seed(comm)};
         std::uniform_int_distribution<size_t> dist{0, comm.size() - 1};
 
         size_t const rand_char = min_char + (gen() % char_range);
@@ -150,16 +167,6 @@ private:
             }
         }
         return raw_strings;
-    }
-
-    size_t get_global_seed(Communicator const& comm) {
-        size_t seed = 0;
-        if (comm.is_root()) {
-            std::random_device rand_seed;
-            seed = rand_seed();
-        }
-        comm.bcast_single(kamping::send_recv_buf(seed));
-        return seed;
     }
 };
 
@@ -198,24 +205,13 @@ class SkewedRandomStringLcpContainer : public StringLcpContainer<StringSet> {
     using Char = typename StringSet::Char;
 
 public:
-    size_t getSameSeedGlobally(Communicator const& comm) {
-        size_t seed = 0;
-        if (comm.is_root()) {
-            std::random_device rand_seed;
-            seed = rand_seed();
-        }
-        comm.bcast_single(kamping::send_recv_buf(seed));
-        return seed;
-    }
-
     SkewedRandomStringLcpContainer(
         size_t const size, size_t const min_length = 100, size_t const max_length = 200
     ) {
         std::vector<Char> random_raw_string_data;
         std::random_device rand_seed;
         Communicator const& comm{kamping::comm_world()};
-        size_t const globalSeed = 0;
-        std::mt19937 rand_gen(globalSeed);
+        std::mt19937 rand_gen(_internal::get_global_seed(comm));
         std::uniform_int_distribution<Char> small_char_dis(65, 70);
         std::uniform_int_distribution<Char> char_dis(65, 90);
 
@@ -283,7 +279,7 @@ class SkewedDNRatioGenerator : public StringLcpContainer<StringSet> {
             std::ceil(std::log(numStrings) / std::log(numberInternChars))
         );
         size_t const stringLength = std::max(desiredStringLength, k);
-        std::vector<unsigned char> rawStrings; //(numStrings * (stringLength + 1), minInternChar);
+        std::vector<unsigned char> rawStrings;
         rawStrings.reserve(numStrings * (stringLength + 1) / comm.size());
 
         size_t const globalSeed = 0;
@@ -447,6 +443,47 @@ private:
             }
         }
         // clang-format on
+    }
+};
+
+template <typename StringSet>
+struct CompressedDNRatioGenerator : public StringLcpContainer<StringSet> {
+    using Char = StringSet::Char;
+
+    CompressedDNRatioGenerator(
+        double const dn_ratio,
+        size_t const len_strings,
+        size_t const num_strings,
+        Communicator const& comm
+    ) {
+        assert(0 <= dn_ratio && dn_ratio <= 1);
+        size_t const strings_per_chunk = std::max<size_t>(1, 2 * len_strings * dn_ratio);
+        size_t const chars_per_chunk = len_strings + strings_per_chunk - 1;
+
+        std::random_device rd;
+        std::mt19937 gen{rd()};
+        std::uniform_int_distribution<Char> dist{'A', 'Z'};
+
+        Char padding_char = dist(gen);
+        comm.bcast_single(kamping::send_recv_buf(padding_char));
+
+        auto& raw_strings = *this->raw_strings_;
+        auto& strings = this->strings_;
+
+        size_t const num_chunks = tlx::div_ceil(num_strings, strings_per_chunk);
+        raw_strings.reserve(num_chunks * chars_per_chunk);
+
+        for (size_t n = 0; n < num_strings; n += strings_per_chunk) {
+            raw_strings.resize(raw_strings.size() + chars_per_chunk, padding_char);
+            std::generate_n(raw_strings.rbegin(), len_strings, [&] { return dist(gen); });
+
+            auto const chunk_size = std::min<size_t>(strings_per_chunk, num_strings - n);
+            auto const begin = raw_strings.end() - chars_per_chunk;
+            for (size_t i = 0; i < chunk_size; ++i) {
+                strings.emplace_back(&*(begin + i), Length{len_strings});
+            }
+        }
+        this->lcps_.resize(strings.size());
     }
 };
 

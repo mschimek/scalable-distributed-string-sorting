@@ -28,17 +28,22 @@
 #include "util/measuringTool.hpp"
 #include "util/string_generator.hpp"
 
+enum class CombinedGenerator { none = 0, dn_ratio, sentinel };
+
 enum class CharGenerator { random = 0, file, file_segment, sentinel };
 
 enum class StringGenerator { suffix = 0, window, difference_cover, sentinel };
 
 struct SorterArgs : public CommonArgs {
+    size_t combined_gen = static_cast<size_t>(CombinedGenerator::none);
     size_t char_gen = static_cast<size_t>(CharGenerator::random);
     size_t string_gen = static_cast<size_t>(StringGenerator::suffix);
-    size_t num_chars = 100000;
     size_t step = 1;
+    size_t num_chars = 100000;
+    size_t num_strings = 10000;
     size_t len_strings = 500;
     size_t difference_cover = 3;
+    double dn_ratio = 0.5;
     bool shuffle = false;
     std::string path;
     size_t quantile_size = 100 * 1024 * 1024;
@@ -51,22 +56,32 @@ struct SorterArgs : public CommonArgs {
         // todo add relevant args
         // clang-format off
         return CommonArgs::get_prefix(comm)
-               + " num_levels=" + std::to_string(args.levels.size())
-               + " iteration="  + std::to_string(args.iteration);
+               + " num_chars="        + std::to_string(args.num_chars)
+               + " num_strings="      + std::to_string(args.num_strings)
+               + " len_strings="      + std::to_string(args.len_strings)
+               + " step="             + std::to_string(args.step)
+               + " dn_ratio="         + std::to_string(args.dn_ratio)
+               + " difference_cover=" + std::to_string(args.difference_cover)
+               + " num_levels="       + std::to_string(args.levels.size())
+               + " quantile_size="    + std::to_string(args.quantile_size)
+               + " iteration="        + std::to_string(args.iteration);
         // clang-format on
     }
 };
 
 template <typename StringSet>
 auto generate_compressed_strings(SorterArgs const& args, dss_mehnert::Communicator const& comm) {
-    using dss_mehnert::measurement::MeasuringTool;
-    auto& measuring_tool = MeasuringTool::measuringTool();
+    using namespace dss_mehnert;
+
+    auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
     comm.barrier();
     measuring_tool.start("generate_strings");
 
     auto input_chars = [&]() -> std::vector<typename StringSet::Char> {
-        using namespace dss_mehnert;
+        if (args.combined_gen != static_cast<size_t>(CombinedGenerator::none)) {
+            return {};
+        }
 
         switch (clamp_enum_value<CharGenerator>(args.char_gen)) {
             case CharGenerator::random: {
@@ -86,7 +101,9 @@ auto generate_compressed_strings(SorterArgs const& args, dss_mehnert::Communicat
     }();
 
     auto input_strings = [&]() -> std::vector<typename StringSet::String> {
-        using namespace dss_mehnert;
+        if (args.combined_gen != static_cast<size_t>(CombinedGenerator::none)) {
+            return {};
+        }
 
         auto const step = args.step, length = args.len_strings;
         auto const dc = args.difference_cover;
@@ -108,15 +125,32 @@ auto generate_compressed_strings(SorterArgs const& args, dss_mehnert::Communicat
         tlx_die("invalid string generator");
     }();
 
+    auto input_container = [&]() mutable -> StringLcpContainer<StringSet> {
+        switch (clamp_enum_value<CombinedGenerator>(args.combined_gen)) {
+            case CombinedGenerator::none: {
+                return {std::move(input_chars), std::move(input_strings)};
+            }
+            case CombinedGenerator::dn_ratio: {
+                return CompressedDNRatioGenerator<StringSet>{
+                    args.dn_ratio,
+                    args.len_strings,
+                    args.num_strings,
+                    comm};
+            }
+            case CombinedGenerator::sentinel: {
+                break;
+            }
+        }
+        tlx_die("invalid combined generator");
+    }();
+
     if (args.shuffle) {
         std::random_device rd;
         std::mt19937 gen{rd()};
-        std::shuffle(input_strings.begin(), input_strings.end(), gen);
+        auto& strings = input_container.get_strings();
+        std::shuffle(strings.begin(), strings.end(), gen);
     }
 
-    dss_mehnert::StringLcpContainer<StringSet> input_container{
-        std::move(input_chars),
-        std::move(input_strings)};
     measuring_tool.stop("generate_strings");
 
     comm.barrier();
@@ -143,7 +177,6 @@ void run_space_efficient_sort(
     using namespace dss_schimek;
 
     constexpr auto alltoall_config = AlltoallConfig();
-
 
     using StringSet = dss_mehnert::CompressedStringSet<CharType>;
     // todo maybe use separate sample policies
@@ -220,6 +253,13 @@ int main(int argc, char* argv[]) {
     add_common_args(args, cp);
 
     cp.add_size_t(
+        'b',
+        "combined-gen",
+        args.combined_gen,
+        "combined char/string generator to use"
+        "([0]=none, 1=dn-ratio)"
+    );
+    cp.add_size_t(
         'c',
         "char-generator",
         args.char_gen,
@@ -233,11 +273,13 @@ int main(int argc, char* argv[]) {
         "string generator to use "
         "([0]=suffix, 1=window, 2=difference_cover)"
     );
+    cp.add_size_t('n', "num-strings", args.num_strings, "number of strings per PE");
     cp.add_size_t('m', "len-strings", args.len_strings, "number of characters per string");
     cp.add_size_t('N', "num-chars", args.num_chars, "number of chars per rank");
+    cp.add_double('r', "dn-ratio", args.dn_ratio, "D/N ratio of generated strings");
     cp.add_size_t('T', "step", args.step, "characters to skip between strings");
     cp.add_size_t('D', "difference-cover", args.difference_cover, "size of difference cover");
-    cp.add_flag('r', "shuffle", args.shuffle, "shuffle the generated strings");
+    cp.add_flag("shuffle", args.shuffle, "shuffle the generated strings");
     cp.add_string('y', "path", args.path, "path to input file");
     cp.add_bytes(
         'q',
