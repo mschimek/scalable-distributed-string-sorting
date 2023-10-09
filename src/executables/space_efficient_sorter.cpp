@@ -52,19 +52,19 @@ struct SorterArgs : public CommonArgs {
 
     // todo print config
 
-    std::string get_result_prefix(SorterArgs const& args, dss_mehnert::Communicator const& comm) {
+    std::string get_prefix(dss_mehnert::Communicator const& comm) const {
         // todo add relevant args
         // clang-format off
         return CommonArgs::get_prefix(comm)
-               + " num_chars="        + std::to_string(args.num_chars)
-               + " num_strings="      + std::to_string(args.num_strings)
-               + " len_strings="      + std::to_string(args.len_strings)
-               + " step="             + std::to_string(args.step)
-               + " dn_ratio="         + std::to_string(args.dn_ratio)
-               + " difference_cover=" + std::to_string(args.difference_cover)
-               + " num_levels="       + std::to_string(args.levels.size())
-               + " quantile_size="    + std::to_string(args.quantile_size)
-               + " iteration="        + std::to_string(args.iteration);
+               + " num_chars="        + std::to_string(num_chars)
+               + " num_strings="      + std::to_string(num_strings)
+               + " len_strings="      + std::to_string(len_strings)
+               + " step="             + std::to_string(step)
+               + " dn_ratio="         + std::to_string(dn_ratio)
+               + " difference_cover=" + std::to_string(difference_cover)
+               + " num_levels="       + std::to_string(levels.size())
+               + " quantile_size="    + std::to_string(quantile_size)
+               + " iteration="        + std::to_string(iteration);
         // clang-format on
     }
 };
