@@ -331,8 +331,6 @@ public:
             candidates = filter(strptr, i, results, candidates);
         }
 
-        assert(check_prefixes_unique(ss, results, comms.comm_root()));
-
         measuring_tool_.setRound(0);
         return results;
     }
@@ -573,40 +571,6 @@ private:
     }
 
     static bool should_send(HashStringIndex const& v) { return !v.is_local_dup || v.send_anyway; }
-
-    template <typename StringSet>
-    bool check_prefixes_unique(
-        StringSet const& ss, std::span<size_t const> prefixes, Communicator const& comm
-    ) {
-        auto const max = std::max_element(prefixes.begin(), prefixes.end());
-        auto const global_max = comm.allreduce_single(
-            kamping::send_buf(max == prefixes.end() ? 0 : *max),
-            kamping::op(kamping::ops::max<>{})
-        );
-
-        bool is_unique = true;
-        for (size_t n = 8; n <= global_max; n *= 2) {
-            std::vector<hash_t> local_hashes, global_hashes;
-            for (size_t i = 0; i != ss.size(); ++i) {
-                auto const& str = ss.at(i);
-                auto const str_chars = ss.get_chars(str, 0);
-                auto const str_prefix = prefixes[i];
-                if (str_prefix == n) {
-                    local_hashes.push_back(HashPolicy::hash(str_chars, str_prefix));
-                }
-            }
-
-            comm.gatherv(kamping::send_buf(local_hashes), kamping::recv_buf(global_hashes));
-            auto const begin = global_hashes.begin(), end = global_hashes.end();
-            std::sort(begin, end);
-            if (comm.is_root()) {
-                is_unique &= std::adjacent_find(begin, end) == end;
-            }
-        }
-
-        comm.bcast_single(kamping::send_recv_buf(is_unique));
-        return is_unique;
-    }
 };
 
 template <bool reuse_hashes, typename HashPolicy>
