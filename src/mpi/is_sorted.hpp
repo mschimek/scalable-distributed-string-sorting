@@ -287,9 +287,10 @@ public:
         copy_container(container, input_container_);
     }
 
-    bool is_sorted(InputPermutation const& permutation, Communicator const& comm) {
+    bool is_sorted(std::vector<size_t> const& permutation_, Communicator const& comm) {
         using namespace kamping;
 
+        auto const permutation = to_input_permutation(permutation_, comm);
         auto const num_quantiles = compute_num_quantiles(comm);
         auto const quantile_size = tlx::div_ceil(permutation.size(), num_quantiles);
         assert(num_quantiles * quantile_size >= permutation.size());
@@ -335,8 +336,9 @@ public:
         return comm.allreduce_single(send_buf({is_sorted}), op(ops::logical_and<>{}));
     }
 
-    bool is_complete(InputPermutation const& permutation, Communicator const& comm) {
+    bool is_complete(std::vector<size_t> const& global_permutation, Communicator const& comm) {
         using namespace kamping;
+        auto permutation = to_input_permutation(global_permutation, comm);
         auto is_complete = check_permutation_complete(permutation, input_container_.size(), comm);
         return comm.allreduce_single(send_buf({is_complete}), op(ops::logical_and<>{}));
     }
@@ -351,6 +353,43 @@ private:
         size_t const total_size = input_container_.make_string_set().get_sum_length();
         size_t const local_num_quantiles = tlx::div_ceil(total_size, quantile_size + 1);
         return comm.allreduce_single(send_buf(local_num_quantiles), op(ops::max<>{}));
+    }
+
+    InputPermutation
+    to_input_permutation(std::vector<size_t> const& global_permutation, Communicator const& comm) {
+        using namespace kamping;
+        auto const size = input_container_.size();
+        auto const total_size = comm.allreduce_single(send_buf(size), op(std::plus<>{}));
+        auto const chunk_size = tlx::div_ceil(total_size, comm.size());
+
+        auto const dest_rank = [=](auto const i) { return i / chunk_size; };
+
+        std::vector<std::array<size_t, 3>> triples(size), recv_triples;
+        auto const get_global_index = [](auto const& triple) { return triple[0]; };
+        auto const get_string = [](auto const& triple) { return triple[1]; };
+        auto const get_rank = [](auto const& triple) { return triple[2]; };
+
+        std::vector<int> counts(comm.size()), offsets(comm.size());
+        for (auto const index: global_permutation) {
+            ++counts[dest_rank(index)];
+        }
+        std::exclusive_scan(counts.begin(), counts.end(), offsets.begin(), size_t{0});
+
+        for (size_t i = 0; auto const& index: global_permutation) {
+            triples[offsets[dest_rank(index)]++] = {index, i++, comm.rank()};
+        }
+
+        comm.alltoallv(send_buf(triples), send_counts(counts), recv_buf(recv_triples));
+
+        std::sort(recv_triples.begin(), recv_triples.end(), [&](auto const& lhs, auto const& rhs) {
+            return get_global_index(lhs) < get_global_index(rhs);
+        });
+
+        std::vector<size_t> strings(recv_triples.size()), ranks(recv_triples.size());
+        std::transform(recv_triples.begin(), recv_triples.end(), strings.begin(), get_string);
+        std::transform(recv_triples.begin(), recv_triples.end(), ranks.begin(), get_rank);
+
+        return InputPermutation{std::move(ranks), std::move(strings)};
     }
 };
 

@@ -21,8 +21,8 @@ namespace dss_mehnert {
 template <typename T>
 static inline std::vector<T>
 shift_left(T* send_data, size_t const send_count, dss_mehnert::Communicator const& comm) {
-    int source = comm.rank() + 1 < comm.size() ? comm.rank() + 1 : 0;
-    int dest = comm.rank() > 0 ? comm.rank() - 1 : comm.size() - 1;
+    int const source = comm.rank() + 1 < comm.size() ? comm.rank() + 1 : 0;
+    int const dest = comm.rank() > 0 ? comm.rank() - 1 : comm.size() - 1;
 
     size_t recv_count = 0;
 

@@ -79,14 +79,16 @@ public:
 
         if (comm_root.size() == 1) {
             this->measuring_tool_.start("write_permutation");
-            InputPermutation permutation{strptr.active()};
+            std::vector<size_t> permutation(strptr.size());
+            for (size_t i = 0; auto const& str: strptr.active()) {
+                permutation[str.stringIndex] = i++;
+            }
             this->measuring_tool_.stop("write_permutation");
 
             this->measuring_tool_.setPhase("none");
-            return std::move(permutation.strings());
+            return permutation;
         }
 
-        // _internal::SpaceEfficientPermutationBuilder<Permutation> builder{strptr.active()};
         auto const prefixes = Base::run_bloom_filter(strptr, comms, start_depth);
 
         this->measuring_tool_.start("compute_quantiles", "compute_quantiles");

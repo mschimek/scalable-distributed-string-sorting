@@ -181,7 +181,7 @@ public:
         }
 
         assert_equal(std::distance(comms.begin(), comms.end()) + 1, remote_permutations_.size());
-        assert(comm_root.is_same_on_all_ranks(rank_offset));
+        assert(comm_root.is_same_on_all_ranks(global_rank_offset));
 
         index_type const local_rank_offset = comm_root.exscan_single(
             kamping::send_buf(remote_permutations_.back().size()),
@@ -234,6 +234,13 @@ public:
         }
         return send_buf;
     }
+
+    // todo
+    struct RemotePermutation {
+        std::vector<rank_type> ranks;
+        std::vector<int> counts;
+        std::vector<int> offsets;
+    };
 
 private:
     std::vector<index_type> local_permutation_;
