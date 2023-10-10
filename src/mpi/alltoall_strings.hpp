@@ -89,7 +89,6 @@ std::pair<unsigned char*, size_t> write_interval(
 
 template <bool compress_prefixes, typename StringPtr>
 size_t get_num_send_chars(StringPtr const& strptr) {
-    // todo maybe add back optimization for uncompressed string set
     auto const N = strptr.active().get_sum_length();
     if constexpr (compress_prefixes) {
         auto const lcp_begin = strptr.lcp();
@@ -123,7 +122,7 @@ std::pair<std::vector<unsigned char>, std::vector<size_t>> write_send_buf(
     auto const num_send_chars = get_num_send_chars<compress_prefixes>(strptr, prefixes...);
 
     // todo this should ideally avoid zero initialization
-    std::vector<unsigned char> send_buf_char(num_send_chars);
+    std::vector<typename StringPtr::StringSet::Char> send_buf_char(num_send_chars);
     std::vector<size_t> send_counts_char(send_counts.size());
 
     unsigned char* pos = send_buf_char.data();
@@ -149,13 +148,14 @@ inline std::vector<size_t> send_integers(
     std::vector<size_t> const& recv_counts,
     Communicator const& comm
 ) {
+    constexpr auto alltoall_kind = AlltoallvCombinedKind::native;
     if constexpr (use_compression) {
         auto compressed_data = dss_schimek::IntegerCompression::writeRanges(
             send_counts.begin(),
             send_counts.end(),
             values.data()
         );
-        auto recv_data = comm.template alltoallv_combined<AlltoallvCombinedKind::native>(
+        auto recv_data = comm.template alltoallv_combined<alltoall_kind>(
             compressed_data.integers,
             compressed_data.counts
         );
@@ -165,31 +165,106 @@ inline std::vector<size_t> send_integers(
             recv_data.begin()
         );
     } else {
-        return comm.template alltoallv_combined<AlltoallvCombinedKind::native>(values, send_counts);
+        return comm.template alltoallv_combined<alltoall_kind>(values, send_counts, recv_counts);
     }
 }
 
-template <AlltoallStringsConfig config, typename StringSet, typename Communicator>
-class StringSetSendImpl {
+template <typename Permutation>
+class PermutationSendImpl {};
+
+template <>
+class PermutationSendImpl<InputPermutation> {
 public:
+    template <AlltoallStringsConfig config, typename StringSet, typename Communicator>
+    static void send(
+        StringLcpContainer<StringSet>& container,
+        std::vector<typename StringSet::Char>& recv_buf_char,
+        std::vector<size_t>& recv_buf_lcp,
+        std::vector<size_t> const& send_counts,
+        std::vector<size_t> const& recv_counts,
+        Communicator const& comm
+    ) {
+        auto& measuring_tool = measurement::MeasuringTool::measuringTool();
+
+        // todo does 7-bit compression make sense for PE and string indices
+        measuring_tool.start("all_to_all_strings_send_idxs");
+        InputPermutation permutation{container.make_string_set()};
+        container.delete_all();
+
+        auto const send_idxs = _internal::send_integers<config.compress_lcps, Communicator>;
+        auto recv_buf_rank = send_idxs(permutation.ranks(), send_counts, recv_counts, comm);
+        auto recv_buf_index = send_idxs(permutation.strings(), send_counts, recv_counts, comm);
+        measuring_tool.stop("all_to_all_strings_send_idxs");
+
+        measuring_tool.start("all_to_all_strings_init_container");
+        container.update(
+            std::move(recv_buf_char),
+            std::move(recv_buf_lcp),
+            make_initializer<StringIndex>(recv_buf_index),
+            make_initializer<PEIndex>(recv_buf_rank)
+        );
+        measuring_tool.stop("all_to_all_strings_init_container");
+    }
+};
+
+template <>
+class PermutationSendImpl<MultiLevelPermutation> {
+public:
+    template <AlltoallStringsConfig config, typename StringSet, typename Communicator>
+    static void send(
+        StringLcpContainer<StringSet>& container,
+        std::vector<typename StringSet::Char>& recv_buf_char,
+        std::vector<size_t>& recv_buf_lcp,
+        std::vector<size_t> const& send_counts,
+        std::vector<size_t> const& recv_counts,
+        Communicator const& comm
+    ) {
+        auto& measuring_tool = measurement::MeasuringTool::measuringTool();
+
+        // todo does 7-bit compression make sense for PE and string indices
+        measuring_tool.start("all_to_all_strings_send_idxs");
+        InputPermutation permutation{container.make_string_set()};
+        container.delete_all();
+
+
+        measuring_tool.stop("all_to_all_strings_send_idxs");
+
+        measuring_tool.start("all_to_all_strings_init_container");
+        container.update(std::move(recv_buf_char), std::move(recv_buf_lcp));
+
+        // set PEIndex to indicate rank of origin PE
+        for (auto str = container.get_strings().begin(); auto const count: recv_counts) {
+            for (size_t i = 0; i != count; ++i) {
+                (*str++).PEIndex = i;
+            }
+        }
+        measuring_tool.stop("all_to_all_strings_init_container");
+    }
+};
+
+template <typename StringSet, typename Permutation>
+class StringSetSendImpl {
+    static_assert(std::is_same_v<Permutation, NoPermutation>);
+
+public:
+    template <AlltoallStringsConfig config, typename Communicator>
     static void alltoallv(
         StringLcpContainer<StringSet>& container,
-        std::vector<unsigned char>& send_buf_char,
+        std::vector<typename StringSet::Char>& send_buf_char,
         std::vector<size_t> const& send_counts_char,
         std::vector<size_t> const& send_counts,
         Communicator const& comm
     ) {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
-        measuring_tool.start("all_to_all_strings_mpi");
         measuring_tool.start("all_to_all_strings_send_chars");
         auto recv_buf_char =
             comm.template alltoallv_combined<config.alltoall_kind>(send_buf_char, send_counts_char);
         send_buf_char.clear();
         send_buf_char.shrink_to_fit();
+        measuring_tool.stop("all_to_all_strings_send_chars");
 
         auto recv_counts = comm.alltoall(kamping::send_buf(send_counts)).extract_recv_buffer();
-        measuring_tool.stop("all_to_all_strings_send_chars");
 
         measuring_tool.start("all_to_all_strings_send_lcps");
         auto send_lcps = _internal::send_integers<config.compress_lcps, Communicator>;
@@ -199,76 +274,55 @@ public:
         measuring_tool.start("all_to_all_strings_send_idxs");
         measuring_tool.stop("all_to_all_strings_send_idxs");
 
-        container.delete_all();
-        measuring_tool.stop("all_to_all_strings_mpi");
-
         measuring_tool.start("all_to_all_strings_init_container");
         container.update(std::move(recv_buf_char), std::move(recv_buf_lcp));
         measuring_tool.stop("all_to_all_strings_init_container");
     }
 };
 
-template <AlltoallStringsConfig config, typename StringSet, typename Communicator>
-    requires(has_permutation_members<StringSet>)
-class StringSetSendImpl<config, StringSet, Communicator> {
+template <PermutationStringSet StringSet, typename Permutation>
+class StringSetSendImpl<StringSet, Permutation> {
+    static_assert(!std::is_same_v<Permutation, NoPermutation>);
+
 public:
+    template <AlltoallStringsConfig config, typename Communicator>
     static void alltoallv(
         StringLcpContainer<StringSet>& container,
-        std::vector<unsigned char>& send_buf_char,
+        std::vector<typename StringSet::Char>& send_buf_char,
         std::vector<size_t> const& send_counts_char,
         std::vector<size_t> const& send_counts,
         Communicator const& comm
     ) {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
-        auto const ss = container.make_string_set();
-
-        measuring_tool.start("all_to_all_strings_mpi");
         measuring_tool.start("all_to_all_strings_send_chars");
         auto recv_buf_char =
             comm.template alltoallv_combined<config.alltoall_kind>(send_buf_char, send_counts_char);
         send_buf_char.clear();
         send_buf_char.shrink_to_fit();
+        measuring_tool.stop("all_to_all_strings_send_chars");
 
         auto recv_counts = comm.alltoall(kamping::send_buf(send_counts)).extract_recv_buffer();
-        measuring_tool.stop("all_to_all_strings_send_chars");
 
         // todo it would be possible to combine all three send_u64 calls ...
         measuring_tool.start("all_to_all_strings_send_lcps");
         auto const send_lcps = _internal::send_integers<config.compress_lcps, Communicator>;
         auto recv_buf_lcp = send_lcps(container.lcps(), send_counts, recv_counts, comm);
-        measuring_tool.stop("all_to_all_strings_send_lcps");
         container.delete_lcps();
+        measuring_tool.stop("all_to_all_strings_send_lcps");
 
-        // todo does 7-bit compression make sense for PE and string indices
-        measuring_tool.start("all_to_all_strings_send_idxs");
-        InputPermutation permutation{ss};
-        container.delete_all();
-
-        auto const send_idxs = _internal::send_integers<config.compress_lcps, Communicator>;
-        auto recv_buf_rank = send_idxs(permutation.ranks(), send_counts, recv_counts, comm);
-        auto recv_buf_index = send_idxs(permutation.strings(), send_counts, recv_counts, comm);
-        measuring_tool.stop("all_to_all_strings_send_idxs");
-        measuring_tool.stop("all_to_all_strings_mpi");
-
-        measuring_tool.start("all_to_all_strings_init_container");
-        container.update(
-            std::move(recv_buf_char),
-            std::move(recv_buf_lcp),
-            make_initializer<StringIndex>(std::move(recv_buf_index)),
-            make_initializer<PEIndex>(std::move(recv_buf_rank))
-        );
-        measuring_tool.stop("all_to_all_strings_init_container");
+        using SendImpl = PermutationSendImpl<Permutation>;
+        constexpr auto send = SendImpl::template send<config, StringSet, Communicator>;
+        send(container, recv_buf_char, recv_buf_lcp, send_counts, recv_counts, comm);
     }
 };
 
 } // namespace _internal
 
-// template <bool compress_lcps, bool compress_prefixes, typename AllToAllPolicy>
 template <typename Comm>
 class AlltoallStringsPlugin : public kamping::plugins::PluginBase<Comm, AlltoallStringsPlugin> {
 public:
-    template <AlltoallStringsConfig config, typename StringSet>
+    template <AlltoallStringsConfig config, typename Permutation, typename StringSet>
     void alltoall_strings(
         StringLcpContainer<StringSet>& container, std::vector<size_t> const& send_counts
     ) const {
@@ -281,19 +335,20 @@ public:
         container.delete_raw_strings();
         measuring_tool.stop("all_to_all_strings_write_send_buf");
 
+        measuring_tool.start("all_to_all_strings_alltoallv");
         auto const& comm = this->to_communicator();
-        using SendImpl = _internal::StringSetSendImpl<config, StringSet, Comm>;
-        SendImpl::alltoallv(container, send_buf_char, send_counts_char, send_counts, comm);
+        using SendImpl = _internal::StringSetSendImpl<StringSet, Permutation>;
+        constexpr auto alltoallv = SendImpl::template alltoallv<config, Comm>;
+        alltoallv(container, send_buf_char, send_counts_char, send_counts, comm);
+        measuring_tool.stop("all_to_all_strings_alltoallv");
     }
 
-    template <AlltoallStringsConfig config, typename StringSet>
+    template <AlltoallStringsConfig config, typename Permutation, typename StringSet>
     void alltoall_strings(
         StringLcpContainer<StringSet>& container,
         std::vector<size_t> const& send_counts,
         std::span<size_t const> prefixes
-    ) const
-        requires(PermutationStringSet<StringSet>)
-    {
+    ) const {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
         measuring_tool.start("all_to_all_strings_write_send_buf");
@@ -303,9 +358,12 @@ public:
         container.delete_raw_strings();
         measuring_tool.stop("all_to_all_strings_write_send_buf");
 
+        measuring_tool.start("all_to_all_strings_alltoallv");
         auto const& comm = this->to_communicator();
-        using SendImpl = _internal::StringSetSendImpl<config, StringSet, Comm>;
-        SendImpl::alltoallv(container, send_buf_char, send_counts_char, send_counts, comm);
+        using SendImpl = _internal::StringSetSendImpl<StringSet, Permutation>;
+        constexpr auto alltoallv = SendImpl::template alltoallv<config, Comm>;
+        alltoallv(container, send_buf_char, send_counts_char, send_counts, comm);
+        measuring_tool.stop("all_to_all_strings_alltoallv");
     }
 };
 

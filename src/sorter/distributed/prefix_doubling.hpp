@@ -53,11 +53,12 @@ protected:
         return prefixes;
     }
 
-    template <PermutationStringSet StringSet>
+    template <PermutationStringSet StringSet, typename PermutationBuilder>
     void sort(
         StringLcpContainer<StringSet>& container,
         Subcommunicators const& comms,
-        std::span<size_t const> dist_prefixes
+        std::span<size_t const> dist_prefixes,
+        PermutationBuilder& builder
     ) {
         auto const& comm_root = comms.comm_root();
 
@@ -68,7 +69,7 @@ protected:
             auto const& comm = comms.comm_final();
             auto const strptr = container.make_string_lcp_ptr();
             auto const send_counts = Base::compute_sorted_send_counts(strptr, arg, comm);
-            Base::exchange_and_merge(container, send_counts, arg, comm);
+            Base::exchange_and_merge(container, send_counts, arg, builder, comm);
             this->measuring_tool_.stop("sort_globally", "final_sorting", comm_root);
             this->measuring_tool_.setRound(0);
             return;
@@ -82,9 +83,10 @@ protected:
                 this->measuring_tool_.start("sort_globally", "partial_sorting");
                 sample::DistPrefixes const arg{dist_prefixes};
                 auto const level = *level_it++;
+                auto const& comm = level.comm_exchange;
                 auto const strptr = container.make_string_lcp_ptr();
                 auto const send_counts = Base::compute_sorted_send_counts(strptr, arg, level);
-                Base::exchange_and_merge(container, send_counts, arg, level.comm_exchange);
+                Base::exchange_and_merge(container, send_counts, arg, builder, comm);
                 this->measuring_tool_.stop("sort_globally", "partial_sorting", comm_root);
                 this->measuring_tool_.setRound(++round);
             }
@@ -94,9 +96,10 @@ protected:
                 this->measuring_tool_.start("sort_globally", "partial_sorting");
                 sample::NoExtraArg const arg;
                 auto const level = *level_it;
+                auto const& comm = level.comm_exchange;
                 auto const strptr = container.make_string_lcp_ptr();
                 auto const send_counts = Base::compute_sorted_send_counts(strptr, arg, level);
-                Base::exchange_and_merge(container, send_counts, arg, level.comm_exchange);
+                Base::exchange_and_merge(container, send_counts, arg, builder, comm);
                 this->measuring_tool_.stop("sort_globally", "partial_sorting", comm_root);
                 this->measuring_tool_.setRound(++round);
             }
@@ -108,7 +111,7 @@ protected:
                 auto const& comm = comms.comm_final();
                 auto const strptr = container.make_string_lcp_ptr();
                 auto const send_counts = Base::compute_sorted_send_counts(strptr, arg, comm);
-                Base::exchange_and_merge(container, send_counts, arg, comm);
+                Base::exchange_and_merge(container, send_counts, arg, builder, comm);
                 this->measuring_tool_.stop("sort_globally", "final_sorting", comm_root);
                 this->measuring_tool_.setRound(0);
             }
@@ -117,10 +120,11 @@ protected:
         }
     }
 
-    template <PermutationStringSet StringSet>
-    InputPermutation write_permutation(StringSet const& ss) {
+    template <PermutationStringSet StringSet, typename PermutationBuilder>
+    typename PermutationBuilder::Permutation
+    write_permutation(StringSet const& ss, PermutationBuilder& builder) {
         this->measuring_tool_.start("write_permutation");
-        InputPermutation const permutation{ss};
+        auto const permutation = builder.build(ss);
         this->measuring_tool_.stop("write_permutation");
 
         this->measuring_tool_.setPhase("none");
@@ -128,11 +132,59 @@ protected:
     }
 };
 
+namespace _internal {
+
+template <typename Permutation>
+class SimplePermutationBuilder;
+
+template <>
+class SimplePermutationBuilder<InputPermutation> {
+public:
+    using Permutation = InputPermutation;
+
+    template <PermutationStringSet StringSet>
+    explicit SimplePermutationBuilder(StringSet const& ss) {}
+
+    template <PermutationStringSet StringSet>
+    void push(StringSet const& ss) {}
+
+    template <PermutationStringSet StringSet>
+    Permutation build(StringSet const& ss) {
+        return Permutation{ss};
+    }
+};
+
+template <>
+class SimplePermutationBuilder<MultiLevelPermutation> {
+public:
+    using Permutation = MultiLevelPermutation;
+
+    template <PermutationStringSet StringSet>
+    explicit SimplePermutationBuilder(StringSet const& ss) : permutation_{ss} {}
+
+    template <PermutationStringSet StringSet>
+    void push(StringSet const& ss) {
+        permutation_.push_level(ss);
+    }
+
+    template <PermutationStringSet StringSet>
+    Permutation build(StringSet const& ss) {
+        return std::move(permutation_);
+    }
+
+private:
+    MultiLevelPermutation permutation_;
+};
+
+} // namespace _internal
+
+
 template <
     AlltoallStringsConfig config,
     typename RedistributionPolicy,
     typename PartitionPolicy,
-    typename BloomFilter>
+    typename BloomFilter,
+    typename Permutation>
 class PrefixDoublingMergeSort : private BasePrefixDoublingMergeSort<
                                     config,
                                     RedistributionPolicy,
@@ -147,7 +199,7 @@ public:
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
 
     template <typename StringSet>
-    InputPermutation sort(StringLcpContainer<StringSet>&& container, Subcommunicators const& comms)
+    Permutation sort(StringLcpContainer<StringSet>&& container, Subcommunicators const& comms)
         requires(!has_permutation_members<StringSet>)
     {
         this->measuring_tool_.start("augment_container");
@@ -159,8 +211,7 @@ public:
     }
 
     template <PermutationStringSet StringSet>
-    InputPermutation
-    sort(StringLcpContainer<StringSet>&& container, Subcommunicators const& comms) {
+    Permutation sort(StringLcpContainer<StringSet>&& container, Subcommunicators const& comms) {
         this->measuring_tool_.setPhase("local_sorting");
 
         auto const strptr = container.make_string_lcp_ptr();
@@ -170,15 +221,15 @@ public:
         tlx::sort_strings_detail::radixsort_CI3(strptr, 0, 0);
         this->measuring_tool_.stop("local_sorting", "sort_locally", comms.comm_root());
 
-        if (comms.comm_root().size() == 1) {
-            return Base::write_permutation(strptr.active());
-        } else {
-            auto const prefixes = Base::run_bloom_filter(strptr, comms, start_depth);
-            Base::sort(container, comms, prefixes);
+        _internal::SimplePermutationBuilder<Permutation> builder{strptr.active()};
 
+        if (comms.comm_root().size() != 1) {
+            auto const prefixes = Base::run_bloom_filter(strptr, comms, start_depth);
+            Base::sort(container, comms, prefixes, builder);
             this->measuring_tool_.setRound(0);
-            return Base::write_permutation(container.make_string_set());
         }
+
+        return Base::write_permutation(container.make_string_set(), builder);
     }
 
 private:

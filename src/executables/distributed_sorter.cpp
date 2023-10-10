@@ -184,11 +184,13 @@ void run_prefix_doubling(
     constexpr auto alltoall_config = AlltoallConfig();
     using StringSet = dss_mehnert::StringSet<CharType, dss_mehnert::Length>;
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
+    using Permutation = dss_mehnert::InputPermutation;
     using MergeSort = dss_mehnert::sorter::PrefixDoublingMergeSort<
         alltoall_config,
         RedistributionPolicy,
         PartitionPolicy,
-        BloomFilterPolicy>;
+        BloomFilterPolicy,
+        Permutation>;
 
     using dss_mehnert::measurement::MeasuringTool;
     auto& measuring_tool = MeasuringTool::measuringTool();

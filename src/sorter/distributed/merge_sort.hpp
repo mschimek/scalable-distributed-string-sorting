@@ -27,6 +27,7 @@
 #include "mpi/alltoall_strings.hpp"
 #include "sorter/distributed/merging.hpp"
 #include "sorter/distributed/multi_level.hpp"
+#include "sorter/distributed/permutation.hpp"
 #include "sorter/distributed/sample.hpp"
 #include "util/measuringTool.hpp"
 
@@ -93,13 +94,16 @@ protected:
         return send_counts;
     }
 
-    template <typename StringSet, typename ExtraArg>
+    template <typename StringSet, typename ExtraArg, typename PermutationBuilder>
     void exchange_and_merge(
         StringLcpContainer<StringSet>& container,
         std::vector<size_t> const& send_counts,
         ExtraArg const extra_arg,
+        PermutationBuilder& builder,
         Communicator const& comm
     ) {
+        using Permutation = PermutationBuilder::Permutation;
+
         assert_equal(send_counts.size(), comm.size());
         measuring_tool_.start("sort_globally", "exchange_and_merge");
 
@@ -108,9 +112,10 @@ protected:
         auto recv_counts = comm.alltoall(kamping::send_buf(send_counts)).extract_recv_buffer();
 
         if constexpr (std::is_same_v<sample::DistPrefixes, ExtraArg>) {
-            comm.template alltoall_strings<config>(container, send_counts, extra_arg.prefixes);
+            auto const& prefixes = extra_arg.prefixes;
+            comm.template alltoall_strings<config, Permutation>(container, send_counts, prefixes);
         } else {
-            comm.template alltoall_strings<config>(container, send_counts);
+            comm.template alltoall_strings<config, Permutation>(container, send_counts);
         };
         measuring_tool_.stop("all_to_all_strings");
 
@@ -137,6 +142,7 @@ protected:
         measuring_tool_.start("merge_ranges");
         constexpr bool is_compressed = config.compress_prefixes;
         auto const result = merge::choose_merge<is_compressed>(container, offsets, recv_counts);
+        builder.push(container.make_string_set());
         measuring_tool_.stop("merge_ranges");
 
         measuring_tool_.start("prefix_decompression");
@@ -149,6 +155,18 @@ protected:
         measuring_tool_.stop("sort_globally", "exchange_and_merge");
     }
 };
+
+namespace _internal {
+
+class DummyPermutationBuilder {
+public:
+    using Permutation = NoPermutation;
+
+    template <typename StringSet>
+    void push(StringSet const& ss) {}
+};
+
+} // namespace _internal
 
 template <AlltoallStringsConfig config, typename RedistributionPolicy, typename PartitionPolicy>
 class DistributedMergeSort
@@ -177,20 +195,22 @@ public:
             this->measuring_tool_.stop("local_sorting", "sort_locally", comm_root);
         }
 
+        _internal::DummyPermutationBuilder builder;
         if (comm_root.size() > 1) {
             this->measuring_tool_.start("avg_lcp");
             auto const avg_lcp = compute_global_lcp_average(container.lcps(), comm_root);
 
-            // todo this formula is somewhat questionable
+            // todo this formula is highly questionable
             sample::MaxLength arg{2 * avg_lcp + 8};
             this->measuring_tool_.stop("avg_lcp");
 
             if constexpr (!Subcommunicators::is_single_level) {
                 for (size_t round = 0; auto level: comms) {
                     this->measuring_tool_.start("sort_globally", "partial_sorting");
+                    auto const& comm = level.comm_exchange;
                     auto const strptr = container.make_string_lcp_ptr();
                     auto const send_counts = Base::compute_sorted_send_counts(strptr, arg, level);
-                    Base::exchange_and_merge(container, send_counts, arg, level.comm_exchange);
+                    Base::exchange_and_merge(container, send_counts, arg, builder, comm);
                     this->measuring_tool_.stop("sort_globally", "partial_sorting", comm_root);
                     this->measuring_tool_.setRound(++round);
                 }
@@ -201,7 +221,7 @@ public:
                 auto const strptr = container.make_string_lcp_ptr();
                 auto const& comm = comms.comm_final();
                 auto const send_counts = Base::compute_sorted_send_counts(strptr, arg, comm);
-                Base::exchange_and_merge(container, send_counts, arg, comm);
+                Base::exchange_and_merge(container, send_counts, arg, builder, comm);
                 this->measuring_tool_.stop("sort_globally", "final_sorting", comm_root);
             }
 

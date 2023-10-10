@@ -18,6 +18,7 @@
 #include "strings/stringcontainer.hpp"
 #include "strings/stringset.hpp"
 
+// todo might want to put this into a nested namespace
 namespace dss_mehnert {
 
 template <typename StringSet>
@@ -48,6 +49,8 @@ augment_string_container(StringLcpContainer<StringSet>&& container, size_t const
 
     return {container.release_raw_strings(), std::move(strings), container.release_lcps()};
 }
+
+class NoPermutation {};
 
 // todo rename (e.g. GlobalPermutation)
 class InputPermutation {
@@ -86,7 +89,6 @@ public:
     rank_type rank(size_type const n) const { return ranks_[n]; }
     index_type string(size_type const n) const { return strings_[n]; }
 
-    // todo not a fan of giving out vector references
     std::vector<rank_type>& ranks() { return ranks_; }
     std::vector<rank_type> const& ranks() const { return ranks_; }
     std::vector<index_type>& strings() { return strings_; }
@@ -95,19 +97,6 @@ public:
     void append(InputPermutation const& other) {
         ranks_.insert(ranks_.end(), other.ranks_.begin(), other.ranks_.end());
         strings_.insert(strings_.end(), other.strings_.begin(), other.strings_.end());
-    }
-
-    template <PermutationStringSet StringSet>
-    void append(StringSet const& ss) {
-        size_type offset = ranks_.size();
-        ranks_.resize(ranks_.size() + ss.size());
-        strings_.resize(strings_.size() + ss.size());
-
-        size_type i = offset;
-        for (auto it = ss.begin(); it != ss.end(); ++it, ++i) {
-            ranks_[i] = ss[it].getPEIndex();
-            strings_[i] = ss[it].getStringIndex();
-        }
     }
 
     template <typename Communicator>
@@ -153,14 +142,36 @@ public:
     using rank_type = std::size_t;
     using index_type = std::size_t;
 
-    MultiLevelPermutation() = default;
+    MultiLevelPermutation() = delete;
 
     template <PermutationStringSet StringSet>
-    explicit MultiLevelPermutation(StringSet const& ss) : local_permutation_(ss.size()) {
+    explicit MultiLevelPermutation(StringSet const& ss, size_type const num_levels = 0)
+        : local_permutation_(ss.size()),
+          remote_permutations_(num_levels) {
         auto dst = local_permutation_.begin();
         for (auto src = ss.begin(); src != ss.end(); ++src, ++dst) {
             *dst = ss[src].getStringIndex();
         }
+    }
+
+    template <PermutationStringSet StringSet>
+    void push_level(StringSet const& ss) {
+        auto dst = remote_permutations_.emplace_back(ss.size()).begin();
+        for (auto src = ss.begin(); src != ss.end(); ++src, ++dst) {
+            *dst = ss[src].getPEIndex();
+        }
+    }
+
+    size_type depth() const { return remote_permutations_.size(); }
+
+    std::vector<index_type> const& local_permutation() const { return local_permutation_; }
+    std::vector<index_type>& local_permutation() { return local_permutation_; }
+
+    std::vector<rank_type> const& remote_permutation(size_type const n) const {
+        return remote_permutations_[n];
+    }
+    std::vector<rank_type>& remote_permutation(size_type const n) {
+        return remote_permutations_[n];
     }
 
     template <typename Subcommunicators>
