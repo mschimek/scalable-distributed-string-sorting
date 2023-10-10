@@ -193,18 +193,17 @@ inline RecvData send_hash_values(
     std::exclusive_scan(interval_sizes.begin(), interval_sizes.end(), offsets.begin(), 0);
     assert_equal(offsets.back() + interval_sizes.back(), std::ssize(hashes));
 
-    auto offset_result = comm.alltoall(kamping::send_buf(offsets));
-    auto result = comm.alltoallv(
+    RecvData recv_data;
+    comm.alltoall(kamping::send_buf(offsets), kamping::recv_buf(recv_data.global_offsets));
+    comm.alltoallv(
         kamping::send_buf(hashes),
         kamping::send_counts(interval_sizes),
-        kamping::send_displs(offsets)
+        kamping::send_displs(offsets),
+        kamping::recv_buf(recv_data.hashes),
+        kamping::recv_counts_out(recv_data.interval_sizes),
+        kamping::recv_displs_out(recv_data.local_offsets)
     );
-
-    return {
-        .hashes = result.extract_recv_buffer(),
-        .interval_sizes = result.extract_recv_counts(),
-        .local_offsets = result.extract_recv_displs(),
-        .global_offsets = offset_result.extract_recv_buffer()};
+    return recv_data;
 }
 
 inline RemoteDuplicates compute_duplicates(

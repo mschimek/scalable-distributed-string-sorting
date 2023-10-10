@@ -111,6 +111,9 @@ protected:
         measuring_tool_.start("all_to_all_strings");
         auto recv_counts = comm.alltoall(kamping::send_buf(send_counts)).extract_recv_buffer();
 
+        // todo do this conversion to in earlier
+        std::vector<int> recv_counts_int{recv_counts.begin(), recv_counts.end()};
+
         if constexpr (std::is_same_v<sample::DistPrefixes, ExtraArg>) {
             auto const& prefixes = extra_arg.prefixes;
             comm.template alltoall_strings<config, Permutation>(
@@ -151,7 +154,7 @@ protected:
         measuring_tool_.start("merge_ranges");
         constexpr bool is_compressed = config.compress_prefixes;
         auto const result = merge::choose_merge<is_compressed>(container, offsets, recv_counts);
-        builder.push(container.make_string_set());
+        builder.push(container.make_string_set(), std::move(recv_counts_int));
         measuring_tool_.stop("merge_ranges");
 
         measuring_tool_.start("prefix_decompression");
@@ -172,7 +175,7 @@ public:
     using Permutation = NoPermutation;
 
     template <typename StringSet>
-    void push(StringSet const& ss) {}
+    void push(StringSet const& ss, std::vector<int>) {}
 };
 
 } // namespace _internal

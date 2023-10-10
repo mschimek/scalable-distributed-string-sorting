@@ -135,27 +135,34 @@ inline std::ostream& operator<<(std::ostream& stream, InputPermutation const& pe
 class MultiLevelPermutation {
 public:
     using size_type = std::size_t;
-    using rank_type = std::size_t;
+
+    using rank_type = int;
     using index_type = std::size_t;
+
+    struct RemotePermutation {
+        std::vector<rank_type> ranks;
+        std::vector<int> counts;
+        std::vector<int> offsets;
+    };
 
     MultiLevelPermutation() = delete;
 
     template <PermutationStringSet StringSet>
-    explicit MultiLevelPermutation(StringSet const& ss, size_type const num_levels = 0)
-        : local_permutation_(ss.size()),
-          remote_permutations_(num_levels) {
-        auto dst = local_permutation_.begin();
-        for (auto src = ss.begin(); src != ss.end(); ++src, ++dst) {
-            *dst = ss[src].getStringIndex();
+    explicit MultiLevelPermutation(StringSet const& ss) : local_permutation_(ss.size()) {
+        for (auto src = ss.begin(); auto& dst: local_permutation_) {
+            dst = ss[src].getStringIndex();
         }
     }
 
     template <PermutationStringSet StringSet>
-    void push_level(StringSet const& ss) {
-        auto dst = remote_permutations_.emplace_back(ss.size()).begin();
-        for (auto src = ss.begin(); src != ss.end(); ++src, ++dst) {
-            *dst = ss[src].getPEIndex();
+    void push_level(StringSet const& ss, std::vector<int> counts) {
+        std::vector<int> ranks(ss.size()), offsets(ss.size());
+        std::exclusive_scan(counts.begin(), counts.end(), offsets.begin(), 0);
+
+        for (auto src = ss.begin(); auto& dst: ranks) {
+            dst = ss[src++].getPEIndex();
         }
+        remote_permutations_.emplace_back(std::move(ranks), std::move(counts), std::move(offsets));
     }
 
     size_type depth() const { return remote_permutations_.size(); }
@@ -163,12 +170,10 @@ public:
     std::vector<index_type> const& local_permutation() const { return local_permutation_; }
     std::vector<index_type>& local_permutation() { return local_permutation_; }
 
-    std::vector<rank_type> const& remote_permutation(size_type const n) const {
+    RemotePermutation const& remote_permutation(size_type const n) const {
         return remote_permutations_[n];
     }
-    std::vector<rank_type>& remote_permutation(size_type const n) {
-        return remote_permutations_[n];
-    }
+    RemotePermutation& remote_permutation(size_type const n) { return remote_permutations_[n]; }
 
     template <typename Subcommunicators>
     std::vector<size_t> to_global_permutation(
@@ -183,45 +188,41 @@ public:
         assert_equal(std::distance(comms.begin(), comms.end()) + 1, remote_permutations_.size());
         assert(comm_root.is_same_on_all_ranks(global_rank_offset));
 
-        index_type const local_rank_offset = comm_root.exscan_single(
-            kamping::send_buf(remote_permutations_.back().size()),
-            kamping::op(std::plus<>{})
-        );
-        index_type const rank_offset = global_rank_offset + local_rank_offset;
-
         std::vector<index_type> send_buf, recv_buf;
-        std::vector<int> counts, offsets;
+        std::vector<rank_type> temp_offsets;
 
         auto level_it = comms.rbegin();
         for (auto it = remote_permutations_.rbegin(); it != remote_permutations_.rend(); ++it) {
-            auto const& ranks = *it;
+            auto const& [ranks, counts, offsets] = *it;
 
             bool const is_first = level_it == comms.rbegin();
             bool const is_final = level_it == comms.rend();
             auto const& comm = is_final ? comm_root : (level_it++)->comm_group;
 
-            counts.clear(), counts.resize(comm.size());
-            std::for_each(ranks.begin(), ranks.end(), [&](auto const rank) { ++counts[rank]; });
-
-            offsets.resize(comm.size());
-            std::exclusive_scan(counts.begin(), counts.end(), offsets.begin(), 0);
-
             assert_equal(ranks.size(), recv_buf.size());
             send_buf.resize(ranks.size());
 
+            temp_offsets = offsets;
             if (is_first) {
+                index_type const local_rank_offset = comm_root.exscan_single(
+                    kamping::send_buf(ranks.size()),
+                    kamping::op(std::plus<>{})
+                );
+                index_type const rank_offset = global_rank_offset + local_rank_offset;
+
                 for (size_type i = 0; i != ranks.size(); ++i) {
-                    send_buf[offsets[ranks[i]]++] = rank_offset + i;
+                    send_buf[temp_offsets[ranks[i]]++] = rank_offset + i;
                 }
             } else {
                 for (size_type i = 0; i != ranks.size(); ++i) {
-                    send_buf[offsets[ranks[i]]++] = recv_buf[i];
+                    send_buf[temp_offsets[ranks[i]]++] = recv_buf[i];
                 }
             }
 
             comm.alltoallv(
                 kamping::send_buf(send_buf),
                 kamping::send_counts(counts),
+                kamping::send_displs(offsets),
                 kamping::recv_buf(recv_buf)
             );
         }
@@ -235,16 +236,9 @@ public:
         return send_buf;
     }
 
-    // todo
-    struct RemotePermutation {
-        std::vector<rank_type> ranks;
-        std::vector<int> counts;
-        std::vector<int> offsets;
-    };
-
 private:
     std::vector<index_type> local_permutation_;
-    std::vector<std::vector<rank_type>> remote_permutations_;
+    std::vector<RemotePermutation> remote_permutations_;
 };
 
 } // namespace dss_mehnert

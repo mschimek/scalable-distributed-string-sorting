@@ -146,7 +146,7 @@ public:
     explicit SimplePermutationBuilder(StringSet const& ss) {}
 
     template <PermutationStringSet StringSet>
-    void push(StringSet const& ss) {}
+    void push(StringSet const& ss, std::vector<int>) {}
 
     template <PermutationStringSet StringSet>
     Permutation build(StringSet const& ss) {
@@ -163,8 +163,8 @@ public:
     explicit SimplePermutationBuilder(StringSet const& ss) : permutation_{ss} {}
 
     template <PermutationStringSet StringSet>
-    void push(StringSet const& ss) {
-        permutation_.push_level(ss);
+    void push(StringSet const& ss, std::vector<int> counts) {
+        permutation_.push_level(ss, std::move(counts));
     }
 
     template <PermutationStringSet StringSet>
