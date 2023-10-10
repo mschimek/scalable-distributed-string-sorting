@@ -50,7 +50,8 @@ public:
           quantile_size_{quantile_size} {}
 
     template <typename StringSet>
-    InputPermutation sort(StringLcpContainer<StringSet>&& container, Subcommunicators const& comms)
+    std::vector<size_t>
+    sort(StringLcpContainer<StringSet>&& container, Subcommunicators const& comms)
         requires(!PermutationStringSet<StringSet>)
     {
         this->measuring_tool_.start("augment_container");
@@ -62,14 +63,14 @@ public:
     }
 
     template <PermutationStringSet StringSet>
-    InputPermutation
+    std::vector<size_t>
     sort(StringLcpContainer<StringSet>&& container, Subcommunicators const& comms) {
+        namespace kmp = kamping;
+
         auto const strptr = container.make_string_lcp_ptr();
         auto const& comm_root = comms.comm_root();
 
         this->measuring_tool_.setPhase("local_sorting");
-
-        // todo debug total size of strings
         this->measuring_tool_.add(container.char_size(), "chars_in_set");
 
         this->measuring_tool_.start("local_sorting", "sort_locally");
@@ -78,13 +79,14 @@ public:
 
         if (comm_root.size() == 1) {
             this->measuring_tool_.start("write_permutation");
-            InputPermutation const permutation{strptr.active()};
+            InputPermutation permutation{strptr.active()};
             this->measuring_tool_.stop("write_permutation");
 
             this->measuring_tool_.setPhase("none");
-            return permutation;
+            return std::move(permutation.strings());
         }
 
+        // _internal::SpaceEfficientPermutationBuilder<Permutation> builder{strptr.active()};
         auto const prefixes = Base::run_bloom_filter(strptr, comms, start_depth);
 
         this->measuring_tool_.start("compute_quantiles", "compute_quantiles");
@@ -93,15 +95,14 @@ public:
         this->measuring_tool_.stop("compute_quantiles", "compute_quantiles");
 
         this->measuring_tool_.start("sort_quantiles", "sort_quantiles_overall");
-        InputPermutation full_permutation;
-        full_permutation.reserve(strptr.size());
+        std::vector<size_t> global_permutation(strptr.size());
 
-        for (size_t i = 0, offset = 0; i != quantile_sizes.size(); ++i) {
+        for (size_t i = 0, local_offset = 0, global_offset = 0; i != quantile_sizes.size(); ++i) {
             this->measuring_tool_.setQuantile(i);
             this->measuring_tool_.start("sort_globally", "sort_quantile");
             auto const size = quantile_sizes[i];
-            auto const quantile = strptr.sub(offset, size);
-            std::span const quantile_prefixes{prefixes.begin() + offset, size};
+            auto const quantile = strptr.sub(local_offset, size);
+            std::span const quantile_prefixes{prefixes.begin() + local_offset, size};
 
             // note that this container is not `consistent`, in the sense that
             // it does not own the characters pointed to by its strings
@@ -113,19 +114,29 @@ public:
             auto const quantile_size_chars = quantile.active().get_sum_length();
             this->measuring_tool_.add(quantile_size_chars, "quantile_size");
 
+            _internal::SimplePermutationBuilder<InputPermutation> builder{quantile.active()};
             this->measuring_tool_.disable();
-            Base::sort(quantile_container, comms, quantile_prefixes);
-            full_permutation.append(quantile_container.make_string_set());
+            Base::sort(quantile_container, comms, quantile_prefixes, builder);
             this->measuring_tool_.enable();
-
+            auto const permutation = builder.build(quantile_container.make_string_set());
             this->measuring_tool_.stop("sort_globally", "sort_quantile");
-            offset += size;
+
+            this->measuring_tool_.start("sort_globally", "compute_permutation");
+            auto const mapping = permutation.map_to_global_indices(global_offset, comm_root);
+            for (auto const& [local_index, global_index]: mapping) {
+                global_permutation[local_index] = global_index;
+            }
+            this->measuring_tool_.stop("sort_globally", "compute_permutation");
+
+            local_offset += size;
+            global_offset +=
+                comm_root.allreduce_single(kmp::send_buf(size), kmp::op(std::plus<>{}));
         }
 
         this->measuring_tool_.setQuantile(0);
         this->measuring_tool_.stop("sort_quantiles", "sort_quantiles_overall");
 
-        return full_permutation;
+        return global_permutation;
     }
 
 private:

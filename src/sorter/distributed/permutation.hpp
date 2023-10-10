@@ -52,7 +52,6 @@ augment_string_container(StringLcpContainer<StringSet>&& container, size_t const
 
 class NoPermutation {};
 
-// todo rename (e.g. GlobalPermutation)
 class InputPermutation {
 public:
     using size_type = std::size_t;
@@ -100,28 +99,25 @@ public:
     }
 
     template <typename Communicator>
-    std::vector<index_type> to_global_permutation(Communicator const& comm) const {
+    std::vector<std::array<index_type, 2>>
+    map_to_global_indices(index_type const global_rank_offset, Communicator const& comm) const {
         namespace kmp = kamping;
 
         std::vector<int> counts(comm.size()), offsets(comm.size());
         std::for_each(ranks_.begin(), ranks_.end(), [&](auto const rank) { ++counts[rank]; });
         std::exclusive_scan(counts.begin(), counts.end(), offsets.begin(), 0);
 
-        index_type const local_offset =
+        index_type const local_rank_offset =
             comm.exscan_single(kmp::send_buf(size()), kmp::op(std::plus<>{}));
+        index_type const rank_offset = global_rank_offset + local_rank_offset;
 
         std::vector<std::array<index_type, 2>> send_buf(size()), recv_buf;
         for (size_type i = 0; i != size(); ++i) {
-            send_buf[offsets[ranks_[i]]++] = {strings_[i], local_offset + i};
+            send_buf[offsets[ranks_[i]]++] = {strings_[i], rank_offset + i};
         }
 
-        comm.alltoallv(kmp::send_buf(send_buf), kmp::send_counts(counts), kmp::recv_buf(recv_buf));
-
-        std::vector<index_type> final_permutation(recv_buf.size());
-        for (auto const& [local_index, global_index]: recv_buf) {
-            final_permutation[local_index] = global_index;
-        }
-        return final_permutation;
+        return comm.alltoallv(kmp::send_buf(send_buf), kmp::send_counts(counts))
+            .extract_recv_buffer();
     }
 
 private:
@@ -175,17 +171,23 @@ public:
     }
 
     template <typename Subcommunicators>
-    std::vector<size_t> to_global_permutation(Subcommunicators const& comms) const {
+    std::vector<size_t> to_global_permutation(
+        index_type const global_rank_offset, Subcommunicators const& comms
+    ) const {
         // this function only works for full permutations, not parts thereof
+        auto const& comm_root = comms.comm_root();
+        if (comm_root.size() == 1) {
+            return local_permutation_;
+        }
 
         assert_equal(std::distance(comms.begin(), comms.end()) + 1, remote_permutations_.size());
-        auto const& comm_root = comms.comm_root();
+        assert(comm_root.is_same_on_all_ranks(rank_offset));
 
-        assert(!remote_permutations_.empty());
-        index_type const local_offset = comm_root.exscan_single(
+        index_type const local_rank_offset = comm_root.exscan_single(
             kamping::send_buf(remote_permutations_.back().size()),
             kamping::op(std::plus<>{})
         );
+        index_type const rank_offset = global_rank_offset + local_rank_offset;
 
         std::vector<index_type> send_buf, recv_buf;
         std::vector<int> counts, offsets;
@@ -209,7 +211,7 @@ public:
 
             if (is_first) {
                 for (size_type i = 0; i != ranks.size(); ++i) {
-                    send_buf[offsets[ranks[i]]++] = local_offset + i;
+                    send_buf[offsets[ranks[i]]++] = rank_offset + i;
                 }
             } else {
                 for (size_type i = 0; i != ranks.size(); ++i) {
