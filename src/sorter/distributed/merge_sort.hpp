@@ -113,14 +113,23 @@ protected:
 
         if constexpr (std::is_same_v<sample::DistPrefixes, ExtraArg>) {
             auto const& prefixes = extra_arg.prefixes;
-            comm.template alltoall_strings<config, Permutation>(container, send_counts, prefixes);
+            comm.template alltoall_strings<config, Permutation>(
+                container,
+                send_counts,
+                recv_counts,
+                prefixes
+            );
         } else {
-            comm.template alltoall_strings<config, Permutation>(container, send_counts);
+            comm.template alltoall_strings<config, Permutation>(
+                container,
+                send_counts,
+                recv_counts
+            );
         };
         measuring_tool_.stop("all_to_all_strings");
 
-        auto size_strings = container.size();
-        auto size_chars = container.char_size() - size_strings;
+        auto const size_strings = container.size();
+        auto const size_chars = container.char_size() - size_strings;
         measuring_tool_.add(size_strings, "local_num_strings");
         measuring_tool_.add(size_chars, "local_num_chars");
 

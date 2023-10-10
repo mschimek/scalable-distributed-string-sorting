@@ -253,6 +253,7 @@ public:
         std::vector<typename StringSet::Char>& send_buf_char,
         std::vector<size_t> const& send_counts_char,
         std::vector<size_t> const& send_counts,
+        std::vector<size_t> const& recv_counts,
         Communicator const& comm
     ) {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
@@ -263,8 +264,6 @@ public:
         send_buf_char.clear();
         send_buf_char.shrink_to_fit();
         measuring_tool.stop("all_to_all_strings_send_chars");
-
-        auto recv_counts = comm.alltoall(kamping::send_buf(send_counts)).extract_recv_buffer();
 
         measuring_tool.start("all_to_all_strings_send_lcps");
         auto send_lcps = _internal::send_integers<config.compress_lcps, Communicator>;
@@ -291,6 +290,7 @@ public:
         std::vector<typename StringSet::Char>& send_buf_char,
         std::vector<size_t> const& send_counts_char,
         std::vector<size_t> const& send_counts,
+        std::vector<size_t> const& recv_counts,
         Communicator const& comm
     ) {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
@@ -301,8 +301,6 @@ public:
         send_buf_char.clear();
         send_buf_char.shrink_to_fit();
         measuring_tool.stop("all_to_all_strings_send_chars");
-
-        auto recv_counts = comm.alltoall(kamping::send_buf(send_counts)).extract_recv_buffer();
 
         // todo it would be possible to combine all three send_u64 calls ...
         measuring_tool.start("all_to_all_strings_send_lcps");
@@ -324,7 +322,9 @@ class AlltoallStringsPlugin : public kamping::plugins::PluginBase<Comm, Alltoall
 public:
     template <AlltoallStringsConfig config, typename Permutation, typename StringSet>
     void alltoall_strings(
-        StringLcpContainer<StringSet>& container, std::vector<size_t> const& send_counts
+        StringLcpContainer<StringSet>& container,
+        std::vector<size_t> const& send_counts,
+        std::vector<size_t> const& recv_counts
     ) const {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
@@ -339,7 +339,7 @@ public:
         auto const& comm = this->to_communicator();
         using SendImpl = _internal::StringSetSendImpl<StringSet, Permutation>;
         constexpr auto alltoallv = SendImpl::template alltoallv<config, Comm>;
-        alltoallv(container, send_buf_char, send_counts_char, send_counts, comm);
+        alltoallv(container, send_buf_char, send_counts_char, send_counts, recv_counts, comm);
         measuring_tool.stop("all_to_all_strings_alltoallv");
     }
 
@@ -347,6 +347,7 @@ public:
     void alltoall_strings(
         StringLcpContainer<StringSet>& container,
         std::vector<size_t> const& send_counts,
+        std::vector<size_t> const& recv_counts,
         std::span<size_t const> prefixes
     ) const {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
@@ -362,7 +363,7 @@ public:
         auto const& comm = this->to_communicator();
         using SendImpl = _internal::StringSetSendImpl<StringSet, Permutation>;
         constexpr auto alltoallv = SendImpl::template alltoallv<config, Comm>;
-        alltoallv(container, send_buf_char, send_counts_char, send_counts, comm);
+        alltoallv(container, send_buf_char, send_counts_char, send_counts, recv_counts, comm);
         measuring_tool.stop("all_to_all_strings_alltoallv");
     }
 };
