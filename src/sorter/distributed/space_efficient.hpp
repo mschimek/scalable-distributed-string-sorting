@@ -99,18 +99,22 @@ public:
 
         this->measuring_tool_.start("sort_quantiles", "sort_quantiles_overall");
 
-        // todo allow this to be selected externally through a template parameter
-        // _internal::SimplePermutationBuilder<InputPermutation> builder{strptr.active()};
-        _internal::SimplePermutationBuilder<MultiLevelPermutation> builder{strptr.active()};
-
         for (size_t i = 0, local_offset = 0, global_offset = 0; i != quantile_sizes.size(); ++i) {
             this->measuring_tool_.setQuantile(i);
             this->measuring_tool_.start("sort_globally", "quantile_overall");
-            this->measuring_tool_.start("sort_globally", "sort_quantile");
+
+            this->measuring_tool_.start("sort_quantiles", "init_permutation");
             auto const size = quantile_sizes[i];
             auto const quantile = strptr.sub(local_offset, size);
             std::span const quantile_prefixes{prefixes.begin() + local_offset, size};
 
+            // todo mabe construct this once per iteration (with only the relevant local
+            // permutation) todo allow this to be selected externally through a template parameter
+            // _internal::SimplePermutationBuilder<InputPermutation> builder{strptr.active()};
+            _internal::SimplePermutationBuilder<MultiLevelPermutation> builder{quantile.active()};
+            this->measuring_tool_.stop("sort_quantiles", "init_permutation");
+
+            this->measuring_tool_.start("sort_globally", "sort_quantile");
             // note that this container is not `consistent`, in the sense that
             // it does not own the characters pointed to by its strings
             StringLcpContainer<StringSet> quantile_container{
@@ -121,21 +125,20 @@ public:
             auto const quantile_size_chars = quantile.active().get_sum_length();
             this->measuring_tool_.add(quantile_size_chars, "quantile_size");
 
-            this->measuring_tool_.disable();
+            // this->measuring_tool_.disable();
             Base::sort(quantile_container, comms, quantile_prefixes, builder);
-            this->measuring_tool_.enable();
+            // this->measuring_tool_.enable();
             this->measuring_tool_.stop("sort_globally", "sort_quantile");
 
             this->measuring_tool_.start("sort_globally", "write_global_permutation");
-            auto const ss = quantile_container.make_string_set();
-            builder.apply(ss, global_permutation, local_offset, global_offset, comms);
-            builder.reset();
-            this->measuring_tool_.stop("sort_globally", "write_global_permutation");
+            auto const permutation = builder.build(quantile_container.make_string_set());
+            permutation.apply(global_permutation, global_offset, comms);
 
             local_offset += size;
             global_offset +=
                 comm_root.allreduce_single(kmp::send_buf(size), kmp::op(std::plus<>{}));
-            this->measuring_tool_.stop("sort_globally", "quantile_overall", comm_root);
+            this->measuring_tool_.stop("sort_globally", "write_global_permutation");
+            this->measuring_tool_.stop("sort_globally", "quantile_overall");
         }
 
         this->measuring_tool_.setQuantile(0);

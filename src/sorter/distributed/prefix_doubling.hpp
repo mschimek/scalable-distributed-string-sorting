@@ -148,24 +148,10 @@ public:
     template <PermutationStringSet StringSet>
     void push(StringSet const& ss, std::vector<int>) {}
 
-    template <typename StringSet, typename Subcommunicators>
-    void apply(
-        StringSet const& ss,
-        std::span<size_t> global_permutation,
-        size_t const local_offset [[maybe_unused]],
-        size_t const global_rank_offset,
-        Subcommunicators const& comms
-    ) {
-        Permutation const permutation{ss};
-        permutation.apply(global_permutation, global_rank_offset, comms.comm_root());
-    }
-
     template <PermutationStringSet StringSet>
     Permutation build(StringSet const& ss) {
         return Permutation{ss};
     }
-
-    void reset() {}
 };
 
 template <>
@@ -181,23 +167,10 @@ public:
         permutation_.push_level(ss, std::move(counts));
     }
 
-    template <typename StringSet, typename Subcommunicators>
-    void apply(
-        StringSet const& ss [[maybe_unused]],
-        std::span<size_t> global_permutation,
-        size_t const local_offset,
-        size_t const global_rank_offset,
-        Subcommunicators const& comms
-    ) {
-        permutation_.apply(global_permutation, local_offset, global_rank_offset, comms);
-    }
-
     template <PermutationStringSet StringSet>
     Permutation build(StringSet const& ss) {
         return std::move(permutation_);
     }
-
-    void reset() { permutation_.clear(); }
 
 private:
     MultiLevelPermutation permutation_;

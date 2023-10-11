@@ -89,14 +89,16 @@ public:
     std::vector<index_type>& strings() { return strings_; }
     std::vector<index_type> const& strings() const { return strings_; }
 
-    template <typename Communicator>
+    template <typename Subcommunicators>
     void apply(
         std::span<index_type> global_permutation,
         index_type const global_index_offset,
-        Communicator const& comm
+        Subcommunicators const& comms
     ) const {
         namespace kmp = kamping;
 
+        // todo don't really need to instantiate the permutation for this
+        auto const& comm = comms.comm_root();
         std::vector<int> counts(comm.size()), offsets(comm.size());
         std::for_each(ranks_.begin(), ranks_.end(), [&](auto const rank) { ++counts[rank]; });
         std::exclusive_scan(counts.begin(), counts.end(), offsets.begin(), 0);
@@ -167,7 +169,6 @@ public:
     template <typename Subcommunicators>
     void apply(
         std::span<index_type> global_permutation,
-        index_type const local_offset,
         index_type const global_index_offset,
         Subcommunicators const& comms
     ) const {
@@ -222,7 +223,7 @@ public:
             );
         }
 
-        for (size_t i = local_offset; auto const global_index: recv_buf) {
+        for (size_t i = 0; auto const global_index: recv_buf) {
             global_permutation[local_permutation_[i++]] = global_index;
         }
     }
