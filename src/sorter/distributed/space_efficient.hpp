@@ -95,7 +95,7 @@ public:
         this->measuring_tool_.start("compute_quantiles", "compute_quantiles");
         sample::DistPrefixes const arg{prefixes};
         auto const quantile_sizes = compute_quantiles(strptr, arg, comm_root);
-        this->measuring_tool_.stop("compute_quantiles", "compute_quantiles");
+        this->measuring_tool_.stop("compute_quantiles", "compute_quantiles", comm_root);
 
         this->measuring_tool_.start("sort_quantiles", "sort_quantiles_overall");
 
@@ -135,7 +135,7 @@ public:
             local_offset += size;
             global_offset +=
                 comm_root.allreduce_single(kmp::send_buf(size), kmp::op(std::plus<>{}));
-            this->measuring_tool_.stop("sort_globally", "quantile_overall");
+            this->measuring_tool_.stop("sort_globally", "quantile_overall", comm_root);
         }
 
         this->measuring_tool_.setQuantile(0);

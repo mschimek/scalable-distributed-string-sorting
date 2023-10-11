@@ -57,7 +57,6 @@ write_interval(unsigned char* buffer, StringSet const& ss, size_t const* lcps) {
         auto const str_len = ss.get_length(str);
         auto const actual_len = str_len - str_depth;
 
-        // todo this is using std::copy everywhere else
         memcpy(dest, ss.get_chars(str, str_depth), actual_len);
         dest += actual_len;
         *dest++ = 0;
@@ -186,11 +185,11 @@ public:
     ) {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
-        // todo does 7-bit compression make sense for PE and string indices
         measuring_tool.start("all_to_all_strings_send_idxs");
         InputPermutation permutation{container.make_string_set()};
         container.delete_all();
 
+        // todo does 7-bit compression make sense for PE and string indices
         auto const send_idxs = _internal::send_integers<config.compress_lcps, Communicator>;
         auto recv_buf_rank = send_idxs(permutation.ranks(), send_counts, recv_counts, comm);
         auto recv_buf_index = send_idxs(permutation.strings(), send_counts, recv_counts, comm);
@@ -221,12 +220,7 @@ public:
     ) {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
-        // todo does 7-bit compression make sense for PE and string indices
         measuring_tool.start("all_to_all_strings_send_idxs");
-        InputPermutation permutation{container.make_string_set()};
-        container.delete_all();
-
-
         measuring_tool.stop("all_to_all_strings_send_idxs");
 
         measuring_tool.start("all_to_all_strings_init_container");
