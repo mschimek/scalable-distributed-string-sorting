@@ -110,7 +110,7 @@ target_include_directories(dss_base PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(dss_base PRIVATE kamping)
 target_link_libraries(dss_base PUBLIC tlx)
 target_link_libraries(dss_base PRIVATE MPI::MPI_CXX)
-target_link_libraries(dss_base INTERFACE ips4o)
+target_link_libraries(dss_base PUBLIC ips4o)
 target_link_libraries(dss_base PUBLIC rbc)
 
 add_subdirectory(src)

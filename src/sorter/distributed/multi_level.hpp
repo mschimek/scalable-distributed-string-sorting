@@ -135,6 +135,7 @@ class NoSplit {
 public:
     using Communicator = Communicator_;
     using iterator = LevelIter<NoSplit<Communicator>, Communicator>;
+    using reverse_iterator = std::reverse_iterator<iterator>;
 
     static constexpr bool is_single_level = true;
 
@@ -149,6 +150,8 @@ public:
 
     iterator begin() const { return {*this, 0}; }
     iterator end() const { return {*this, 0}; }
+    reverse_iterator rbegin() const { return std::reverse_iterator(end()); }
+    reverse_iterator rend() const { return std::reverse_iterator(begin()); }
 
     Level<Communicator> level(size_t level) const { tlx_die("not implemented"); };
 
@@ -196,6 +199,7 @@ class GridwiseSplit {
 public:
     using Communicator = Communicator_;
     using iterator = LevelIter<GridwiseSplit<Communicator>, Communicator>;
+    using reverse_iterator = std::reverse_iterator<iterator>;
 
     static constexpr bool is_single_level = false;
     static constexpr std::string_view get_name() { return "grid_split"; }
@@ -206,6 +210,8 @@ public:
 
     iterator begin() const { return {*this, 0}; }
     iterator end() const { return {*this, cols_.comms.size()}; }
+    reverse_iterator rbegin() const { return std::reverse_iterator(end()); }
+    reverse_iterator rend() const { return std::reverse_iterator(begin()); }
 
     Communicator const& comm_root() const { return rows_.comms.front(); }
     Communicator const& comm_final() const { return rows_.comms.back(); }

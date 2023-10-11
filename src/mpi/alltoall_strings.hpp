@@ -233,9 +233,10 @@ public:
         container.update(std::move(recv_buf_char), std::move(recv_buf_lcp));
 
         // set PEIndex to indicate rank of origin PE
-        for (auto str = container.get_strings().begin(); auto const count: recv_counts) {
-            for (size_t i = 0; i != count; ++i) {
-                (*str++).PEIndex = i;
+        auto str = container.get_strings().begin();
+        for (size_t rank = 0; rank != recv_counts.size(); ++rank) {
+            for (size_t i = 0; i != recv_counts[rank]; ++i) {
+                (*str++).PEIndex = rank;
             }
         }
         measuring_tool.stop("all_to_all_strings_init_container");
