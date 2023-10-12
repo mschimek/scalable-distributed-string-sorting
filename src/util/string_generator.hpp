@@ -380,8 +380,9 @@ struct CompressedSuffixGenerator : public std::vector<typename StringSet::String
     CompressedSuffixGenerator(std::vector<Char>& chars, size_t const step = 1) {
         assert(step > 0);
 
-        for (auto it = chars.begin(); it < chars.end(); it += step) {
-            this->emplace_back(&*it, Length{static_cast<size_t>(chars.end() - it)});
+        for (size_t offset = 0; offset < chars.size(); offset += step) {
+            size_t const length = static_cast<size_t>(chars.size() - offset);
+            this->emplace_back(chars.data() + offset, Length{length});
         }
     }
 };
@@ -390,13 +391,11 @@ template <typename StringSet>
 struct CompressedWindowGenerator : public std::vector<typename StringSet::String> {
     using Char = StringSet::Char;
 
-    CompressedWindowGenerator(
-        std::vector<Char>& chars, size_t const length, size_t const step = 1
-    ) {
+    CompressedWindowGenerator(std::vector<Char>& chars, size_t const length, size_t const step) {
         assert(length > 0 && step > 0);
 
-        for (auto it = chars.begin(); it + length <= chars.end(); it += step) {
-            this->emplace_back(&*it, Length{length});
+        for (size_t offset = 0; offset + step <= chars.size(); offset += step) {
+            this->emplace_back(chars.data() + offset, Length{length});
         }
     }
 };
@@ -406,9 +405,12 @@ struct CompressedDifferenceCoverGenerator : public std::vector<typename StringSe
     using Char = StringSet::Char;
 
     CompressedDifferenceCoverGenerator(std::vector<Char>& chars, size_t const size) {
-        for (auto const& k: get_difference_cover(size)) {
-            for (auto it = chars.begin() + k; it < chars.end(); it += size) {
-                this->emplace_back(&*it, Length{std::min<size_t>(size, chars.end() - it)});
+        auto const difference_cover = get_difference_cover(size);
+        this->reserve((chars.size() / size + 1) * difference_cover.size());
+        for (auto const& k: difference_cover) {
+            for (size_t offset = k; offset < chars.size(); offset += size) {
+                auto const length = std::min<size_t>(size, chars.size() - offset);
+                this->emplace_back(chars.data() + offset, Length{length});
             }
         }
     }
@@ -424,30 +426,44 @@ private:
             case 31: { return {1, 2, 4, 9, 13, 19}; }
             case 32: { return {1, 2, 3, 4, 8, 12, 20}; }
             case 64: { return {1, 2, 3, 6, 15, 17, 35, 43, 60}; }
-            // case 128: {
-            //     return {};
-            // }
-            // case 256: {
-            //     return {};
-            // }
+            // todo case 128: { return {}; }
+            // todo case 256: { return {}; } 
+            // todo maybe generate these on the fly?
             case 512: {
-                return {0, 1, 2, 3, 4, 9, 18, 27, 36, 45, 64, 83, 102, 121, 140, 159,
-                        178, 197, 216, 226, 236, 246, 256, 266, 267, 268, 269, 270 };
+                return {0, 1, 2, 3, 4, 9, 18, 27, 36, 45, 64, 83, 102, 121, 140, 159, 178, 197, 216,
+                    226, 236, 246, 256, 266, 267, 268, 269, 270 };
             }
             case 1024: {
-                return {0, 1, 2, 3, 4, 5, 6, 13, 26, 39, 52, 65, 78, 91, 118, 145,
-                        172, 199, 226, 253, 280, 307, 334, 361, 388, 415, 442, 456,
-                        470, 484, 498, 512, 526, 540, 541, 542, 543, 544, 545, 546};
+                return {0, 1, 2, 3, 4, 5, 6, 13, 26, 39, 52, 65, 78, 91, 118, 145, 172, 199, 226,
+                    253, 280, 307, 334, 361, 388, 415, 442, 456, 470, 484, 498, 512, 526, 540, 541,
+                    542, 543, 544, 545, 546};
             }
             case 2048: {
-                return {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 19, 38, 57, 76, 95, 114, 133,
-                        152, 171, 190, 229, 268, 307, 346, 385, 424, 463, 502, 541,
-                        580, 619, 658, 697, 736, 775, 814, 853, 892, 931, 951, 971,
-                        991, 1011, 1031, 1051, 1071, 1091, 1111, 1131, 1132, 1133,
-                        1134, 1135, 1136, 1137, 1138, 1139, 1140 };
+                return {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 19, 38, 57, 76, 95, 114, 133, 152, 171, 190,
+                    229, 268, 307, 346, 385, 424, 463, 502, 541, 580, 619, 658, 697, 736, 775, 814,
+                    853, 892, 931, 951, 971, 991, 1011, 1031, 1051, 1071, 1091, 1111, 1131, 1132,
+                    1133, 1134, 1135, 1136, 1137, 1138, 1139, 1140 };
+            }
+            case 4096: {
+                return {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 27, 54, 81, 108, 135, 162,
+                    189, 216, 243, 270, 297, 324, 351, 378, 433, 488, 543, 598, 653, 708, 763, 818,
+                    873, 928, 983, 1038, 1093, 1148, 1203, 1258, 1313, 1368, 1423, 1478, 1533,
+                    1588, 1643, 1698, 1753, 1808, 1863, 1891, 1919, 1947, 1975, 2003, 2031, 2059,
+                    2087, 2115, 2143, 2171, 2199, 2227, 2255, 2256, 2257, 2258, 2259, 2260, 2261,
+                    2262, 2263, 2264, 2265, 2266, 2267, 2268 };
+            }
+            case 8192: {
+                return {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 37, 74,
+                    111, 148, 185, 222, 259, 296, 333, 370, 407, 444, 481, 518, 555, 592, 629, 666,
+                    703, 778, 853, 928, 1003, 1078, 1153, 1228, 1303, 1378, 1453, 1528, 1603, 1678,
+                    1753, 1828, 1903, 1978, 2053, 2128, 2203, 2278, 2353, 2428, 2503, 2578, 2653,
+                    2728, 2803, 2878, 2953, 3028, 3103, 3178, 3253, 3328, 3403, 3478, 3516, 3554,
+                    3592, 3630, 3668, 3706, 3744, 3782, 3820, 3858, 3896, 3934, 3972, 4010, 4048,
+                    4086, 4124, 4162, 4200, 4201, 4202, 4203, 4204, 4205, 4206, 4207, 4208, 4209,
+                    4210, 4211, 4212, 4213, 4214, 4215, 4216, 4217, 4218};
             }
             default: {
-                tlx_die("no difference cover available for N=" << size);
+                tlx_die("no difference cover available for X=" << size);
             }
         }
         // clang-format on
