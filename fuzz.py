@@ -4,6 +4,7 @@ import itertools
 import os
 import random
 import sys
+import enum
 
 def run_or_exit(cmd):
     print(f"++ {cmd}")
@@ -51,30 +52,48 @@ def fuzz_merge_sort(target, fixed_args, min_procs, max_procs, repeat):
               f" {' '.join(map(str, levels))}")
 
 def fuzz_space_efficient_sort(target, fixed_args, min_procs, max_procs, repeat):
+    class StringGenerator(enum.Enum):
+        DNRatio = (1, 0)
+        Suffix = (0, 0)
+        Window = (0, 1)
+        DifferenceCover = (0, 2)
+
     for _ in repeat:
-        random_args = ["--sample-chars", "--sample-indexed", "--sample-random", "--rquick-lcp",
-                       "--lcp-compression", "--prefix-compression", "--prefix-doubling",
-                       "--grid-bloomfilter", "--shuffle"]
+        random_args = ["--sample-chars", "--sample-indexed", "--sample-random",
+                       "--quantile-chars", "--quantile-indexed", "--quantile-random",
+                       "--rquick-lcp", "--lcp-compression", "--prefix-compression",
+                       "--prefix-doubling", "--grid-bloomfilter", "--shuffle"]
 
         nargs = random.randint(0, len(random_args))
         choice = random.sample(random_args, k=nargs)
         procs = random.randint(min_procs, max_procs)
         levels = get_levels(procs)
 
-        char_gen = 0
-        str_gen = random.randint(0, 2)
-        len_strings = random.randint(1, 1000)
-        num_chars = random.randint(10000, 50000)
-        difference_cover = random.choice([3, 7, 13, 21, 32, 64])
-        quantile_size = random.randint(20, 200)
+        generator = random.choice(list(StringGenerator))
+        num_chars = random.randint(1, 50000) \
+            if generator == StringGenerator.Suffix \
+            else random.randint(1, 500000)
+        combined_gnerator, string_generator = generator.value
+        char_generator = 0
+        len_strings = random.randint(1, 5000)
+        num_strings = random.randint(1, 5000)
+        dn_ratio = random.random()
+        step = random.randint(1, 16)
+        dc = random.choice([3, 7, 13, 21, 31, 32, 64, 512, 1024, 2048, 4096, 8192])
+
+        quantile_size = random.randint(20, 200000)
+        sampling_factor = random.randint(1, 10)
+        quantile_factor = random.randint(1, 10)
 
         run_or_exit(f"mpirun -n {procs} --oversubscribe"
-              f" target/{target}/space_efficient_sorter -v -V -i 3"
-              f" --char-generator {char_gen} --string-generator {str_gen}"
-              f" --len-strings {len_strings} --num-chars {num_chars}"
-              f" --difference-cover {difference_cover} --quantile-size {quantile_size}MiB"
-              f" {' '.join(fixed_args)} {' '.join(choice)} "
-              f" {' '.join(map(str, levels))}")
+            f" target/{target}/space_efficient_sorter -v -V -i 3"
+            f" --sampling-factor {sampling_factor} --use-quantile-sampler"
+            f" --quantile-factor {quantile_factor} --quantile-size {quantile_size}KiB"
+            f" --combined-generator {combined_gnerator} --string-generator {string_generator}"
+            f" --char-generator {char_generator} --num-chars {num_chars} --len-strings {len_strings}"
+            f" --num-strings {num_strings} --dn-ratio {dn_ratio} --step {step} --difference-cover {dc}"
+            f" {' '.join(fixed_args)} {' '.join(choice)} "
+            f" {' '.join(map(str, levels))}")
 
 def fuzz_all(target, fixed_args, min_procs, max_procs, repeat):
     for _ in repeat:
