@@ -284,7 +284,7 @@ void sortRec(
     auto const is_left_group = myrank < nprocs / 2;
 
     // Select pivot globally with binary tree median selection.
-    auto const strptr = local_strings.make_auto_ptr();
+    auto const strptr = make_auto_ptr(local_strings);
     auto const pivot = selectSplitter(gen, bit_store, strptr, buffers, tag, comm);
     tracker.median_select_t.stop();
 
@@ -317,12 +317,12 @@ void sortRec(
     buffers.send_data.sendrecv(buffers.recv_data, recv_cnt, partner, tag, comm);
 
     buffers.recv_strings.resize_strings(buffers.recv_data.get_num_strings());
-    buffers.recv_data.read_into(buffers.recv_strings.make_auto_ptr());
+    buffers.recv_data.read_into(make_auto_ptr(buffers.recv_strings));
     tracker.exchange_t.stop();
 
     // Merge received elements with own elements.
     tracker.merge_t.start(comm);
-    merge(own_ptr, buffers.recv_strings.make_auto_ptr(), buffers.merge_strings);
+    merge(own_ptr, make_auto_ptr(buffers.recv_strings), buffers.merge_strings);
     buffers.merge_strings.make_contiguous(buffers.char_buffer);
 
     using std::swap;
@@ -384,9 +384,9 @@ Container<StringPtr> sort(
         tracker.local_sort_t.start(comm);
         Container<StringPtr> local_strings;
         local_strings.resize_strings(local_data.get_num_strings());
-        local_data.read_into(local_strings.make_auto_ptr());
+        local_data.read_into(make_auto_ptr(local_strings));
         std::swap(local_strings.raw_strings(), local_data.raw_strs);
-        sortLocally(local_strings.make_auto_ptr());
+        sortLocally(make_auto_ptr(local_strings));
         tracker.local_sort_t.stop();
 
         return local_strings;
@@ -441,14 +441,14 @@ Container<StringPtr> sort(
     assert(tlx::is_power_of_two(comm.getSize()));
 
     Container<StringPtr> local_strings(local_data.get_num_strings(true));
-    local_data.read_into(local_strings.make_auto_ptr(), false);
+    local_data.read_into(make_auto_ptr(local_strings), false);
     std::swap(local_strings.raw_strings(), local_data.raw_strs);
 
     TemporaryBuffers<StringPtr> buffers;
     buffers.recv_data = std::move(local_data);
 
     tracker.local_sort_t.start(comm);
-    sortLocally(local_strings.make_auto_ptr());
+    sortLocally(make_auto_ptr(local_strings));
     tracker.local_sort_t.stop();
 
     RandomBitStore bit_store;

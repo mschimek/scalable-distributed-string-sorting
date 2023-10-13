@@ -166,7 +166,6 @@ public:
 
     StringSet make_string_set() { return {strings(), strings() + size()}; }
     StringPtr make_string_ptr() { return {make_string_set()}; }
-    StringPtr make_auto_ptr() { return make_string_ptr(); }
 
     void resize_strings(size_t const count) {
         // for some reason GCC detects a potential null dereference here
@@ -289,7 +288,6 @@ public:
     }
 
     StringLcpPtr make_string_lcp_ptr() { return {this->make_string_set(), this->lcp_array()}; }
-    StringLcpPtr make_auto_ptr() { return make_string_lcp_ptr(); }
 
     void resize_strings(size_t const count) {
         Base::resize_strings(count);

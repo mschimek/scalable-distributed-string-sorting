@@ -73,7 +73,7 @@ StringPtr selectMedians(
         Comparator<StringPtr>{}
     );
 
-    auto const strptr = merge_strings.make_auto_ptr();
+    auto const strptr = make_auto_ptr(merge_strings);
     if (merge_strings.size() <= n) {
         return strptr;
     } else {
@@ -133,11 +133,11 @@ StringT<StringPtr> select(
 
         buffers.recv_data.recv(source, tag, comm);
         buffers.recv_strings.resize_strings(buffers.recv_data.get_num_strings());
-        buffers.recv_data.read_into(buffers.recv_strings.make_auto_ptr());
+        buffers.recv_data.read_into(make_auto_ptr(buffers.recv_strings));
 
         auto const medians = _internal::selectMedians(
             strptr,
-            buffers.recv_strings.make_auto_ptr(),
+            make_auto_ptr(buffers.recv_strings),
             buffers.merge_strings,
             n,
             async_gen,
@@ -153,7 +153,7 @@ StringT<StringPtr> select(
         }
 
         buffers.median_strings.make_contiguous(buffers.char_buffer);
-        strptr = buffers.median_strings.make_auto_ptr();
+        strptr = make_auto_ptr(buffers.median_strings);
     }
 
     if (myrank == 0) {
@@ -175,7 +175,7 @@ StringT<StringPtr> select(
     }
 
     buffers.median_strings.resize_strings(1);
-    auto median_ptr = buffers.median_strings.make_auto_ptr();
+    auto median_ptr = make_auto_ptr(buffers.median_strings);
     buffers.recv_data.read_into(median_ptr);
     std::swap(buffers.median_strings.raw_strings(), buffers.recv_data.raw_strs);
 

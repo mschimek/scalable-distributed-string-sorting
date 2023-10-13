@@ -25,6 +25,15 @@
 
 namespace RQuick2 {
 
+template <typename StringContainer>
+auto make_auto_ptr(StringContainer& container) {
+    if constexpr (StringContainer::has_lcps) {
+        return container.make_string_lcp_ptr();
+    } else {
+        return container.make_string_ptr();
+    }
+}
+
 template <typename StringPtr>
 using StringT = typename StringPtr::StringSet::String;
 
@@ -502,9 +511,9 @@ void merge(StringPtr const& strptr1, StringPtr const& strptr2, Container<StringP
     dest.resize_strings(strptr1.size() + strptr2.size());
 
     if constexpr (StringPtr::with_lcp) {
-        dss_mehnert::merge::lcp_merge(strptr1, strptr2, dest.make_auto_ptr());
+        dss_mehnert::merge::lcp_merge(strptr1, strptr2, make_auto_ptr(dest));
         if constexpr (StringPtr::StringSet::is_indexed) {
-            dss_mehnert::sort_duplicates(dest.make_auto_ptr());
+            dss_mehnert::sort_duplicates(make_auto_ptr(dest));
         }
     } else {
         Comparator<StringPtr> const comp;
