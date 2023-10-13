@@ -65,7 +65,6 @@ protected:
             extra_arg,
             level.comm_orig
         );
-
         measuring_tool_.stop("sort_globally", "compute_partition");
 
         measuring_tool_.start("sort_globally", "redistribute_strings");

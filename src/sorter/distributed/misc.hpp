@@ -50,7 +50,7 @@ inline LocalSplitterInterval compute_splitter_interval(
     comm.bcast_single(kamping::send_recv_buf(total_size), kamping::root(comm.size() - 1));
 
     size_t const num_splitters = std::min(num_partitions - 1, total_size);
-    size_t const splitter_dist = total_size / (num_splitters + 1);
+    size_t const splitter_dist = std::max<size_t>(1, total_size / (num_splitters + 1));
 
     auto clamp = [=](auto const x) { return std::clamp<size_t>(x, 1, num_partitions); };
     size_t const local_begin = clamp(tlx::div_ceil(global_prefix, splitter_dist));

@@ -69,7 +69,10 @@ public:
         }
         measuring_tool.stop("compute_intervals");
 
-        assert_equal(interval_sizes.size(), num_partitions);
+        // handle edge cases where less than num_partitions strings are present in total
+        assert(interval_sizes.size() <= num_partitions);
+        interval_sizes.resize(num_partitions, 0);
+
         return interval_sizes;
     }
 };
@@ -97,7 +100,6 @@ public:
         auto chosen_splitters = Derived::choose_splitters(sample_set, num_partitions, comm);
         measuring_tool.stop("choose_splitters");
 
-        assert_equal(chosen_splitters.size(), num_partitions - 1);
         return chosen_splitters;
     }
 };
