@@ -170,7 +170,6 @@ private:
     }
 };
 
-// todo consider adding a CLI option for this
 template <typename Char, bool is_indexed>
 class Sequential : public BaseSplitterPolicy<Char, is_indexed, Sequential<Char, is_indexed>> {
     friend BaseSplitterPolicy<Char, is_indexed, Sequential<Char, is_indexed>>;
@@ -185,11 +184,11 @@ private:
         StringLcpContainer<StringSet> global_samples;
         if constexpr (is_indexed) {
             auto recv_indices = comm.allgatherv(kamping::send_buf(sample.indices));
-            global_samples = StringContainer{
+            global_samples = StringLcpContainer<StringSet>{
                 recv_sample.extract_recv_buffer(),
                 make_initializer<Index>(recv_indices.extract_recv_buffer())};
         } else {
-            global_samples = StringLcpContainer{recv_sample.extract_recv_buffer()};
+            global_samples = StringLcpContainer<StringSet>{recv_sample.extract_recv_buffer()};
         }
 
         tlx::sort_strings_detail::radixsort_CI3(global_samples.make_string_lcp_ptr(), 0, 0);
@@ -202,7 +201,7 @@ private:
 
     static StringContainer<StringSet>
     choose_splitters(StringSet const& ss, size_t const num_partitions, Communicator const&) {
-        return choose_splitters(ss, num_partitions);
+        return dss_mehnert::choose_splitters(ss, num_partitions);
     }
 };
 

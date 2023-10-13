@@ -70,11 +70,11 @@ StringContainer<StringSet> choose_splitters(StringSet const& samples, size_t con
     size_t const splitter_dist = samples.size() / (num_splitters + 1);
 
     StringContainer<StringSet> container;
-    container.strings().reserve(num_splitters);
+    container.get_strings().reserve(num_splitters);
 
     for (size_t i = 0; i < num_splitters; ++i) {
         auto const& splitter = samples.at((i + 1) * splitter_dist);
-        container.strings().emplace_back(splitter);
+        container.get_strings().emplace_back(splitter);
     }
 
     container.make_contiguous();

@@ -97,7 +97,6 @@ public:
     ) const {
         namespace kmp = kamping;
 
-        // todo don't really need to instantiate the permutation for this
         auto const& comm = comms.comm_root();
         std::vector<int> counts(comm.size()), offsets(comm.size());
         std::for_each(ranks_.begin(), ranks_.end(), [&](auto const rank) { ++counts[rank]; });

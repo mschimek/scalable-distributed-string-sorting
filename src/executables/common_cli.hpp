@@ -28,7 +28,7 @@ enum class MPIRoutineAllToAll { native = 0, direct, combined, sentinel };
 
 enum class Redistribution { none = 0, naive, simple_strings, simple_chars, grid, sentinel };
 
-enum class SplitterSorter { RQuickV1 = 0, RQuickV2, RQuickLcp };
+enum class SplitterSorter { RQuickV1, RQuickV2, RQuickLcp, Sequential };
 
 template <typename T>
 T clamp_enum_value(size_t const i) {
@@ -48,6 +48,7 @@ struct CommonArgs {
     SamplerArgs sampler;
     bool rquick_v1 = false;
     bool rquick_lcp = false;
+    bool splitter_sequential = false;
     size_t redistribution = static_cast<size_t>(Redistribution::grid);
     bool prefix_compression = false;
     bool lcp_compression = false;
@@ -78,8 +79,14 @@ struct CommonArgs {
 
     SplitterSorter get_splitter_sorter() const {
         tlx_die_verbose_if(rquick_v1 && rquick_lcp, "RQuick v1 does not support using LCP values");
+        tlx_die_verbose_if(
+            splitter_sequential && (rquick_v1 || rquick_lcp),
+            "can't use both RQuick and sequential sorting"
+        );
 
-        if (rquick_v1) {
+        if (splitter_sequential) {
+            return SplitterSorter::Sequential;
+        } else if (rquick_v1) {
             return SplitterSorter::RQuickV1;
         } else {
             if (rquick_lcp) {
@@ -254,6 +261,7 @@ inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
     );
     cp.add_flag('Q', "rquick-v1", args.rquick_v1, "use version 1 of RQuick (defaults to v2)");
     cp.add_flag('L', "rquick-lcp", args.rquick_lcp, "use LCP values in RQuick (only with v2)");
+    cp.add_flag("splitter-sequential", args.splitter_sequential, "use sequential splitter sorting");
     cp.add_flag(
         'l',
         "lcp-compression",
@@ -416,6 +424,11 @@ init_partition_policy(SamplerArgs const& sampler, SplitterSorter splitter_sorter
                 } else {
                     die_with_feature("CLI_ENABLE_RQUICK_LCP");
                 }
+            }
+            case SplitterSorter::Sequential: {
+                using SplitterPolicy = Sequential<Char, indexed>;
+                using PartitionPolicy = PartitionPolicy<SamplePolicy, SplitterPolicy>;
+                return disptach_policy.template operator()<PartitionPolicy>();
             }
         }
         tlx_die("unknown splitter sorter");

@@ -6,6 +6,10 @@ import random
 import sys
 import enum
 
+common_args = ["--sample-chars", "--sample-indexed", "--sample-random",
+               "--rquick-lcp", "--splitter-sequential", "--lcp-compression",
+               "--prefix-compression", "--prefix-doubling", "--grid-bloomfilter"]
+
 def run_or_exit(cmd):
     print(f"++ {cmd}")
     if os.system(cmd) != 0:
@@ -28,14 +32,22 @@ def get_levels(num_procs):
 
     return levels[1:]
 
+def get_random_args(random_args, fixed_args):
+    difference = list(set(random_args) - set(fixed_args))
+    nargs = random.randint(0, len(random_args) - 1)
+    sample = random.sample(difference, k=nargs)
+
+    splitter_sorter = {"--rquick-lcp", "--splitter-sequential"}
+    if splitter_sorter & set(sample) == splitter_sorter:
+        return list(set(sample) - {random.choice(list(splitter_sorter))})
+    else:
+        return sample
+
 def fuzz_merge_sort(target, fixed_args, min_procs, max_procs, repeat):
     for _ in repeat:
-        random_args = ["--sample-chars", "--sample-indexed", "--sample-random", "--rquick-lcp",
-                       "--lcp-compression", "--prefix-compression", "--prefix-doubling",
-                       "--grid-bloomfilter"]
+        random_args = common_args
 
-        nargs = random.randint(0, len(random_args))
-        choice = random.sample(random_args, k=nargs)
+        args = get_random_args(random_args, fixed_args)
         procs = random.randint(min_procs, max_procs)
         levels = get_levels(procs)
 
@@ -48,7 +60,7 @@ def fuzz_merge_sort(target, fixed_args, min_procs, max_procs, repeat):
               f" target/{target}/distributed_sorter -v -V -i 3"
               f" --num-strings {num_strings} --len-strings {len_strings}"
               f" --DN-ratio {dn_ratio} --sampling-factor {sampling_factor}"
-              f" {' '.join(fixed_args)} {' '.join(choice)} "
+              f" {' '.join(fixed_args)} {' '.join(args)}"
               f" {' '.join(map(str, levels))}")
 
 def fuzz_space_efficient_sort(target, fixed_args, min_procs, max_procs, repeat):
@@ -59,13 +71,10 @@ def fuzz_space_efficient_sort(target, fixed_args, min_procs, max_procs, repeat):
         DifferenceCover = (0, 2)
 
     for _ in repeat:
-        random_args = ["--sample-chars", "--sample-indexed", "--sample-random",
-                       "--quantile-chars", "--quantile-indexed", "--quantile-random",
-                       "--rquick-lcp", "--lcp-compression", "--prefix-compression",
-                       "--prefix-doubling", "--grid-bloomfilter", "--shuffle"]
+        random_args = common_args + ["--quantile-chars", "--quantile-indexed",
+                                     "--quantile-random", "--shuffle"]
 
-        nargs = random.randint(0, len(random_args))
-        choice = random.sample(random_args, k=nargs)
+        args = get_random_args(random_args, fixed_args)
         procs = random.randint(min_procs, max_procs)
         levels = get_levels(procs)
 
@@ -92,8 +101,7 @@ def fuzz_space_efficient_sort(target, fixed_args, min_procs, max_procs, repeat):
             f" --combined-generator {combined_gnerator} --string-generator {string_generator}"
             f" --char-generator {char_generator} --num-chars {num_chars} --len-strings {len_strings}"
             f" --num-strings {num_strings} --dn-ratio {dn_ratio} --step {step} --difference-cover {dc}"
-            f" {' '.join(fixed_args)} {' '.join(choice)} "
-            f" {' '.join(map(str, levels))}")
+            f" {' '.join(fixed_args)} {' '.join(args)} {' '.join(map(str, levels))}")
 
 def fuzz_all(target, fixed_args, min_procs, max_procs, repeat):
     for _ in repeat:
