@@ -12,10 +12,13 @@
 #include <tlx/cmdline_parser.hpp>
 #include <tlx/die/core.hpp>
 
+#include "mpi/alltoall_combined.hpp"
 #include "options.hpp"
 #include "sorter/distributed/bloomfilter.hpp"
 #include "sorter/distributed/partition.hpp"
 #include "sorter/distributed/redistribution.hpp"
+#include "sorter/distributed/sample.hpp"
+#include "strings/stringset.hpp"
 
 inline void check_path_exists(std::string const& path) {
     tlx_die_verbose_unless(std::filesystem::exists(path), "file not found: " << path);
@@ -25,18 +28,24 @@ enum class MPIRoutineAllToAll { native = 0, direct, combined, sentinel };
 
 enum class Redistribution { none = 0, naive, simple_strings, simple_chars, grid, sentinel };
 
+enum class SplitterSorter { RQuickV1 = 0, RQuickV2, RQuickLcp };
+
 template <typename T>
 T clamp_enum_value(size_t const i) {
     return static_cast<T>(std::min(i, static_cast<size_t>(T::sentinel)));
 }
 
-struct CommonArgs {
-    std::string experiment;
+struct SamplerArgs {
     bool sample_chars = false;
     bool sample_indexed = false;
     bool sample_random = false;
     size_t sampling_factor = 2;
+};
+
+struct CommonArgs {
+    std::string experiment;
     size_t alltoall_routine = static_cast<size_t>(MPIRoutineAllToAll::native);
+    SamplerArgs sampler;
     bool rquick_v1 = false;
     bool rquick_lcp = false;
     size_t redistribution = static_cast<size_t>(Redistribution::grid);
@@ -54,10 +63,10 @@ struct CommonArgs {
         return std::string("RESULT")
                + (experiment.empty() ? "" : (" experiment=" + experiment))
                + " num_procs="          + std::to_string(comm.size())
-               + " sample_chars="       + std::to_string(sample_chars)
-               + " sample_indexed="     + std::to_string(sample_indexed)
-               + " sample_random="      + std::to_string(sample_random)
-               + " sampling_factor="    + std::to_string(sampling_factor)
+               + " sample_chars="       + std::to_string(sampler.sample_chars)
+               + " sample_indexed="     + std::to_string(sampler.sample_indexed)
+               + " sample_random="      + std::to_string(sampler.sample_random)
+               + " sampling_factor="    + std::to_string(sampler.sampling_factor)
                + " rquick_v1="          + std::to_string(rquick_v1)
                + " rquick_lcp="         + std::to_string(rquick_lcp)
                + " lcp_compression="    + std::to_string(lcp_compression)
@@ -66,9 +75,23 @@ struct CommonArgs {
                + " grid_bloomfilter="   + std::to_string(grid_bloomfilter);
         // clang-format on
     }
+
+    SplitterSorter get_splitter_sorter() const {
+        tlx_die_verbose_if(rquick_v1 && rquick_lcp, "RQuick v1 does not support using LCP values");
+
+        if (rquick_v1) {
+            return SplitterSorter::RQuickV1;
+        } else {
+            if (rquick_lcp) {
+                return SplitterSorter::RQuickLcp;
+            } else {
+                return SplitterSorter::RQuickV2;
+            }
+        }
+    }
 };
 
-inline void die_with_feature(std::string_view feature) {
+inline void die_with_feature [[noreturn]] (std::string_view feature) {
     tlx_die("feature disabled for compile time; enable with '-D" << feature << "=On'");
 }
 
@@ -91,7 +114,7 @@ get_first_level(std::vector<size_t> const& levels, dss_mehnert::Communicator con
 }
 
 template <typename Callback, typename... Args>
-void arg7(Callback cb, CommonArgs const& args) {
+void dispatch_bloomfilter(Callback cb, CommonArgs const& args) {
     using namespace dss_mehnert::bloomfilter;
 
     if (args.grid_bloomfilter) {
@@ -102,7 +125,7 @@ void arg7(Callback cb, CommonArgs const& args) {
 }
 
 template <typename Callback, typename... Args>
-void arg6(Callback cb, CommonArgs const& args) {
+void dispatch_redistribution(Callback cb, CommonArgs const& args) {
     using namespace dss_mehnert::redistribution;
     using dss_mehnert::Communicator;
 
@@ -110,23 +133,28 @@ void arg6(Callback cb, CommonArgs const& args) {
     if constexpr (CliOptions::enable_redistribution) {
         switch (redistribution) {
             case Redistribution::none: {
-                arg7<Callback, Args..., NoRedistribution<Communicator>>(cb, args);
+                using Redistribution = NoRedistribution<Communicator>;
+                dispatch_bloomfilter<Callback, Args..., Redistribution>(cb, args);
                 return;
             }
             case Redistribution::naive: {
-                arg7<Callback, Args..., NaiveRedistribution<Communicator>>(cb, args);
+                using Redistribution = NaiveRedistribution<Communicator>;
+                dispatch_bloomfilter<Callback, Args..., Redistribution>(cb, args);
                 return;
             };
             case Redistribution::simple_strings: {
-                arg7<Callback, Args..., SimpleStringRedistribution<Communicator>>(cb, args);
+                using Redistribution = SimpleStringRedistribution<Communicator>;
+                dispatch_bloomfilter<Callback, Args..., Redistribution>(cb, args);
                 return;
             };
             case Redistribution::simple_chars: {
-                arg7<Callback, Args..., SimpleCharRedistribution<Communicator>>(cb, args);
+                using Redistribution = SimpleCharRedistribution<Communicator>;
+                dispatch_bloomfilter<Callback, Args..., Redistribution>(cb, args);
                 return;
             };
             case Redistribution::grid: {
-                arg7<Callback, Args..., GridwiseRedistribution<Communicator>>(cb, args);
+                using Redistribution = GridwiseRedistribution<Communicator>;
+                dispatch_bloomfilter<Callback, Args..., Redistribution>(cb, args);
                 return;
             }
             case Redistribution::sentinel: {
@@ -136,127 +164,52 @@ void arg6(Callback cb, CommonArgs const& args) {
         tlx_die("unknown redistribution policy");
     } else {
         if (redistribution == Redistribution::grid) {
-            arg7<Callback, Args..., GridwiseRedistribution<Communicator>>(cb, args);
+            dispatch_bloomfilter<Callback, Args..., GridwiseRedistribution<Communicator>>(cb, args);
         } else {
             die_with_feature("CLI_ENABLE_REDISTRIBUTION");
         }
     }
 }
 
-template <typename Callback, typename CharType, typename AlltoallConfig, typename Sampler>
-void arg5(Callback cb, CommonArgs const& args) {
-    using namespace dss_mehnert::partition;
+template <typename Callback, typename CharType>
+void dispatch_alltoall_strings(Callback cb, CommonArgs const& args) {
+    using AlltoallKind = dss_mehnert::mpi::AlltoallvCombinedKind;
 
-    constexpr bool is_indexed = Sampler::is_indexed;
+    auto dispatch_config = [&]<AlltoallKind kind, bool compress_lcps, bool compress_prefixes> {
+        using dss_mehnert::mpi::AlltoallStringsConfig;
+        constexpr AlltoallStringsConfig config{
+            .alltoall_kind = kind,
+            .compress_lcps = compress_lcps,
+            .compress_prefixes = compress_prefixes,
+        };
+        using Config = std::integral_constant<AlltoallStringsConfig, config>;
+        dispatch_redistribution<Callback, CharType, Config>(cb, args);
+    };
 
-    tlx_die_verbose_if(
-        args.rquick_v1 && args.rquick_lcp,
-        "RQuick v1 does not support using LCP values"
-    );
-
-    if (args.rquick_v1) {
-        if constexpr (CliOptions::enable_rquick_v1) {
-            using SplitterPolicy = RQuickV1<CharType, is_indexed>;
-            using PartitionPolicy = PartitionPolicy<Sampler, SplitterPolicy>;
-            arg6<Callback, CharType, AlltoallConfig, PartitionPolicy>(cb, args);
+    auto disptach_prefix_compression = [&]<AlltoallKind kind, bool compress_lcps> {
+        if (args.prefix_compression) {
+            dispatch_config.template operator()<kind, compress_lcps, true>();
         } else {
-            die_with_feature("CLI_ENABLE_RQUICK_V1");
-        }
-    } else {
-        if (args.rquick_lcp) {
-            if constexpr (CliOptions::enable_rquick_lcp) {
-                using SplitterPolicy = RQuickV2<CharType, is_indexed, true>;
-                using PartitionPolicy = PartitionPolicy<Sampler, SplitterPolicy>;
-                arg6<Callback, CharType, AlltoallConfig, PartitionPolicy>(cb, args);
-            } else {
-                die_with_feature("CLI_ENABLE_RQUICK_LCP");
-            }
-        } else {
-            using SplitterPolicy = RQuickV2<CharType, is_indexed, false>;
-            using PartitionPolicy = PartitionPolicy<Sampler, SplitterPolicy>;
-            arg6<Callback, CharType, AlltoallConfig, PartitionPolicy>(cb, args);
-        }
-    }
-}
-
-template <typename Callback, typename... Args>
-void arg4(Callback cb, CommonArgs const& args) {
-    using namespace dss_mehnert::sample;
-
-    // todo this could/should use type erasure
-
-    auto with_random = [=]<bool indexed, bool random> {
-        if (args.sample_chars) {
-            arg5<Callback, Args..., CharBasedSampling<indexed, random>>(cb, args);
-        } else {
-            arg5<Callback, Args..., StringBasedSampling<indexed, random>>(cb, args);
+            dispatch_config.template operator()<kind, compress_lcps, false>();
         }
     };
 
-    auto with_indexed = [=]<bool indexed> {
-        if (args.sample_random) {
-            with_random.template operator()<indexed, true>();
+    auto dispatch_lcp_compression = [&]<AlltoallKind Kind> {
+        if (args.lcp_compression) {
+            disptach_prefix_compression.template operator()<Kind, true>();
         } else {
-            with_random.template operator()<indexed, false>();
+            disptach_prefix_compression.template operator()<Kind, false>();
         }
     };
 
-    if (args.sample_chars) {
-        with_indexed.template operator()<true>();
-    } else {
-        with_indexed.template operator()<false>();
-    }
-}
-
-template <
-    typename Callback,
-    typename CharType,
-    typename AlltoallvCombinedKind,
-    typename LcpCompression,
-    typename PrefixCompression>
-void arg3b(Callback cb, CommonArgs const& args) {
-    using dss_mehnert::mpi::AlltoallStringsConfig;
-    constexpr AlltoallStringsConfig config{
-        .alltoall_kind = AlltoallvCombinedKind(),
-        .compress_lcps = LcpCompression(),
-        .compress_prefixes = PrefixCompression(),
-    };
-    arg4<Callback, CharType, std::integral_constant<AlltoallStringsConfig, config>>(cb, args);
-}
-
-template <typename Callback, typename... Args>
-void arg3(Callback cb, CommonArgs const& args) {
-    using namespace dss_schimek;
-
-    if (args.prefix_compression) {
-        arg3b<Callback, Args..., std::true_type>(cb, args);
-    } else {
-        arg3b<Callback, Args..., std::false_type>(cb, args);
-    }
-}
-
-template <typename Callback, typename... Args>
-void arg2(Callback cb, CommonArgs const& args) {
-    if (args.lcp_compression) {
-        arg3<Callback, Args..., std::true_type>(cb, args);
-    } else {
-        arg3<Callback, Args..., std::false_type>(cb, args);
-    }
-}
-
-// todo remove this or make small the default
-template <typename Callback, typename... Args>
-void arg1(Callback cb, CommonArgs const& args) {
     switch (clamp_enum_value<MPIRoutineAllToAll>(args.alltoall_routine)) {
-        using Kind = dss_mehnert::mpi::AlltoallvCombinedKind;
-
         case MPIRoutineAllToAll::native: {
-            arg2<Callback, Args..., std::integral_constant<Kind, Kind::native>>(cb, args);
+            dispatch_lcp_compression.template operator()<AlltoallKind::native>();
             return;
         }
         case MPIRoutineAllToAll::direct: {
             if constexpr (CliOptions::enable_alltoall) {
-                arg2<Callback, Args..., std::integral_constant<Kind, Kind::direct>>(cb, args);
+                dispatch_lcp_compression.template operator()<AlltoallKind::direct>();
             } else {
                 die_with_feature("CLI_ENABLE_ALLTOALL");
             }
@@ -264,7 +217,7 @@ void arg1(Callback cb, CommonArgs const& args) {
         }
         case MPIRoutineAllToAll::combined: {
             if constexpr (CliOptions::enable_alltoall) {
-                arg2<Callback, Args..., std::integral_constant<Kind, Kind::combined>>(cb, args);
+                dispatch_lcp_compression.template operator()<AlltoallKind::combined>();
             } else {
                 die_with_feature("CLI_ENABLE_ALLTOALL");
             }
@@ -279,7 +232,7 @@ void arg1(Callback cb, CommonArgs const& args) {
 
 template <typename Callback>
 inline void dispatch_common_args(Callback cb, CommonArgs const& args) {
-    arg1<Callback, unsigned char>(cb, args);
+    dispatch_alltoall_strings<Callback, unsigned char>(cb, args);
 }
 
 inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
@@ -290,13 +243,13 @@ inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
         args.num_iterations,
         "number of sorting iterations to run"
     );
-    cp.add_flag('C', "sample-chars", args.sample_chars, "use character based sampling");
-    cp.add_flag('I', "sample-indexed", args.sample_indexed, "use indexed sampling");
-    cp.add_flag('R', "sample-random", args.sample_random, "use random sampling");
+    cp.add_flag('C', "sample-chars", args.sampler.sample_chars, "use character based sampling");
+    cp.add_flag('I', "sample-indexed", args.sampler.sample_indexed, "use indexed sampling");
+    cp.add_flag('R', "sample-random", args.sampler.sample_random, "use random sampling");
     cp.add_size_t(
         'S',
         "sampling-factor",
-        args.sampling_factor,
+        args.sampler.sampling_factor,
         "use the given oversampling factor"
     );
     cp.add_flag('Q', "rquick-v1", args.rquick_v1, "use version 1 of RQuick (defaults to v2)");
@@ -352,3 +305,147 @@ inline size_t mpi_warmup(size_t const bytes_per_PE, dss_mehnert::Communicator co
     auto volatile sum = std::accumulate(recv_data.begin(), recv_data.end(), size_t{0});
     return sum;
 }
+
+namespace dss_mehnert {
+
+template <typename StringSet, typename... SamplerArgs>
+class PolymorphicPartitionPolicy {
+public:
+    using This = PolymorphicPartitionPolicy<StringSet, SamplerArgs...>;
+    using StringPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
+
+    template <typename PartitionPolicy>
+    explicit PolymorphicPartitionPolicy(PartitionPolicy policy)
+        : self_{new PartitionObject<PartitionPolicy>{std::move(policy)}} {}
+
+    template <typename SamplerArg>
+    std::vector<size_t> compute_partition(
+        StringPtr const& strptr,
+        size_t const num_partitions,
+        SamplerArg const arg,
+        Communicator const& comm
+    ) const {
+        return self_->compute_partition(strptr, num_partitions, arg, comm);
+    }
+
+private:
+    template <typename SamplerArg>
+    struct PartitionConcept_ {
+        virtual ~PartitionConcept_() = default;
+
+        virtual std::vector<size_t> compute_partition(
+            StringPtr const& strptr,
+            size_t const num_partitions,
+            SamplerArg const arg,
+            Communicator const& comm
+        ) const = 0;
+    };
+
+    struct PartitionConcept : public PartitionConcept_<SamplerArgs>... {
+        using PartitionConcept_<SamplerArgs>::compute_partition...;
+    };
+
+    template <typename PartitionPolicy, typename SamplerArg>
+    struct PartitionObject_ : public virtual PartitionConcept, private virtual PartitionPolicy {
+        virtual std::vector<size_t> compute_partition(
+            StringPtr const& strptr,
+            size_t const num_partitions,
+            SamplerArg const arg,
+            Communicator const& comm
+        ) const override {
+            return PartitionPolicy::compute_partition(strptr, num_partitions, arg, comm);
+        }
+    };
+
+    template <typename PartitionPolicy>
+    struct PartitionObject final : public PartitionObject_<PartitionPolicy, SamplerArgs>... {
+        explicit PartitionObject(PartitionPolicy policy) : PartitionPolicy{std::move(policy)} {}
+    };
+
+    std::unique_ptr<PartitionConcept> self_;
+};
+
+template <typename Char>
+using MergeSortPartitionPolicy =
+    PolymorphicPartitionPolicy<StringSet<Char, Length>, sample::MaxLength>;
+
+template <typename Char>
+using PrefixDoublingPartitionPolicy = PolymorphicPartitionPolicy<
+    StringSet<Char, Length, StringIndex, PEIndex>,
+    sample::NoExtraArg,
+    sample::DistPrefixes>;
+
+template <typename Char>
+using SpaceEfficientPartitionPolicy = PolymorphicPartitionPolicy<
+    CompressedStringSet<Char, StringIndex, PEIndex>,
+    sample::NoExtraArg,
+    sample::DistPrefixes>;
+
+template <typename Char, typename PolymorphicPolicy>
+PolymorphicPolicy
+init_partition_policy(SamplerArgs const& sampler, SplitterSorter splitter_sorter) {
+    auto disptach_policy = [&]<typename PartitionPolicy> {
+        return PolymorphicPolicy{PartitionPolicy{sampler.sampling_factor}};
+    };
+
+    auto dispatch_sorter = [&]<typename SamplePolicy> {
+        using namespace dss_mehnert::partition;
+
+        constexpr bool indexed = SamplePolicy::is_indexed;
+
+        switch (splitter_sorter) {
+            case SplitterSorter::RQuickV1: {
+                if constexpr (CliOptions::enable_rquick_v1) {
+                    using SplitterPolicy = RQuickV1<Char, indexed>;
+                    using PartitionPolicy = PartitionPolicy<SamplePolicy, SplitterPolicy>;
+                    return disptach_policy.template operator()<PartitionPolicy>();
+                } else {
+                    die_with_feature("CLI_ENABLE_RQUICK_V1");
+                }
+            }
+            case SplitterSorter::RQuickV2: {
+                using SplitterPolicy = RQuickV2<Char, indexed, false>;
+                using PartitionPolicy = PartitionPolicy<SamplePolicy, SplitterPolicy>;
+                return disptach_policy.template operator()<PartitionPolicy>();
+            }
+            case SplitterSorter::RQuickLcp: {
+                if constexpr (CliOptions::enable_rquick_lcp) {
+                    using SplitterPolicy = RQuickV2<Char, indexed, true>;
+                    using PartitionPolicy = PartitionPolicy<SamplePolicy, SplitterPolicy>;
+                    return disptach_policy.template operator()<PartitionPolicy>();
+                } else {
+                    die_with_feature("CLI_ENABLE_RQUICK_LCP");
+                }
+            }
+        }
+        tlx_die("unknown splitter sorter");
+    };
+
+    auto dispatch_sampler = [&]<bool indexed, bool random> {
+        using namespace dss_mehnert::sample;
+
+        if (sampler.sample_chars) {
+            using SamplePolicy = CharBasedSampling<indexed, random>;
+            return dispatch_sorter.template operator()<SamplePolicy>();
+        } else {
+            using SamplePolicy = StringBasedSampling<indexed, random>;
+            return dispatch_sorter.template operator()<SamplePolicy>();
+        }
+    };
+
+    auto dispatch_random = [&]<bool indexed> {
+        if (sampler.sample_random) {
+            return dispatch_sampler.template operator()<indexed, true>();
+        } else {
+            return dispatch_sampler.template operator()<indexed, false>();
+        }
+    };
+
+    if (sampler.sample_chars) {
+        return dispatch_random.template operator()<true>();
+    } else {
+        return dispatch_random.template operator()<false>();
+    }
+}
+
+} // namespace dss_mehnert

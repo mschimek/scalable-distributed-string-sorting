@@ -194,6 +194,8 @@ public:
     template <typename StringSet>
     using Result = SampleResult<typename StringSet::Char, is_indexed>;
 
+    StringBasedSampling() = default;
+
     explicit StringBasedSampling(size_t const sampling_factor)
         : sampling_factor_{sampling_factor} {}
 
@@ -244,6 +246,8 @@ public:
 
     template <typename StringSet>
     using Result = SampleResult<typename StringSet::Char, is_indexed>;
+
+    CharBasedSampling() = default;
 
     explicit CharBasedSampling(size_t const sampling_factor) : sampling_factor_{sampling_factor} {}
 

@@ -394,7 +394,7 @@ struct CompressedWindowGenerator : public std::vector<typename StringSet::String
     CompressedWindowGenerator(std::vector<Char>& chars, size_t const length, size_t const step) {
         assert(length > 0 && step > 0);
 
-        for (size_t offset = 0; offset + step <= chars.size(); offset += step) {
+        for (size_t offset = 0; offset + length <= chars.size(); offset += step) {
             this->emplace_back(chars.data() + offset, Length{length});
         }
     }

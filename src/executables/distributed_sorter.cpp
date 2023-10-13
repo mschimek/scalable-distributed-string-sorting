@@ -119,13 +119,13 @@ auto generate_strings(SorterArgs const& args, dss_mehnert::Communicator const& c
 template <
     typename CharType,
     typename AlltoallConfig,
-    typename PartitionPolicy,
     typename RedistributionPolicy,
     typename BloomFilterPolicy>
 void run_merge_sort(
     SorterArgs const& args, std::string prefix, dss_mehnert::Communicator const& comm
 ) {
     constexpr auto alltoall_config = AlltoallConfig();
+    using PartitionPolicy = dss_mehnert::MergeSortPartitionPolicy<CharType>;
     using StringSet = dss_mehnert::StringSet<CharType, dss_mehnert::Length>;
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
     using MergeSort = dss_mehnert::sorter::
@@ -153,7 +153,10 @@ void run_merge_sort(
     Subcommunicators comms{first_level, args.levels.end(), comm};
     measuring_tool.stop("none", "create_communicators", comm);
 
-    MergeSort merge_sort{PartitionPolicy{args.sampling_factor}};
+    MergeSort merge_sort{dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
+        args.sampler,
+        args.get_splitter_sorter()
+    )};
     merge_sort.sort(input_container, comms);
     measuring_tool.stop("none", "sorting_overall", comm);
 
@@ -175,13 +178,13 @@ void run_merge_sort(
 template <
     typename CharType,
     typename AlltoallConfig,
-    typename PartitionPolicy,
     typename RedistributionPolicy,
     typename BloomFilterPolicy>
 void run_prefix_doubling(
     SorterArgs const& args, std::string prefix, dss_mehnert::Communicator const& comm
 ) {
     constexpr auto alltoall_config = AlltoallConfig();
+    using PartitionPolicy = dss_mehnert::PrefixDoublingPartitionPolicy<CharType>;
     using StringSet = dss_mehnert::StringSet<CharType, dss_mehnert::Length>;
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
     using Permutation = dss_mehnert::InputPermutation;
@@ -213,7 +216,10 @@ void run_prefix_doubling(
     Subcommunicators comms{first_level, args.levels.end(), comm};
     measuring_tool.stop("none", "create_communicators", comm);
 
-    MergeSort merge_sort{PartitionPolicy{args.sampling_factor}};
+    MergeSort merge_sort{dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
+        args.sampler,
+        args.get_splitter_sorter()
+    )};
     auto permutation = merge_sort.sort(std::move(input_container), comms);
     measuring_tool.stop("none", "sorting_overall", comm);
 

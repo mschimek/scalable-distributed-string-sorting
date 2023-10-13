@@ -328,6 +328,7 @@ public:
         auto [send_buf_char, send_counts_char] =
             _internal::write_send_buf<config.compress_prefixes>(strptr, send_counts);
         container.delete_raw_strings();
+        measuring_tool.add(send_buf_char.size(), "all_to_all_strings_send_buf_size");
         measuring_tool.stop("all_to_all_strings_write_send_buf");
 
         measuring_tool.start("all_to_all_strings_alltoallv");
@@ -352,6 +353,7 @@ public:
         auto [send_buf_char, send_counts_char] =
             _internal::write_send_buf<config.compress_prefixes>(strptr, send_counts, prefixes);
         container.delete_raw_strings();
+        measuring_tool.add(send_buf_char.size(), "all_to_all_strings_send_buf_size");
         measuring_tool.stop("all_to_all_strings_write_send_buf");
 
         measuring_tool.start("all_to_all_strings_alltoallv");

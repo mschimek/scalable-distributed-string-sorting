@@ -33,6 +33,8 @@ using SorterStringSet =
 template <typename SamplePolicy, typename SplitterPolicy>
 class PartitionPolicy : private SamplePolicy, private SplitterPolicy {
 public:
+    PartitionPolicy() = default;
+
     explicit PartitionPolicy(size_t const sampling_factor) : SamplePolicy{sampling_factor} {}
 
     template <typename StringPtr, typename SamplerArg>

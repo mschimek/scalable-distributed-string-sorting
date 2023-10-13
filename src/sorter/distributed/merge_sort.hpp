@@ -139,7 +139,7 @@ protected:
         measuring_tool_.setPhase("merging");
         measuring_tool_.start("merge_strings");
 
-        measuring_tool_.start("compute_ranges");
+        measuring_tool_.start("merge_ranges");
         std::erase(recv_counts, 0);
         std::vector<size_t> offsets(recv_counts.size());
         std::exclusive_scan(recv_counts.begin(), recv_counts.end(), offsets.begin(), size_t{0});
@@ -149,9 +149,7 @@ protected:
                 lcps[offset] = 0;
             }
         }
-        measuring_tool_.stop("compute_ranges");
 
-        measuring_tool_.start("merge_ranges");
         constexpr bool is_compressed = config.compress_prefixes;
         auto const result = merge::choose_merge<is_compressed>(container, offsets, recv_counts);
         builder.push(container.make_string_set(), std::move(recv_counts_int));

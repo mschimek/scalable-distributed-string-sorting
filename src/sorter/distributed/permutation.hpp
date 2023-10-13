@@ -13,9 +13,9 @@
 
 #include <kamping/collectives/alltoall.hpp>
 #include <kamping/collectives/exscan.hpp>
+#include <kamping/named_parameters.hpp>
 #include <tlx/die.hpp>
 
-#include "kamping/named_parameters.hpp"
 #include "strings/stringcontainer.hpp"
 #include "strings/stringset.hpp"
 

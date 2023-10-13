@@ -158,7 +158,7 @@ auto generate_compressed_strings(SorterArgs const& args, dss_mehnert::Communicat
     auto const num_gen_chars = input_container.char_size();
     auto const num_gen_strs = input_container.size();
     auto const num_uncompressed_chars = input_container.make_string_set().get_sum_length();
-    measuring_tool.add(num_gen_chars - num_gen_strs, "input_chars");
+    measuring_tool.add(num_gen_chars, "input_chars");
     measuring_tool.add(num_gen_strs, "input_strings");
     measuring_tool.add(num_uncompressed_chars, "uncompressed_input_chars");
 
@@ -168,7 +168,6 @@ auto generate_compressed_strings(SorterArgs const& args, dss_mehnert::Communicat
 template <
     typename CharType,
     typename AlltoallConfig,
-    typename PartitionPolicy,
     typename RedistributionPolicy,
     typename BloomFilterPolicy>
 void run_space_efficient_sort(
@@ -180,6 +179,7 @@ void run_space_efficient_sort(
 
     using StringSet = dss_mehnert::CompressedStringSet<CharType>;
     // todo maybe use separate sample policies
+    using PartitionPolicy = dss_mehnert::SpaceEfficientPartitionPolicy<CharType>;
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
     using Sorter = dss_mehnert::sorter::SpaceEfficientSort<
         alltoall_config,
@@ -211,8 +211,16 @@ void run_space_efficient_sort(
     measuring_tool.stop("none", "create_communicators", comm);
 
     // todo add CLI options for quantile partition policy
-    PartitionPolicy const partition{args.sampling_factor};
-    Sorter merge_sort{partition, partition, args.quantile_size};
+    Sorter merge_sort{
+        dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
+            args.sampler,
+            args.get_splitter_sorter()
+        ),
+        dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
+            args.sampler,
+            args.get_splitter_sorter()
+        ),
+        args.quantile_size};
     auto permutation = merge_sort.sort(std::move(input_container), comms);
     measuring_tool.stop("none", "sorting_overall", comm);
 
