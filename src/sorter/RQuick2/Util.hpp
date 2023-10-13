@@ -16,6 +16,7 @@
 #include <kamping/mpi_datatype.hpp>
 
 #include "merge/lcp_merge.hpp"
+#include "sorter/distributed/duplicate_sorting.hpp"
 #include "strings/bound.hpp"
 #include "strings/stringcontainer.hpp"
 #include "strings/stringset.hpp"
@@ -502,6 +503,9 @@ void merge(StringPtr const& strptr1, StringPtr const& strptr2, Container<StringP
 
     if constexpr (StringPtr::with_lcp) {
         dss_mehnert::merge::lcp_merge(strptr1, strptr2, dest.make_auto_ptr());
+        if constexpr (StringPtr::StringSet::is_indexed) {
+            dss_mehnert::sort_duplicates(dest.make_auto_ptr());
+        }
     } else {
         Comparator<StringPtr> const comp;
         auto const dest_set = dest.make_string_set();

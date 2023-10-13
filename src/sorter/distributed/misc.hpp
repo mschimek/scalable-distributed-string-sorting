@@ -216,10 +216,10 @@ inline std::vector<size_t> compute_interval_sizes(
 
 template <typename StringSet, typename SplitterSet>
 inline std::vector<size_t>
-compute_interval_binary(StringSet const& ss, SplitterSet const& splitters) {
+compute_interval_binary(StringSet const& ss, SplitterSet const& splitters)
     // todo this restriction could be relaxed if desired
-    static_assert(StringSet::has_length);
-
+    requires(StringSet::has_length)
+{
     using String = StringSet::String;
 
     std::vector<size_t> intervals;
