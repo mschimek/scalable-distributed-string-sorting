@@ -441,7 +441,7 @@ init_partition_policy(SamplerArgs const& sampler, SplitterSorter splitter_sorter
         }
     };
 
-    if (sampler.sample_chars) {
+    if (sampler.sample_indexed) {
         return dispatch_random.template operator()<true>();
     } else {
         return dispatch_random.template operator()<false>();

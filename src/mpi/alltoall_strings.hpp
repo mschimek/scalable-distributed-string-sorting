@@ -58,8 +58,8 @@ write_interval(unsigned char* buffer, StringSet const& ss, size_t const* lcps) {
         auto const actual_len = str_len - str_depth;
 
         memcpy(dest, ss.get_chars(str, str_depth), actual_len);
-        dest += actual_len;
-        *dest++ = 0;
+        *(dest + actual_len) = 0;
+        dest += actual_len + 1;
     }
     return {dest, static_cast<size_t>(dest - buffer)};
 }
@@ -79,9 +79,10 @@ std::pair<unsigned char*, size_t> write_interval(
 
         auto const str_len = *prefixes++;
         auto const actual_len = str_len - str_depth;
+
         memcpy(dest, ss.get_chars(str, str_depth), actual_len);
-        dest += actual_len;
-        *dest++ = 0;
+        *(dest + actual_len) = 0;
+        dest += actual_len + 1;
     }
     return {dest, static_cast<size_t>(dest - buffer)};
 }

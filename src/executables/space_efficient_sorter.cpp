@@ -35,6 +35,8 @@ enum class CharGenerator { random = 0, file, file_segment, sentinel };
 enum class StringGenerator { suffix = 0, window, difference_cover, sentinel };
 
 struct SorterArgs : public CommonArgs {
+    bool use_quantile_sampler = false;
+    SamplerArgs quantile_sampler;
     size_t combined_gen = static_cast<size_t>(CombinedGenerator::none);
     size_t char_gen = static_cast<size_t>(CharGenerator::random);
     size_t string_gen = static_cast<size_t>(StringGenerator::suffix);
@@ -217,7 +219,7 @@ void run_space_efficient_sort(
             args.get_splitter_sorter()
         ),
         dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
-            args.sampler,
+            args.use_quantile_sampler ? args.quantile_sampler : args.sampler,
             args.get_splitter_sorter()
         ),
         args.quantile_size};
@@ -260,9 +262,35 @@ int main(int argc, char* argv[]) {
 
     add_common_args(args, cp);
 
+    cp.add_flag(
+        "use-quantile-sampler",
+        args.use_quantile_sampler,
+        "use separate quantile sampling policy"
+    );
+    cp.add_flag(
+        "quantile-chars",
+        args.quantile_sampler.sample_chars,
+        "use character based sampling for quantiles"
+    );
+    cp.add_flag(
+        "quantile-indexed",
+        args.quantile_sampler.sample_indexed,
+        "use indexed sampling for quantiles"
+    );
+    cp.add_flag(
+        "quantile-random",
+        args.quantile_sampler.sample_random,
+        "use random sampling for quantiles"
+    );
+    cp.add_size_t(
+        "quantile-factor",
+        args.quantile_sampler.sampling_factor,
+        "use the given oversampling factor for quantiles"
+    );
+
     cp.add_size_t(
         'b',
-        "combined-gen",
+        "combined-generator",
         args.combined_gen,
         "combined char/string generator to use"
         "([0]=none, 1=dn-ratio)"
