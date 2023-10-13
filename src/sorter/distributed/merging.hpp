@@ -39,17 +39,13 @@ struct MergeResult<true> {
 };
 
 template <bool is_compressed, size_t K, typename StringSet>
-inline MergeResult<is_compressed> multiway_merge(
-    StringLcpContainer<StringSet>& input_strings,
-    std::vector<size_t>& interval_offsets,
-    std::vector<size_t>& interval_sizes
-) {
+inline MergeResult<is_compressed>
+multiway_merge(StringLcpContainer<StringSet>& input_strings, std::vector<size_t>& interval_sizes) {
     assert_equal(K, pow2roundup(interval_sizes.size()));
     if (input_strings.empty()) {
         return {};
     }
 
-    interval_offsets.resize(K, 0);
     interval_sizes.resize(K, 0);
 
     using MergeAdapter = dss_schimek::StringLcpPtrMergeAdapter<StringSet>;
@@ -63,7 +59,7 @@ inline MergeResult<is_compressed> multiway_merge(
 
     MergeAdapter in_ptr{input_strings.make_string_set(), input_strings.lcp_array()};
     MergeAdapter out_ptr{sorted_string_set, sorted_lcps.data()};
-    LoserTree loser_tree{in_ptr, interval_offsets, interval_sizes};
+    LoserTree loser_tree{in_ptr, interval_sizes};
 
     if constexpr (is_compressed) {
         std::vector<size_t> saved_lcps;
@@ -80,51 +76,30 @@ inline MergeResult<is_compressed> multiway_merge(
 }
 
 template <bool is_compressed, typename StringSet>
-static inline MergeResult<is_compressed> choose_merge(
-    StringLcpContainer<StringSet>& recv_strings,
-    std::vector<size_t>& interval_offsets,
-    std::vector<size_t>& interval_sizes
-) {
-    assert(interval_sizes.size() == interval_offsets.size());
+static inline MergeResult<is_compressed>
+choose_merge(StringLcpContainer<StringSet>& recv_strings, std::vector<size_t>& interval_sizes) {
     auto merge_k = [&]<size_t K>() {
-        return multiway_merge<is_compressed, K, StringSet>(
-            recv_strings,
-            interval_offsets,
-            interval_sizes
-        );
+        return multiway_merge<is_compressed, K, StringSet>(recv_strings, interval_sizes);
     };
 
     switch (pow2roundup(interval_sizes.size())) {
-        case 1:
-            return merge_k.template operator()<1>();
-        case 2:
-            return merge_k.template operator()<2>();
-        case 4:
-            return merge_k.template operator()<4>();
-        case 8:
-            return merge_k.template operator()<8>();
-        case 16:
-            return merge_k.template operator()<16>();
-        case 32:
-            return merge_k.template operator()<32>();
-        case 64:
-            return merge_k.template operator()<64>();
-        case 128:
-            return merge_k.template operator()<128>();
-        case 256:
-            return merge_k.template operator()<256>();
-        case 512:
-            return merge_k.template operator()<512>();
-        case 1024:
-            return merge_k.template operator()<1024>();
-        case 2048:
-            return merge_k.template operator()<2048>();
-        case 4096:
-            return merge_k.template operator()<4096>();
-        case 8192:
-            return merge_k.template operator()<8192>();
-        case 16384:
-            return merge_k.template operator()<16384>();
+        // clang-format off
+        case 1:     return merge_k.template operator()<1>();
+        case 2:     return merge_k.template operator()<2>();
+        case 4:     return merge_k.template operator()<4>();
+        case 8:     return merge_k.template operator()<8>();
+        case 16:    return merge_k.template operator()<16>();
+        case 32:    return merge_k.template operator()<32>();
+        case 64:    return merge_k.template operator()<64>();
+        case 128:   return merge_k.template operator()<128>();
+        case 256:   return merge_k.template operator()<256>();
+        case 512:   return merge_k.template operator()<512>();
+        case 1024:  return merge_k.template operator()<1024>();
+        case 2048:  return merge_k.template operator()<2048>();
+        case 4096:  return merge_k.template operator()<4096>();
+        case 8192:  return merge_k.template operator()<8192>();
+        case 16384: return merge_k.template operator()<16384>();
+        // clang-format on
         default:
             // todo consider increasing this to 2^15
             tlx_die("Error in merge: K is not 2^i for i in {0,...,14} ");

@@ -8,77 +8,69 @@
 #include <cstring>
 #include <iostream>
 #include <numeric>
+#include <span>
 #include <string>
 #include <vector>
 
 #include "encoding/integer_compression.hpp"
 
-namespace dss_schimek {
+namespace dss_mehnert {
+
 class IntegerCompression {
     struct CompressedIntegersCounts {
         std::vector<uint8_t> integers;
-        std::vector<uint64_t> counts;
+        std::vector<int> counts;
     };
 
 public:
-    // return number bytes written
+    template <typename InputIterator>
+    static CompressedIntegersCounts
+    writeRanges(std::span<int const> intervals, InputIterator input_it) {
+        int const num_integers = std::accumulate(intervals.begin(), intervals.end(), 0);
+
+        CompressedIntegersCounts result;
+        result.counts.reserve(intervals.size());
+        result.integers.resize(num_integers * sizeof(uint64_t));
+
+
+        for (auto output_it = result.integers.begin(); auto const interval: intervals) {
+            size_t const bytes_written = write(input_it, output_it, interval);
+            result.counts.push_back(bytes_written);
+            output_it += bytes_written;
+            input_it += interval;
+        }
+        return result;
+    }
+
+    template <typename InputIterator>
+    static std::vector<uint64_t>
+    readRanges(std::span<int const> intervals, InputIterator input_it) {
+        int const num_integers = std::accumulate(intervals.begin(), intervals.end(), 0);
+
+        std::vector<uint64_t> output(num_integers);
+        for (auto output_it = output.begin(); auto const interval: intervals) {
+            input_it += read(input_it, output_it, output_it + interval);
+            output_it += interval;
+        }
+        return output;
+    }
+
+private:
     template <typename InputIterator, typename OutputIterator>
-    static size_t write(InputIterator input, OutputIterator output, size_t numElemsToWrite) {
+    static size_t write(InputIterator input, OutputIterator output, size_t count) {
         dss_schimek::Writer writer(output);
-        for (size_t i = 0; i < numElemsToWrite; ++i) {
+        for (size_t i = 0; i < count; ++i) {
             writer.PutVarint(*(input + i));
         }
         return writer.getNumPutBytes();
     }
 
-    template <typename CountIterator, typename InputIterator>
-    static CompressedIntegersCounts
-    writeRanges(CountIterator beginCounts, CountIterator endCounts, InputIterator dataInputBegin) {
-        const uint64_t sumOfLcpsToEncode = std::accumulate(beginCounts, endCounts, uint64_t{0});
-        CompressedIntegersCounts returnData;
-        returnData.integers.resize(sumOfLcpsToEncode * sizeof(uint64_t));
-        // just a guess that is far too conservative in most cases
-        returnData.counts.reserve(endCounts - beginCounts);
-
-        uint64_t curNumEncodedLcps = 0u;
-        uint64_t curNumWrittenBytes = 0u;
-        for (CountIterator it = beginCounts; it != endCounts; ++it) {
-            const uint64_t usedBytes = write(
-                dataInputBegin + curNumEncodedLcps,
-                returnData.integers.begin() + curNumWrittenBytes,
-                *it
-            );
-            returnData.counts.push_back(usedBytes);
-            curNumWrittenBytes += usedBytes;
-            curNumEncodedLcps += *it;
-        }
-        return returnData;
-    }
-
     template <typename InputIterator, typename OutputIterator>
-    static uint64_t read(InputIterator input, OutputIterator begin, OutputIterator end) {
-        dss_schimek::Reader reader(input, begin, end);
+    static size_t read(InputIterator first, OutputIterator d_first, OutputIterator d_last) {
+        dss_schimek::Reader reader(first, d_first, d_last);
         reader.decode();
         return reader.getNumReadBytes();
     }
-
-    template <typename CountIterator, typename InputIterator>
-    static std::vector<uint64_t>
-    readRanges(CountIterator beginCounts, CountIterator endCounts, InputIterator dataInputBegin) {
-        const uint64_t sumOfRecvLcpValues = std::accumulate(beginCounts, endCounts, uint64_t{0});
-        std::vector<uint64_t> output(sumOfRecvLcpValues);
-        uint64_t curNumWrittenLcps = 0u;
-        uint64_t curNumConsumedBytes = 0u;
-        for (CountIterator it = beginCounts; it != endCounts; ++it) {
-            curNumConsumedBytes += read(
-                dataInputBegin + curNumConsumedBytes,
-                output.begin() + curNumWrittenLcps,
-                output.begin() + curNumWrittenLcps + *it
-            );
-            curNumWrittenLcps += *it;
-        }
-        return output;
-    }
 };
 
-} // namespace dss_schimek
+} // namespace dss_mehnert

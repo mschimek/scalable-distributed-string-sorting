@@ -50,7 +50,7 @@ protected:
     MeasuringTool& measuring_tool_ = MeasuringTool::measuringTool();
 
     template <typename StringPtr, typename ExtraArg>
-    std::vector<size_t> compute_sorted_send_counts(
+    std::vector<int> compute_sorted_send_counts(
         StringPtr const& strptr,
         ExtraArg const extra_arg,
         multi_level::Level<Communicator> const& level
@@ -74,11 +74,11 @@ protected:
         assert_equal(send_counts.size(), level.comm_exchange.size());
         measuring_tool_.stop("sort_globally", "redistribute_strings");
 
-        return send_counts;
+        return {send_counts.begin(), send_counts.end()};
     }
 
     template <typename StringPtr, typename ExtraArg>
-    std::vector<size_t> compute_sorted_send_counts(
+    std::vector<int> compute_sorted_send_counts(
         StringPtr const& strptr, ExtraArg const extra_arg, Communicator const& comm
     ) {
         measuring_tool_.add(1, "num_groups");
@@ -92,13 +92,13 @@ protected:
         measuring_tool_.start("sort_globally", "redistribute_strings");
         measuring_tool_.stop("sort_globally", "redistribute_strings");
 
-        return send_counts;
+        return {send_counts.begin(), send_counts.end()};
     }
 
     template <typename StringSet, typename ExtraArg, typename PermutationBuilder>
     void exchange_and_merge(
         StringLcpContainer<StringSet>& container,
-        std::vector<size_t> const& send_counts,
+        std::vector<int> const& send_counts,
         ExtraArg const extra_arg,
         PermutationBuilder& builder,
         Communicator const& comm
@@ -110,10 +110,9 @@ protected:
 
         measuring_tool_.setPhase("string_exchange");
         measuring_tool_.start("all_to_all_strings");
-        auto recv_counts = comm.alltoall(kamping::send_buf(send_counts)).extract_recv_buffer();
 
-        // todo do this conversion to in earlier
-        std::vector<int> recv_counts_int{recv_counts.begin(), recv_counts.end()};
+        std::vector<int> recv_counts;
+        comm.alltoall(kamping::send_buf(send_counts), kamping::recv_buf(recv_counts));
 
         if constexpr (std::is_same_v<sample::DistPrefixes, ExtraArg>) {
             auto const& prefixes = extra_arg.prefixes;
@@ -132,28 +131,25 @@ protected:
         };
         measuring_tool_.stop("all_to_all_strings");
 
-        auto const size_strings = container.size();
-        auto const size_chars = container.char_size() - size_strings;
-        measuring_tool_.add(size_strings, "local_num_strings");
-        measuring_tool_.add(size_chars, "local_num_chars");
+        measuring_tool_.add(container.size(), "local_num_strings");
+        measuring_tool_.add(container.char_size() - container.size(), "local_num_chars");
 
         measuring_tool_.setPhase("merging");
         measuring_tool_.start("merge_strings");
-
         measuring_tool_.start("merge_ranges");
-        std::erase(recv_counts, 0);
-        std::vector<size_t> offsets(recv_counts.size());
-        std::exclusive_scan(recv_counts.begin(), recv_counts.end(), offsets.begin(), size_t{0});
+        std::vector<size_t> merge_counts{recv_counts.begin(), recv_counts.end()};
+        std::erase(merge_counts, 0);
 
         if (auto& lcps = container.lcps(); !container.empty()) {
-            for (auto const offset: offsets) {
+            for (size_t i = 0, offset = 0; i != merge_counts.size(); ++i) {
                 lcps[offset] = 0;
+                offset += merge_counts[i];
             }
         }
 
         constexpr bool is_compressed = config.compress_prefixes;
-        auto const result = merge::choose_merge<is_compressed>(container, offsets, recv_counts);
-        builder.push(container.make_string_set(), std::move(recv_counts_int));
+        auto const result = merge::choose_merge<is_compressed>(container, merge_counts);
+        builder.push(container.make_string_set(), std::move(recv_counts));
         measuring_tool_.stop("merge_ranges");
 
         measuring_tool_.start("prefix_decompression");

@@ -33,7 +33,7 @@ struct AlltoallStringsConfig {
 namespace _internal {
 
 template <typename LcpIt>
-inline void set_interval_start_lcp(LcpIt lcp_it, std::span<size_t const> interval_sizes) {
+inline void set_interval_start_lcp(LcpIt lcp_it, std::span<int const> interval_sizes) {
     for (auto const& interval: interval_sizes) {
         if (interval != 0) {
             *lcp_it = 0;
@@ -115,7 +115,7 @@ size_t get_num_send_chars(StringPtr const& strptr, std::span<size_t const> prefi
 
 template <bool compress_prefixes, typename StringPtr, typename... Prefixes>
 std::pair<std::vector<unsigned char>, std::vector<size_t>> write_send_buf(
-    StringPtr const& strptr, std::vector<size_t> const& send_counts, Prefixes const&... prefixes
+    StringPtr const& strptr, std::span<int const> send_counts, Prefixes const&... prefixes
 ) {
     set_interval_start_lcp(strptr.lcp(), send_counts);
 
@@ -144,28 +144,25 @@ std::pair<std::vector<unsigned char>, std::vector<size_t>> write_send_buf(
 template <bool use_compression, typename Communicator>
 inline std::vector<size_t> send_integers(
     std::vector<size_t>& values,
-    std::vector<size_t> const& send_counts,
-    std::vector<size_t> const& recv_counts,
+    std::span<int const> send_counts,
+    std::span<int const> recv_counts,
     Communicator const& comm
 ) {
-    constexpr auto alltoall_kind = AlltoallvCombinedKind::native;
     if constexpr (use_compression) {
-        auto compressed_data = dss_schimek::IntegerCompression::writeRanges(
-            send_counts.begin(),
-            send_counts.end(),
-            values.data()
+        auto const compressed = IntegerCompression::writeRanges(send_counts, values.data());
+        auto result = comm.alltoallv(
+            kamping::send_buf(compressed.integers),
+            kamping::send_counts(compressed.counts)
         );
-        auto recv_data = comm.template alltoallv_combined<alltoall_kind>(
-            compressed_data.integers,
-            compressed_data.counts
-        );
-        return dss_schimek::IntegerCompression::readRanges(
-            recv_counts.begin(),
-            recv_counts.end(),
-            recv_data.begin()
-        );
+        auto const recv_data = result.extract_recv_buffer();
+        return IntegerCompression::readRanges(recv_counts, recv_data.begin());
     } else {
-        return comm.template alltoallv_combined<alltoall_kind>(values, send_counts, recv_counts);
+        auto result = comm.alltoallv(
+            kamping::send_buf(values),
+            kamping::send_counts(send_counts),
+            kamping::recv_counts(recv_counts)
+        );
+        return result.extract_recv_buffer();
     }
 }
 
@@ -180,8 +177,8 @@ public:
         StringLcpContainer<StringSet>& container,
         std::vector<typename StringSet::Char>& recv_buf_char,
         std::vector<size_t>& recv_buf_lcp,
-        std::vector<size_t> const& send_counts,
-        std::vector<size_t> const& recv_counts,
+        std::vector<int> const& send_counts,
+        std::vector<int> const& recv_counts,
         Communicator const& comm
     ) {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
@@ -215,8 +212,8 @@ public:
         StringLcpContainer<StringSet>& container,
         std::vector<typename StringSet::Char>& recv_buf_char,
         std::vector<size_t>& recv_buf_lcp,
-        std::vector<size_t> const& send_counts,
-        std::vector<size_t> const& recv_counts,
+        std::vector<int> const& send_counts,
+        std::vector<int> const& recv_counts,
         Communicator const& comm
     ) {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
@@ -230,7 +227,7 @@ public:
         // set PEIndex to indicate rank of origin PE
         auto str = container.get_strings().begin();
         for (size_t rank = 0; rank != recv_counts.size(); ++rank) {
-            for (size_t i = 0; i != recv_counts[rank]; ++i) {
+            for (int i = 0; i != recv_counts[rank]; ++i) {
                 (*str++).PEIndex = rank;
             }
         }
@@ -248,8 +245,8 @@ public:
         StringLcpContainer<StringSet>& container,
         std::vector<typename StringSet::Char>& send_buf_char,
         std::vector<size_t> const& send_counts_char,
-        std::vector<size_t> const& send_counts,
-        std::vector<size_t> const& recv_counts,
+        std::vector<int> const& send_counts,
+        std::vector<int> const& recv_counts,
         Communicator const& comm
     ) {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
@@ -285,8 +282,8 @@ public:
         StringLcpContainer<StringSet>& container,
         std::vector<typename StringSet::Char>& send_buf_char,
         std::vector<size_t> const& send_counts_char,
-        std::vector<size_t> const& send_counts,
-        std::vector<size_t> const& recv_counts,
+        std::vector<int> const& send_counts,
+        std::vector<int> const& recv_counts,
         Communicator const& comm
     ) {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
@@ -319,8 +316,8 @@ public:
     template <AlltoallStringsConfig config, typename Permutation, typename StringSet>
     void alltoall_strings(
         StringLcpContainer<StringSet>& container,
-        std::vector<size_t> const& send_counts,
-        std::vector<size_t> const& recv_counts
+        std::vector<int> const& send_counts,
+        std::vector<int> const& recv_counts
     ) const {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
@@ -343,8 +340,8 @@ public:
     template <AlltoallStringsConfig config, typename Permutation, typename StringSet>
     void alltoall_strings(
         StringLcpContainer<StringSet>& container,
-        std::vector<size_t> const& send_counts,
-        std::vector<size_t> const& recv_counts,
+        std::vector<int> const& send_counts,
+        std::vector<int> const& recv_counts,
         std::span<size_t const> prefixes
     ) const {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();

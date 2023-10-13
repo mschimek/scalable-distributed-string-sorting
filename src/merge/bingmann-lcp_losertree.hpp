@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <span>
 #include <utility>
 
 #include <tlx/define/likely.hpp>
@@ -310,16 +311,13 @@ private:
     }
 
 public:
-    LcpStringLoserTree_(
-        Stream const& input,
-        std::vector<size_t> const& offsets,
-        std::vector<size_t> const& sizes,
-        lcp_t knownCommonLcp = 0
-    ) {
-        assert(sizes.size() == K && offsets.size() == K);
-        auto op = [&](auto const& offset, auto const& size) { return input.sub(offset, size); };
-        std::transform(offsets.begin(), offsets.end(), sizes.begin(), streams + 1, op);
-        initTree(knownCommonLcp);
+    LcpStringLoserTree_(Stream const& input, std::span<size_t const> sizes, lcp_t knwon_lcp = 0) {
+        assert(sizes.size() == K);
+
+        for (size_t i = 0, offset = 0; i != sizes.size(); offset += sizes[i++]) {
+            streams[i + 1] = input.sub(offset, sizes[i]);
+        }
+        initTree(knwon_lcp);
     }
 
     void
