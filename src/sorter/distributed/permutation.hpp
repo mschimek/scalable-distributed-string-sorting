@@ -51,12 +51,18 @@ augment_string_container(StringLcpContainer<StringSet>&& container, size_t const
     return {container.release_raw_strings(), std::move(strings), container.release_lcps()};
 }
 
+template <typename Member, typename StringSet, typename OutputIterator>
+void write_member(StringSet const& ss, OutputIterator const d_first) {
+    std::transform(ss.begin(), ss.end(), d_first, [](auto const& str) {
+        return str.Member::value();
+    });
+}
+
 class NoPermutation {};
 
 class InputPermutation {
 public:
     using size_type = std::size_t;
-
     using rank_type = std::size_t;
     using index_type = std::size_t;
 
@@ -130,32 +136,36 @@ public:
     using rank_type = int;
     using index_type = std::size_t;
 
+    struct LocalPermutation : public std::vector<index_type> {
+        LocalPermutation(LocalPermutation const&) = default;
+
+        template <typename StringSet>
+        explicit LocalPermutation(StringSet const& ss) : std::vector<index_type>(ss.size()) {
+            write_member<StringIndex>(ss, this->begin());
+        }
+    };
+
     struct RemotePermutation {
         std::vector<rank_type> ranks;
         std::vector<int> counts;
+
+        template <PermutationStringSet StringSet>
+        RemotePermutation(StringSet const& ss, std::vector<int> counts)
+            : ranks(ss.size()),
+              counts{std::move(counts)} {
+            write_member<PEIndex>(ss, ranks.begin());
+        }
     };
 
-    MultiLevelPermutation() = delete;
+    MultiLevelPermutation(MultiLevelPermutation const&) = default;
 
-    template <PermutationStringSet StringSet>
-    explicit MultiLevelPermutation(StringSet const& ss) : local_permutation_(ss.size()) {
-        for (auto src = ss.begin(); auto& dst: local_permutation_) {
-            dst = ss[src++].stringIndex;
-        }
-    }
-
-    template <PermutationStringSet StringSet>
-    void push_level(StringSet const& ss, std::vector<int> counts) {
-        std::vector<int> ranks(ss.size());
-
-        for (auto src = ss.begin(); auto& dst: ranks) {
-            dst = ss[src++].PEIndex;
-        }
-        remote_permutations_.emplace_back(std::move(ranks), std::move(counts));
-    }
+    MultiLevelPermutation(
+        LocalPermutation local_permutation, std::vector<RemotePermutation> remote_permutations
+    )
+        : local_permutation_{std::move(local_permutation)},
+          remote_permutations_{std::move(remote_permutations)} {}
 
     size_type depth() const { return remote_permutations_.size(); }
-    void clear() { remote_permutations_.clear(); }
 
     std::vector<index_type> const& local_permutation() const { return local_permutation_; }
     std::vector<index_type>& local_permutation() { return local_permutation_; }
@@ -228,7 +238,7 @@ public:
     }
 
 private:
-    std::vector<index_type> local_permutation_;
+    LocalPermutation local_permutation_;
     std::vector<RemotePermutation> remote_permutations_;
 };
 

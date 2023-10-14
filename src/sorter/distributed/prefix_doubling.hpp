@@ -160,20 +160,21 @@ public:
     using Permutation = MultiLevelPermutation;
 
     template <PermutationStringSet StringSet>
-    explicit SimplePermutationBuilder(StringSet const& ss) : permutation_{ss} {}
+    explicit SimplePermutationBuilder(StringSet const& ss) : local_{ss} {}
 
     template <PermutationStringSet StringSet>
     void push(StringSet const& ss, std::vector<int> counts) {
-        permutation_.push_level(ss, std::move(counts));
+        remote_.emplace_back(ss, std::move(counts));
     }
 
     template <PermutationStringSet StringSet>
     Permutation build(StringSet const& ss) {
-        return std::move(permutation_);
+        return {std::move(local_), std::move(remote_)};
     }
 
 private:
-    MultiLevelPermutation permutation_;
+    Permutation::LocalPermutation local_;
+    std::vector<Permutation::RemotePermutation> remote_;
 };
 
 } // namespace _internal
