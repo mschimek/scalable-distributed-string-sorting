@@ -143,13 +143,13 @@ std::pair<std::vector<unsigned char>, std::vector<size_t>> write_send_buf(
 
 template <bool use_compression, typename Communicator>
 inline std::vector<size_t> send_integers(
-    std::vector<size_t>& values,
+    std::vector<size_t> const& values,
     std::span<int const> send_counts,
     std::span<int const> recv_counts,
     Communicator const& comm
 ) {
     if constexpr (use_compression) {
-        auto const compressed = IntegerCompression::writeRanges(send_counts, values.data());
+        auto const compressed = IntegerCompression::writeRanges(send_counts, values.begin());
         auto result = comm.alltoallv(
             kamping::send_buf(compressed.integers),
             kamping::send_counts(compressed.counts)

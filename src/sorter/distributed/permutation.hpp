@@ -90,9 +90,7 @@ public:
     rank_type rank(size_type const n) const { return ranks_[n]; }
     index_type string(size_type const n) const { return strings_[n]; }
 
-    std::vector<rank_type>& ranks() { return ranks_; }
     std::vector<rank_type> const& ranks() const { return ranks_; }
-    std::vector<index_type>& strings() { return strings_; }
     std::vector<index_type> const& strings() const { return strings_; }
 
     template <typename Subcommunicators>
@@ -168,17 +166,37 @@ public:
     size_type depth() const { return remote_permutations_.size(); }
 
     std::vector<index_type> const& local_permutation() const { return local_permutation_; }
-    std::vector<index_type>& local_permutation() { return local_permutation_; }
-
     RemotePermutation const& remote_permutation(size_type const n) const {
         return remote_permutations_[n];
     }
-    RemotePermutation& remote_permutation(size_type const n) { return remote_permutations_[n]; }
 
     template <typename Subcommunicators>
     void apply(
         std::span<index_type> global_permutation,
         index_type const global_index_offset,
+        Subcommunicators const& comms
+    ) const {
+        assert(comms.comm_root().is_same_on_all_ranks(global_index_offset));
+
+        auto compute_indices = [&](auto const& ranks, auto& offsets, auto& dest) {
+            index_type const local_index_offset = comms.comm_root().exscan_single(
+                kamping::send_buf(ranks.size()),
+                kamping::op(std::plus<>{})
+            );
+            index_type const index_offset = global_index_offset + local_index_offset;
+
+            for (size_type i = 0; i != ranks.size(); ++i) {
+                dest[offsets[ranks[i]]++] = index_offset + i;
+            }
+        };
+        apply(global_permutation, compute_indices, comms);
+    }
+
+protected:
+    template <typename Subcommunicators, typename ComputeIndices>
+    void apply(
+        std::span<index_type> global_permutation,
+        ComputeIndices compute_indices,
         Subcommunicators const& comms
     ) const {
         // todo maybe relax this requirement
@@ -188,7 +206,6 @@ public:
             std::distance(comms.begin(), comms.end()) + 1,
             std::ssize(remote_permutations_)
         );
-        assert(comms.comm_root().is_same_on_all_ranks(global_index_offset));
 
         std::vector<index_type> send_buf, recv_buf;
         std::vector<int> offsets, temp_offsets;
@@ -207,15 +224,7 @@ public:
 
             temp_offsets = offsets;
             if (is_first) {
-                index_type const local_index_offset = comms.comm_root().exscan_single(
-                    kamping::send_buf(ranks.size()),
-                    kamping::op(std::plus<>{})
-                );
-                index_type const index_offset = global_index_offset + local_index_offset;
-
-                for (size_type i = 0; i != ranks.size(); ++i) {
-                    send_buf[temp_offsets[ranks[i]]++] = index_offset + i;
-                }
+                compute_indices(ranks, temp_offsets, send_buf);
             } else {
                 assert_equal(recv_buf.size(), ranks.size());
                 for (size_type i = 0; i != ranks.size(); ++i) {
@@ -242,6 +251,57 @@ private:
     std::vector<RemotePermutation> remote_permutations_;
 };
 
+class BikeshedStringRanks : private MultiLevelPermutation {
+public:
+    using MultiLevelPermutation::index_type;
+    using MultiLevelPermutation::rank_type;
+    using MultiLevelPermutation::size_type;
+
+    using offset_type = std::uint8_t;
+
+    using MultiLevelPermutation::LocalPermutation;
+    using MultiLevelPermutation::RemotePermutation;
+
+    BikeshedStringRanks(
+        LocalPermutation local,
+        std::vector<RemotePermutation> remote,
+        std::vector<offset_type> index_offsets
+    )
+        : MultiLevelPermutation{std::move(local), std::move(remote)},
+          index_offsets_{std::move(index_offsets)} {}
+
+    using MultiLevelPermutation::depth;
+    using MultiLevelPermutation::local_permutation;
+    using MultiLevelPermutation::remote_permutation;
+
+    std::vector<offset_type> const& index_offsets() const { return index_offsets_; }
+
+    template <typename Subcommunicators>
+    void apply(
+        std::span<index_type> global_permutation,
+        index_type const global_index_offset,
+        Subcommunicators const& comms
+    ) const {
+        assert(comms.comm_root().is_same_on_all_ranks(global_index_offset));
+
+        auto compute_indices = [&](auto const& ranks, auto& offsets, auto& dest) {
+            index_type const local_index_offset = comms.comm_root().exscan_single(
+                kamping::send_buf(ranks.size()),
+                kamping::op(std::plus<>{})
+            );
+            index_type const index_offset = global_index_offset + local_index_offset;
+
+            for (size_type i = 0; i != ranks.size(); ++i) {
+                dest[offsets[ranks[i]]++] = index_offset + index_offsets_[i];
+            }
+        };
+        apply(global_permutation, compute_indices, comms);
+    }
+
+private:
+    std::vector<offset_type> index_offsets_;
+};
+
 inline std::ostream& operator<<(std::ostream& stream, InputPermutation const& permutation) {
     for (size_t i = 0; i != permutation.size(); ++i) {
         stream << "{" << permutation.rank(i) << ", " << permutation.string(i) << "}, ";
@@ -261,6 +321,26 @@ inline std::ostream& operator<<(std::ostream& stream, MultiLevelPermutation cons
         std::copy(ranks.begin(), ranks.end(), std::ostream_iterator<int>(std::cout, ", "));
         std::cout << std::endl;
     }
+    return stream;
+}
+
+inline std::ostream& operator<<(std::ostream& stream, BikeshedStringRanks const& permutation) {
+    auto const& local = permutation.local_permutation();
+    std::cout << "local permutation: ";
+    std::copy(local.begin(), local.end(), std::ostream_iterator<size_t>(std::cout, ", "));
+    std::cout << std::endl;
+
+    for (size_t depth = 0; depth != permutation.depth(); ++depth) {
+        auto const& ranks = permutation.remote_permutation(depth).ranks;
+        std::cout << "remote permutation[" << depth << "]: ";
+        std::copy(ranks.begin(), ranks.end(), std::ostream_iterator<int>(std::cout, ", "));
+        std::cout << std::endl;
+    }
+
+    auto const& offsets = permutation.index_offsets();
+    std::cout << "index offsets: ";
+    std::copy(offsets.begin(), offsets.end(), std::ostream_iterator<uint8_t>(std::cout, ", "));
+    std::cout << std::endl;
     return stream;
 }
 
