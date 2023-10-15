@@ -1,4 +1,5 @@
 // (c) 2019 Matthias Schimek
+// (c) 2023 Pascal Mehnert
 // This code is licensed under BSD 2-Clause License (see LICENSE for details)
 
 #pragma once
@@ -24,6 +25,45 @@
 #include "strings/stringtools.hpp"
 
 namespace dss_mehnert {
+
+inline InputPermutation
+make_input_permutation(std::vector<size_t> const& global_permutation, Communicator const& comm) {
+    // todo does this work with non-unique ranks?
+    using namespace kamping;
+
+    auto const size = global_permutation.size();
+    auto const total_size = comm.allreduce_single(send_buf(size), op(std::plus<>{}));
+    auto const chunk_size = tlx::div_ceil(total_size, comm.size());
+
+    auto const dest_rank = [=](auto const i) { return i / chunk_size; };
+
+    std::vector<std::array<size_t, 3>> triples(size), recv_triples;
+    auto const get_global_index = [](auto const& triple) { return triple[0]; };
+    auto const get_string = [](auto const& triple) { return triple[1]; };
+    auto const get_rank = [](auto const& triple) { return triple[2]; };
+
+    std::vector<int> counts(comm.size()), offsets(comm.size());
+    for (auto const index: global_permutation) {
+        ++counts[dest_rank(index)];
+    }
+    std::exclusive_scan(counts.begin(), counts.end(), offsets.begin(), size_t{0});
+
+    for (size_t i = 0; auto const& index: global_permutation) {
+        triples[offsets[dest_rank(index)]++] = {index, i++, comm.rank()};
+    }
+
+    comm.alltoallv(send_buf(triples), send_counts(counts), recv_buf(recv_triples));
+
+    std::sort(recv_triples.begin(), recv_triples.end(), [&](auto const& lhs, auto const& rhs) {
+        return get_global_index(lhs) < get_global_index(rhs);
+    });
+
+    std::vector<size_t> strings(recv_triples.size()), ranks(recv_triples.size());
+    std::transform(recv_triples.begin(), recv_triples.end(), strings.begin(), get_string);
+    std::transform(recv_triples.begin(), recv_triples.end(), ranks.begin(), get_rank);
+
+    return InputPermutation{std::move(ranks), std::move(strings)};
+}
 
 template <typename Char>
 bool check_global_order(
@@ -83,17 +123,19 @@ template <typename StringSet>
 bool check_permutation_global_order(
     StringSet const& ss, InputPermutation const& permutation, Communicator const& comm
 ) {
+    namespace pdms = dss_mehnert::sorter::prefix_doubling;
+
     std::vector<typename StringSet::Char> first_string{0}, last_string{0};
     if (!permutation.empty()) {
         InputPermutation const sentinels{
             {permutation.ranks().front(), permutation.ranks().back()},
             {permutation.strings().front(), permutation.strings().back()}};
 
-        auto sentinel_strings = dss_mehnert::sorter::apply_permutation(ss, sentinels, comm);
+        auto sentinel_strings = pdms::apply_permutation(ss, sentinels, comm);
         first_string = sentinel_strings.get_raw_string(0);
         last_string = sentinel_strings.get_raw_string(1);
     } else {
-        dss_mehnert::sorter::apply_permutation(ss, InputPermutation{}, comm);
+        pdms::apply_permutation(ss, InputPermutation{}, comm);
     }
     return check_global_order(first_string, last_string, permutation.empty(), comm);
 }
@@ -247,13 +289,18 @@ public:
         copy_container(container, input_container_);
     }
 
+    bool is_sorted(std::vector<size_t> const& global_permutation, Communicator const& comm) {
+        return is_sorted(make_input_permutation(global_permutation, comm), comm);
+    }
+
     bool is_sorted(InputPermutation const& permutation, Communicator const& comm) {
         using namespace kamping;
+        namespace pdms = dss_mehnert::sorter::prefix_doubling;
 
         auto const ss = input_container_.make_string_set();
 
         bool is_sorted = true;
-        auto sorted_strings = dss_mehnert::sorter::apply_permutation(ss, permutation, comm);
+        auto sorted_strings = pdms::apply_permutation(ss, permutation, comm);
         if (!sorted_strings.make_string_set().check_order()) {
             sorted_strings.make_string_set().print();
             std::cout << "the permutation is not sorted locally\n";
@@ -265,6 +312,10 @@ public:
             is_sorted = false;
         }
         return comm.allreduce_single(send_buf({is_sorted}), op(ops::logical_and<>{}));
+    }
+
+    bool is_complete(std::vector<size_t> const& global_permutation, Communicator const& comm) {
+        return is_complete(make_input_permutation(global_permutation, comm), comm);
     }
 
     bool is_complete(InputPermutation const& permutation, Communicator const& comm) {
@@ -287,10 +338,14 @@ public:
         copy_container(container, input_container_);
     }
 
-    bool is_sorted(std::vector<size_t> const& permutation_, Communicator const& comm) {
-        using namespace kamping;
+    bool is_sorted(std::vector<size_t> const& global_permutation, Communicator const& comm) {
+        return is_sorted(make_input_permutation(global_permutation, comm), comm);
+    }
 
-        auto const permutation = to_input_permutation(permutation_, comm);
+    bool is_sorted(InputPermutation const& permutation, Communicator const& comm) {
+        using namespace kamping;
+        namespace pdms = dss_mehnert::sorter::prefix_doubling;
+
         auto const num_quantiles = compute_num_quantiles(comm);
         auto const quantile_size = tlx::div_ceil(permutation.size(), num_quantiles);
         assert(num_quantiles * quantile_size >= permutation.size());
@@ -307,7 +362,7 @@ public:
                 {ranks.begin() + begin, ranks.begin() + end},
                 {strings.begin() + begin, strings.begin() + end}};
 
-            auto quantile = dss_mehnert::sorter::apply_permutation(
+            auto quantile = pdms::apply_permutation(
                 input_container_.make_string_set(),
                 quantile_permutation,
                 comm
@@ -337,14 +392,18 @@ public:
     }
 
     bool is_complete(std::vector<size_t> const& global_permutation, Communicator const& comm) {
+        return is_complete(make_input_permutation(global_permutation, comm), comm);
+    }
+
+    bool is_complete(InputPermutation const& permutation, Communicator const& comm) {
         using namespace kamping;
-        auto permutation = to_input_permutation(global_permutation, comm);
         auto is_complete = check_permutation_complete(permutation, input_container_.size(), comm);
         return comm.allreduce_single(send_buf({is_complete}), op(ops::logical_and<>{}));
     }
 
 private:
-    static constexpr size_t quantile_size = 500 * 1024 * 1024;
+    static constexpr size_t quantile_size = 100 * 1024 * 1024;
+
     StringContainer input_container_;
 
     size_t compute_num_quantiles(Communicator const& comm) {
@@ -353,43 +412,6 @@ private:
         size_t const total_size = input_container_.make_string_set().get_sum_length();
         size_t const local_num_quantiles = tlx::div_ceil(total_size, quantile_size + 1);
         return comm.allreduce_single(send_buf(local_num_quantiles), op(ops::max<>{}));
-    }
-
-    InputPermutation
-    to_input_permutation(std::vector<size_t> const& global_permutation, Communicator const& comm) {
-        using namespace kamping;
-        auto const size = input_container_.size();
-        auto const total_size = comm.allreduce_single(send_buf(size), op(std::plus<>{}));
-        auto const chunk_size = tlx::div_ceil(total_size, comm.size());
-
-        auto const dest_rank = [=](auto const i) { return i / chunk_size; };
-
-        std::vector<std::array<size_t, 3>> triples(size), recv_triples;
-        auto const get_global_index = [](auto const& triple) { return triple[0]; };
-        auto const get_string = [](auto const& triple) { return triple[1]; };
-        auto const get_rank = [](auto const& triple) { return triple[2]; };
-
-        std::vector<int> counts(comm.size()), offsets(comm.size());
-        for (auto const index: global_permutation) {
-            ++counts[dest_rank(index)];
-        }
-        std::exclusive_scan(counts.begin(), counts.end(), offsets.begin(), size_t{0});
-
-        for (size_t i = 0; auto const& index: global_permutation) {
-            triples[offsets[dest_rank(index)]++] = {index, i++, comm.rank()};
-        }
-
-        comm.alltoallv(send_buf(triples), send_counts(counts), recv_buf(recv_triples));
-
-        std::sort(recv_triples.begin(), recv_triples.end(), [&](auto const& lhs, auto const& rhs) {
-            return get_global_index(lhs) < get_global_index(rhs);
-        });
-
-        std::vector<size_t> strings(recv_triples.size()), ranks(recv_triples.size());
-        std::transform(recv_triples.begin(), recv_triples.end(), strings.begin(), get_string);
-        std::transform(recv_triples.begin(), recv_triples.end(), ranks.begin(), get_rank);
-
-        return InputPermutation{std::move(ranks), std::move(strings)};
     }
 };
 
