@@ -44,8 +44,8 @@ public:
         SamplerArg const arg,
         Communicator const& comm
     ) const {
-        assert(num_partitions > 0);
-        if (num_partitions == 1) {
+        assert(num_partitions > 0 || strptr.size() == 0);
+        if (num_partitions <= 1) {
             return {strptr.size()};
         }
 
