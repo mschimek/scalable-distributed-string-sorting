@@ -18,6 +18,7 @@
 #include "mpi/communicator.hpp"
 #include "mpi/read_input.hpp"
 #include "strings/stringcontainer.hpp"
+#include "tlx/die/core.hpp"
 #include "tlx/math/div_ceil.hpp"
 
 namespace dss_mehnert {
@@ -480,6 +481,8 @@ struct CompressedDNRatioGenerator : public StringLcpContainer<StringSet> {
         size_t const num_strings,
         Communicator const& comm
     ) {
+        tlx_die_verbose_if(dn_ratio > 0.5, "D/N ratios greater than 1/2 are not suppported");
+
         assert(0 <= dn_ratio && dn_ratio <= 1);
         size_t const strings_per_chunk = std::max<size_t>(1, 2 * len_strings * dn_ratio);
         size_t const chars_per_chunk = len_strings + strings_per_chunk - 1;

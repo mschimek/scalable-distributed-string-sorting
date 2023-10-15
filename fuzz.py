@@ -86,7 +86,7 @@ def fuzz_space_efficient_sort(target, fixed_args, min_procs, max_procs, repeat):
         char_generator = 0
         len_strings = random.randint(1, 5000)
         num_strings = random.randint(1, 5000)
-        dn_ratio = random.random()
+        dn_ratio = random.random() / 2
         step = random.randint(1, 16)
         dc = random.choice([3, 7, 13, 21, 31, 32, 64, 512, 1024, 2048, 4096, 8192])
 
