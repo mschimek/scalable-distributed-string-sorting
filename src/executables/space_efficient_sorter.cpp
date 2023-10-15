@@ -312,7 +312,7 @@ int main(int argc, char* argv[]) {
     );
     cp.add_size_t('n', "num-strings", args.num_strings, "number of strings per PE");
     cp.add_size_t('m', "len-strings", args.len_strings, "number of characters per string");
-    cp.add_size_t('N', "num-chars", args.num_chars, "number of chars per rank");
+    cp.add_bytes('N', "num-chars", args.num_chars, "number of chars per rank");
     cp.add_double('r', "dn-ratio", args.dn_ratio, "D/N ratio of generated strings");
     cp.add_size_t('T', "step", args.step, "characters to skip between strings");
     cp.add_size_t('D', "difference-cover", args.difference_cover, "size of difference cover");

@@ -277,8 +277,8 @@ public:
         this->measuring_tool_.start("sort_quantiles", "sort_quantiles_overall");
 
         // todo allow this to be selected externally through a template parameter
-        // PermutationBuilder<Char, MultiLevelPermutation> builder{strptr.active(), comms};
-        PermutationBuilder<Char, BikeshedStringRanks> builder{strptr.active(), comms};
+        PermutationBuilder<Char, MultiLevelPermutation> builder{strptr.active(), comms};
+        // PermutationBuilder<Char, BikeshedStringRanks> builder{strptr.active(), comms};
 
         for (size_t i = 0, local_offset = 0; i != quantile_sizes.size(); ++i) {
             this->measuring_tool_.setQuantile(i);

@@ -46,8 +46,11 @@ inline size_t get_file_size(std::string const& path) {
     return in.tellg();
 }
 
-inline std::vector<unsigned char> distribute_random_file_segments(
-    std::string const& input_path, size_t segment_size, Communicator const& comm
+inline std::vector<unsigned char> distribute_file_segments(
+    std::string const& input_path,
+    size_t const requested_size,
+    bool const random,
+    Communicator const& comm
 ) {
     MPI_File mpi_file;
     MPI_File_open(
@@ -60,14 +63,20 @@ inline std::vector<unsigned char> distribute_random_file_segments(
 
     MPI_Offset file_size = 0;
     MPI_File_get_size(mpi_file, &file_size);
-    segment_size = std::min(segment_size, static_cast<size_t>(file_size));
+    size_t const segment_size = std::min(requested_size, static_cast<size_t>(file_size));
+    size_t offset = 0;
 
-    std::random_device rd;
-    std::mt19937_64 gen{rd()};
-    std::uniform_int_distribution<size_t> dist{0, file_size - segment_size};
-    size_t const offset = dist(gen);
+    if (random) {
+        std::random_device rd;
+        std::mt19937_64 gen{rd()};
+        std::uniform_int_distribution<size_t> dist{0, file_size - segment_size};
+        offset = dist(gen);
+    } else {
+        auto const max_step = (file_size - segment_size) / std::max<size_t>(comm.size() - 1, 1);
+        offset = comm.rank() * std::min<size_t>(segment_size, max_step);
+    }
+
     assert(offset + segment_size <= static_cast<size_t>(file_size));
-
     MPI_File_seek(mpi_file, offset, MPI_SEEK_SET);
 
     std::vector<unsigned char> result(segment_size);
