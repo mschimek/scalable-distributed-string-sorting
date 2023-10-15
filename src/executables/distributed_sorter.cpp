@@ -188,7 +188,7 @@ void run_prefix_doubling(
     using StringSet = dss_mehnert::StringSet<CharType, dss_mehnert::Length>;
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
     using Permutation = dss_mehnert::InputPermutation;
-    using MergeSort = dss_mehnert::sorter::PrefixDoublingMergeSort<
+    using MergeSort = dss_mehnert::sorter::prefix_doubling::PrefixDoublingMergeSort<
         alltoall_config,
         RedistributionPolicy,
         PartitionPolicy,

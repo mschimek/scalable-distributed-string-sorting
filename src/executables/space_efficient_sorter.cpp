@@ -176,6 +176,7 @@ void run_space_efficient_sort(
     SorterArgs const& args, std::string prefix, dss_mehnert::Communicator const& comm
 ) {
     using namespace dss_schimek;
+    namespace sems = dss_mehnert::sorter::space_efficient;
 
     constexpr auto alltoall_config = AlltoallConfig();
 
@@ -183,7 +184,7 @@ void run_space_efficient_sort(
     // todo maybe use separate sample policies
     using PartitionPolicy = dss_mehnert::SpaceEfficientPartitionPolicy<CharType>;
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
-    using Sorter = dss_mehnert::sorter::SpaceEfficientSort<
+    using Sorter = sems::SpaceEfficientSort<
         alltoall_config,
         RedistributionPolicy,
         PartitionPolicy,

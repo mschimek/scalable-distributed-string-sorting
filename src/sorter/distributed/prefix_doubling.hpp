@@ -25,6 +25,7 @@
 
 namespace dss_mehnert {
 namespace sorter {
+namespace prefix_doubling {
 
 template <
     AlltoallStringsConfig config,
@@ -132,18 +133,16 @@ protected:
     }
 };
 
-namespace _internal {
-
 template <typename Permutation>
-class SimplePermutationBuilder;
+class PermutationBuilder;
 
 template <>
-class SimplePermutationBuilder<InputPermutation> {
+class PermutationBuilder<InputPermutation> {
 public:
     using Permutation = InputPermutation;
 
     template <PermutationStringSet StringSet>
-    explicit SimplePermutationBuilder(StringSet const& ss) {}
+    explicit PermutationBuilder(StringSet const& ss) {}
 
     template <PermutationStringSet StringSet>
     void push(StringSet const& ss, std::vector<int>) {}
@@ -155,12 +154,12 @@ public:
 };
 
 template <>
-class SimplePermutationBuilder<MultiLevelPermutation> {
+class PermutationBuilder<MultiLevelPermutation> {
 public:
     using Permutation = MultiLevelPermutation;
 
     template <PermutationStringSet StringSet>
-    explicit SimplePermutationBuilder(StringSet const& ss) : local_{ss} {}
+    explicit PermutationBuilder(StringSet const& ss) : local_{ss} {}
 
     template <PermutationStringSet StringSet>
     void push(StringSet const& ss, std::vector<int> counts) {
@@ -169,16 +168,13 @@ public:
 
     template <PermutationStringSet StringSet>
     Permutation build(StringSet const& ss) {
-        return {std::move(local_), std::move(remote_)};
+        return {std::move(this->local_), std::move(this->remote_)};
     }
 
-private:
+protected:
     Permutation::LocalPermutation local_;
     std::vector<Permutation::RemotePermutation> remote_;
 };
-
-} // namespace _internal
-
 
 template <
     AlltoallStringsConfig config,
@@ -222,7 +218,7 @@ public:
         tlx::sort_strings_detail::radixsort_CI3(strptr, 0, 0);
         this->measuring_tool_.stop("local_sorting", "sort_locally", comms.comm_root());
 
-        _internal::SimplePermutationBuilder<Permutation> builder{strptr.active()};
+        PermutationBuilder<Permutation> builder{strptr.active()};
 
         if (comms.comm_root().size() != 1) {
             auto const prefixes = Base::run_bloom_filter(strptr, comms, start_depth);
@@ -316,5 +312,6 @@ StringLcpContainer<StringSet> apply_permutation(
     return output_container;
 }
 
+} // namespace prefix_doubling
 } // namespace sorter
 } // namespace dss_mehnert

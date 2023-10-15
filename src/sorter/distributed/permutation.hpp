@@ -29,6 +29,9 @@ constexpr bool has_permutation_members = has_member<typename StringSet::String, 
 template <typename StringSet>
 concept PermutationStringSet = has_permutation_members<StringSet>;
 
+template <typename StringPtr>
+concept PermutationStringPtr = PermutationStringSet<typename StringPtr::StringSet>;
+
 template <typename String>
 using AugmentedString = String::template with_members_t<StringIndex, PEIndex>;
 
@@ -135,11 +138,17 @@ public:
     using index_type = std::size_t;
 
     struct LocalPermutation : public std::vector<index_type> {
-        LocalPermutation(LocalPermutation const&) = default;
+        LocalPermutation() = default;
 
         template <typename StringSet>
         explicit LocalPermutation(StringSet const& ss) : std::vector<index_type>(ss.size()) {
-            write_member<StringIndex>(ss, this->begin());
+            write_member<StringIndex>(ss, begin());
+        }
+
+        template <typename StringSet>
+        void write(StringSet const& ss) {
+            resize(ss.size());
+            write_member<StringIndex>(ss, begin());
         }
     };
 
@@ -147,15 +156,22 @@ public:
         std::vector<rank_type> ranks;
         std::vector<int> counts;
 
+        RemotePermutation() = default;
+
         template <PermutationStringSet StringSet>
         RemotePermutation(StringSet const& ss, std::vector<int> counts)
             : ranks(ss.size()),
               counts{std::move(counts)} {
             write_member<PEIndex>(ss, ranks.begin());
         }
-    };
 
-    MultiLevelPermutation(MultiLevelPermutation const&) = default;
+        template <PermutationStringSet StringSet>
+        void write(StringSet const& ss, std::vector<int> counts) {
+            ranks.resize(ss.size());
+            write_member<PEIndex>(ss, ranks.begin());
+            this->counts = std::move(counts);
+        }
+    };
 
     MultiLevelPermutation(
         LocalPermutation local_permutation, std::vector<RemotePermutation> remote_permutations
@@ -163,12 +179,14 @@ public:
         : local_permutation_{std::move(local_permutation)},
           remote_permutations_{std::move(remote_permutations)} {}
 
+    explicit MultiLevelPermutation(size_type const depth) : remote_permutations_(depth) {}
+
     size_type depth() const { return remote_permutations_.size(); }
 
-    std::vector<index_type> const& local_permutation() const { return local_permutation_; }
-    RemotePermutation const& remote_permutation(size_type const n) const {
-        return remote_permutations_[n];
-    }
+    LocalPermutation const& local() const { return local_permutation_; }
+    LocalPermutation& local() { return local_permutation_; }
+    RemotePermutation const& remote(size_type const n) const { return remote_permutations_[n]; }
+    RemotePermutation& remote(size_type const n) { return remote_permutations_[n]; }
 
     template <typename Subcommunicators>
     void apply(
@@ -241,7 +259,7 @@ protected:
             );
         }
 
-        for (size_t i = 0; auto const global_index: recv_buf) {
+        for (size_type i = 0; auto const global_index: recv_buf) {
             global_permutation[local_permutation_[i++]] = global_index;
         }
     }
@@ -262,6 +280,8 @@ public:
     using MultiLevelPermutation::LocalPermutation;
     using MultiLevelPermutation::RemotePermutation;
 
+    explicit BikeshedStringRanks(size_type const depth) : MultiLevelPermutation(depth) {}
+
     BikeshedStringRanks(
         LocalPermutation local,
         std::vector<RemotePermutation> remote,
@@ -271,10 +291,11 @@ public:
           index_offsets_{std::move(index_offsets)} {}
 
     using MultiLevelPermutation::depth;
-    using MultiLevelPermutation::local_permutation;
-    using MultiLevelPermutation::remote_permutation;
+    using MultiLevelPermutation::local;
+    using MultiLevelPermutation::remote;
 
     std::vector<offset_type> const& index_offsets() const { return index_offsets_; }
+    std::vector<offset_type>& index_offsets() { return index_offsets_; }
 
     template <typename Subcommunicators>
     void apply(
@@ -285,17 +306,21 @@ public:
         assert(comms.comm_root().is_same_on_all_ranks(global_index_offset));
 
         auto compute_indices = [&](auto const& ranks, auto& offsets, auto& dest) {
+            index_type const local_offset_sum =
+                std::accumulate(index_offsets_.begin(), index_offsets_.end(), index_type{0});
             index_type const local_index_offset = comms.comm_root().exscan_single(
-                kamping::send_buf(ranks.size()),
+                kamping::send_buf(local_offset_sum),
                 kamping::op(std::plus<>{})
             );
             index_type const index_offset = global_index_offset + local_index_offset;
 
+            index_type current_index = index_offset;
             for (size_type i = 0; i != ranks.size(); ++i) {
-                dest[offsets[ranks[i]]++] = index_offset + index_offsets_[i];
+                current_index += index_offsets_[i];
+                dest[offsets[ranks[i]]++] = current_index;
             }
         };
-        apply(global_permutation, compute_indices, comms);
+        MultiLevelPermutation::apply(global_permutation, compute_indices, comms);
     }
 
 private:
@@ -310,13 +335,13 @@ inline std::ostream& operator<<(std::ostream& stream, InputPermutation const& pe
 }
 
 inline std::ostream& operator<<(std::ostream& stream, MultiLevelPermutation const& permutation) {
-    auto const& local = permutation.local_permutation();
+    auto const& local = permutation.local();
     std::cout << "local permutation: ";
     std::copy(local.begin(), local.end(), std::ostream_iterator<size_t>(std::cout, ", "));
     std::cout << std::endl;
 
     for (size_t depth = 0; depth != permutation.depth(); ++depth) {
-        auto const& ranks = permutation.remote_permutation(depth).ranks;
+        auto const& ranks = permutation.remote(depth).ranks;
         std::cout << "remote permutation[" << depth << "]: ";
         std::copy(ranks.begin(), ranks.end(), std::ostream_iterator<int>(std::cout, ", "));
         std::cout << std::endl;
@@ -325,13 +350,13 @@ inline std::ostream& operator<<(std::ostream& stream, MultiLevelPermutation cons
 }
 
 inline std::ostream& operator<<(std::ostream& stream, BikeshedStringRanks const& permutation) {
-    auto const& local = permutation.local_permutation();
+    auto const& local = permutation.local();
     std::cout << "local permutation: ";
     std::copy(local.begin(), local.end(), std::ostream_iterator<size_t>(std::cout, ", "));
     std::cout << std::endl;
 
     for (size_t depth = 0; depth != permutation.depth(); ++depth) {
-        auto const& ranks = permutation.remote_permutation(depth).ranks;
+        auto const& ranks = permutation.remote(depth).ranks;
         std::cout << "remote permutation[" << depth << "]: ";
         std::copy(ranks.begin(), ranks.end(), std::ostream_iterator<int>(std::cout, ", "));
         std::cout << std::endl;
