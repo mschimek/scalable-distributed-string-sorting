@@ -207,18 +207,22 @@ public:
                 dest[offsets[ranks[i]]++] = index_offset + i;
             }
         };
-        apply(global_permutation, compute_indices, comms);
+        apply_(global_permutation, compute_indices, comms);
     }
 
 protected:
     template <typename Subcommunicators, typename ComputeIndices>
-    void apply(
+    void apply_(
         std::span<index_type> global_permutation,
         ComputeIndices compute_indices,
         Subcommunicators const& comms
     ) const {
-        // todo maybe relax this requirement
-        assert(comms.comm_root().size() > 1);
+        if (comms.comm_root().size() == 1) {
+            for (size_t i = 0; i != local_permutation_.size(); ++i) {
+                global_permutation[local_permutation_[i]] = i;
+            }
+            return;
+        }
 
         assert_equal(
             std::distance(comms.begin(), comms.end()) + 1,
@@ -320,7 +324,7 @@ public:
                 dest[offsets[ranks[i]]++] = current_index;
             }
         };
-        MultiLevelPermutation::apply(global_permutation, compute_indices, comms);
+        MultiLevelPermutation::apply_(global_permutation, compute_indices, comms);
     }
 
 private:

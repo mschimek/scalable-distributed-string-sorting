@@ -289,14 +289,17 @@ public:
         copy_container(container, input_container_);
     }
 
-    bool is_sorted(std::vector<size_t> const& global_permutation, Communicator const& comm) {
-        return is_sorted(make_input_permutation(global_permutation, comm), comm);
+    template <typename Subcommunicators>
+    bool is_sorted(MultiLevelPermutation const& permutation, Subcommunicators const& comms) {
+        return is_sorted(make_input_permutation(permutation, comms), comms);
     }
 
-    bool is_sorted(InputPermutation const& permutation, Communicator const& comm) {
+    template <typename Subcommunicators>
+    bool is_sorted(InputPermutation const& permutation, Subcommunicators const& comms) {
         using namespace kamping;
         namespace pdms = dss_mehnert::sorter::prefix_doubling;
 
+        auto const& comm = comms.comm_root();
         auto const ss = input_container_.make_string_set();
 
         bool is_sorted = true;
@@ -314,18 +317,30 @@ public:
         return comm.allreduce_single(send_buf({is_sorted}), op(ops::logical_and<>{}));
     }
 
-    bool is_complete(std::vector<size_t> const& global_permutation, Communicator const& comm) {
-        return is_complete(make_input_permutation(global_permutation, comm), comm);
+    template <typename Subcommunicators>
+    bool is_complete(MultiLevelPermutation const& permutation, Subcommunicators const& comms) {
+        return is_complete(make_input_permutation(permutation, comms), comms);
     }
 
-    bool is_complete(InputPermutation const& permutation, Communicator const& comm) {
+    template <typename Subcommunicators>
+    bool is_complete(InputPermutation const& permutation, Subcommunicators const& comms) {
         using namespace kamping;
+        auto const& comm = comms.comm_root();
         auto is_complete = check_permutation_complete(permutation, input_container_.size(), comm);
         return comm.allreduce_single(send_buf({is_complete}), op(ops::logical_and<>{}));
     }
 
 private:
     StringContainer input_container_;
+
+    template <typename Subcommunicators>
+    InputPermutation make_input_permutation(
+        MultiLevelPermutation const& permutation, Subcommunicators const& comms
+    ) {
+        std::vector<size_t> global_permutation(input_container_.size());
+        permutation.apply(global_permutation, 0, comms);
+        return dss_mehnert::make_input_permutation(global_permutation, comms.comm_root());
+    }
 };
 
 template <typename StringSet>

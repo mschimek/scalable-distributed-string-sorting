@@ -141,6 +141,8 @@ public:
 
     static constexpr std::string_view get_name() { return "no_split"; }
 
+    explicit NoSplit(Communicator const& comm) : comm_(comm) {}
+
     NoSplit(auto first_level, auto last_level, Communicator const& comm) : comm_(comm) {
         tlx_die_verbose_unless(
             first_level == last_level,

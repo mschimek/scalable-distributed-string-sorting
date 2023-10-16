@@ -362,7 +362,7 @@ struct FileCharGenerator : public std::vector<typename StringSet::Char> {
 
     FileCharGenerator(std::string const& path, Communicator const& comm)
         : std::vector<Char>{distribute_file(path, 0, comm)} {
-        std::replace(this->begin(), this->end(), 0, 'A');
+        std::replace(this->begin(), this->end(), static_cast<Char>(0), static_cast<Char>('A'));
     }
 };
 
@@ -374,7 +374,7 @@ struct FileSegmentCharGenerator : public std::vector<typename StringSet::Char> {
         std::string const& path, size_t const segment_size, Communicator const& comm
     )
         : std::vector<Char>{distribute_file_segments(path, segment_size, false, comm)} {
-        std::replace(this->begin(), this->end(), 0, 'A');
+        std::replace(this->begin(), this->end(), static_cast<Char>(0), static_cast<Char>('A'));
     }
 };
 

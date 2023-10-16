@@ -26,6 +26,7 @@
 #include "mpi/is_sorted.hpp"
 #include "options.hpp"
 #include "sorter/distributed/merge_sort.hpp"
+#include "sorter/distributed/permutation.hpp"
 #include "sorter/distributed/prefix_doubling.hpp"
 #include "strings/stringset.hpp"
 #include "util/measuringTool.hpp"
@@ -33,21 +34,24 @@
 
 enum class StringGenerator {
     skewed_random = 0,
-    dn_ratio = 1,
-    file = 2,
-    skewed_dn_ratio = 3,
-    suffix = 4,
-    sentinel = 5
+    dn_ratio,
+    file,
+    skewed_dn_ratio,
+    suffix,
+    sentinel,
 };
+
+enum class Permutation { simple = 0, multi_level, sentinel };
 
 struct SorterArgs : public CommonArgs {
     size_t string_generator = static_cast<size_t>(StringGenerator::dn_ratio);
+    size_t permutation = static_cast<size_t>(Permutation::simple);
     size_t num_strings = 100000;
     size_t len_strings = 100;
     size_t len_strings_min = len_strings;
     size_t len_strings_max = len_strings + 10;
     std::string path;
-    double DN_ratio = 0.5;
+    double dn_ratio = 0.5;
     size_t iteration = 0;
     bool strong_scaling = false;
     std::vector<size_t> levels;
@@ -60,7 +64,7 @@ struct SorterArgs : public CommonArgs {
                + " num_levels="     + std::to_string(levels.size())
                + " iteration="      + std::to_string(iteration)
                + " strong_scaling=" + std::to_string(strong_scaling)
-               + " dn_ratio="       + std::to_string(DN_ratio);
+               + " dn_ratio="       + std::to_string(dn_ratio);
         // clang-format on
     }
 };
@@ -77,7 +81,7 @@ auto generate_strings(SorterArgs const& args, dss_mehnert::Communicator const& c
     auto input_container = [=]() -> StringLcpContainer<StringSet> {
         auto const num_strings = (args.strong_scaling ? 1 : comm.size()) * args.num_strings;
         auto const len_strings = args.len_strings;
-        auto const DN_ratio = args.DN_ratio;
+        auto const DN_ratio = args.dn_ratio;
         auto const& path = args.path;
 
         switch (clamp_enum_value<StringGenerator>(args.string_generator)) {
@@ -179,7 +183,8 @@ template <
     typename CharType,
     typename AlltoallConfig,
     typename RedistributionPolicy,
-    typename BloomFilterPolicy>
+    typename BloomFilterPolicy,
+    typename Permutation>
 void run_prefix_doubling(
     SorterArgs const& args, std::string prefix, dss_mehnert::Communicator const& comm
 ) {
@@ -187,7 +192,6 @@ void run_prefix_doubling(
     using PartitionPolicy = dss_mehnert::PrefixDoublingPartitionPolicy<CharType>;
     using StringSet = dss_mehnert::StringSet<CharType, dss_mehnert::Length>;
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
-    using Permutation = dss_mehnert::InputPermutation;
     using MergeSort = dss_mehnert::sorter::prefix_doubling::PrefixDoublingMergeSort<
         alltoall_config,
         RedistributionPolicy,
@@ -227,16 +231,39 @@ void run_prefix_doubling(
     measuring_tool.disableCommVolume();
 
     if (args.check_sorted) {
-        auto const is_sorted = checker.is_sorted(permutation, comm);
+        auto const is_sorted = checker.is_sorted(permutation, comms);
         die_verbose_unless(is_sorted, "output permutation is not sorted");
     }
     if (args.check_complete) {
-        auto const is_complete = checker.is_complete(permutation, comm);
+        auto const is_complete = checker.is_complete(permutation, comms);
         die_verbose_unless(is_complete, "output permutation is not complete");
     }
 
     measuring_tool.write_on_root(std::cout, comm);
     measuring_tool.reset();
+}
+
+template <typename... Args>
+void dispatch_permutation(
+    SorterArgs const& args, std::string prefix, dss_mehnert::Communicator const& comm
+) {
+    using namespace dss_mehnert;
+
+    // todo maybe feature gate this
+    switch (clamp_enum_value<Permutation>(args.permutation)) {
+        case Permutation::simple: {
+            run_prefix_doubling<Args..., InputPermutation>(args, prefix, comm);
+            return;
+        }
+        case Permutation::multi_level: {
+            run_prefix_doubling<Args..., MultiLevelPermutation>(args, prefix, comm);
+            return;
+        }
+        case Permutation::sentinel: {
+            break;
+        }
+    }
+    tlx_die("invalid permutation");
 }
 
 template <typename... Args>
@@ -249,7 +276,7 @@ void run(SorterArgs const& args) {
 
     if (args.prefix_doubling) {
         if constexpr (CliOptions::enable_prefix_doubling) {
-            run_prefix_doubling<Args...>(args, prefix, comm);
+            dispatch_permutation<Args...>(args, prefix, comm);
         } else {
             die_with_feature("CLI_ENABLE_PREFIX_DOUBLING");
         }
@@ -275,8 +302,9 @@ int main(int argc, char* argv[]) {
         "type of string generation to use "
         "(0=skewed, [1]=DNGen, 2=file, 3=skewedDNGen, 4=suffixGen)"
     );
+    cp.add_size_t('o', "permutation", args.permutation, "type of permutation to use for PDMS");
     cp.add_string('y', "path", args.path, "path to input file");
-    cp.add_double('r', "DN-ratio", args.DN_ratio, "D/N ratio of generated strings");
+    cp.add_double('r', "DN-ratio", args.dn_ratio, "D/N ratio of generated strings");
     cp.add_size_t('n', "num-strings", args.num_strings, "number of strings to be generated");
     cp.add_size_t('m', "len-strings", args.len_strings, "length of generated strings");
     cp.add_size_t(
