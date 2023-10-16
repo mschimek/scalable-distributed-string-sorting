@@ -314,7 +314,7 @@ public:
         std::vector<size_t> candidates = filter(strptr, start_depth, results);
 
         for (size_t i = start_depth * 2; i < std::numeric_limits<size_t>::max(); i *= 2) {
-            measuring_tool_.add(candidates.size(), "bloomfilter_numberCandidates");
+            measuring_tool_.add(candidates.size(), "bloomfilter_num_candidates");
             measuring_tool_.start("bloomfilter_allreduce");
             auto const all_empty = comms.comm_root().allreduce_single(
                 kamping::send_buf({candidates.empty()}),
@@ -343,11 +343,16 @@ public:
     ) {
         auto const& ss = strptr.active();
 
-        measuring_tool_.start("bloomfilter_find_local_duplicates");
+        measuring_tool_.start("bloomfilter_generate_hash_pairs");
         auto hash_pairs = generate_hash_pairs(ss, candidates..., depth, strptr.lcp());
         auto& hash_idx_pairs = hash_pairs.hash_idx_pairs;
+        measuring_tool_.stop("bloomfilter_generate_hash_pairs");
 
+        measuring_tool_.start("bloomfilter_sort_local_hashes");
         ips4o::sort(hash_idx_pairs.begin(), hash_idx_pairs.end(), hash_less<HashStringIndex>{});
+        measuring_tool_.stop("bloomfilter_sort_local_hashes");
+
+        measuring_tool_.start("bloomfilter_find_local_duplicates");
         auto local_hash_dups = get_local_duplicates(hash_idx_pairs);
         std::erase_if(hash_idx_pairs, std::not_fn(should_send));
         measuring_tool_.stop("bloomfilter_find_local_duplicates");
@@ -569,7 +574,9 @@ private:
         }
     }
 
-    static bool should_send(HashStringIndex const& v) { return !v.is_local_dup || v.send_anyway; }
+    static bool should_send(HashStringIndex const& v) noexcept {
+        return !v.is_local_dup || v.send_anyway;
+    }
 };
 
 template <bool reuse_hashes, typename HashPolicy>
