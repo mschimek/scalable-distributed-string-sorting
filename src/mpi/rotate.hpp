@@ -32,14 +32,6 @@ void rotate_strings_right(
     int const succ = comm.rank_shifted_cyclic(1);
     int send_count = source.size(), recv_count = 0;
 
-    std::cout << std::format(
-        "rank={} skip_rank={} pred={} succ={} before",
-        comm.rank(),
-        skip_rank,
-        pred,
-        succ
-    ) << std::endl;
-
     // clang-format off
     if (skip_rank) {
         comm.recv(kmp::recv_buf(send_count), kmp::recv_counts(1), kmp::source(pred), kmp::tag(tag));
@@ -52,8 +44,6 @@ void rotate_strings_right(
     }
     dest.resize(recv_count);
 
-    std::cout << std::format("rank={} middle", comm.rank()) << std::endl;
-
     if (skip_rank) {
         comm.recv(kmp::recv_buf(dest), kmp::recv_counts(recv_count), kmp::source(pred), kmp::tag(tag));
         comm.send(kmp::send_buf(dest), kmp::destination(succ), kmp::tag(tag));
@@ -63,8 +53,6 @@ void rotate_strings_right(
                      comm.mpi_communicator(), MPI_STATUS_IGNORE);
     }
     // clang-format on
-
-    std::cout << std::format("rank={} after", comm.rank()) << std::endl;
 }
 
 
