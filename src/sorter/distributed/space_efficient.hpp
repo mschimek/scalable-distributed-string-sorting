@@ -31,9 +31,9 @@ template <typename CharType, typename Permutation>
 class PermutationBuilder;
 
 template <typename CharType>
-class PermutationBuilder<CharType, InputPermutation> {
+class PermutationBuilder<CharType, SimplePermutation> {
 public:
-    using Permutation = InputPermutation;
+    using Permutation = SimplePermutation;
 
     template <PermutationStringSet StringSet, typename Subcommunicators>
     PermutationBuilder(StringSet const&, Subcommunicators const&) {}
@@ -99,9 +99,9 @@ private:
 };
 
 template <typename CharType>
-class PermutationBuilder<CharType, BikeshedStringRanks> {
+class PermutationBuilder<CharType, NonUniquePermutation> {
 public:
-    using Permutation = BikeshedStringRanks;
+    using Permutation = NonUniquePermutation;
 
     template <PermutationStringSet StringSet, typename Subcommunicators>
     PermutationBuilder(StringSet const& ss, Subcommunicators const& comms)
@@ -140,7 +140,7 @@ private:
     bool is_first_quantile_ = true;
     size_t current_depth_ = 0;
     size_t global_offset_ = 0;
-    BikeshedStringRanks permutation_;
+    NonUniquePermutation permutation_;
     std::vector<CharType> lower_bound_;
 
     template <PermutationStringPtr StringPtr>

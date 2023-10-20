@@ -170,7 +170,7 @@ template <typename Permutation>
 class PermutationSendImpl {};
 
 template <>
-class PermutationSendImpl<InputPermutation> {
+class PermutationSendImpl<SimplePermutation> {
 public:
     template <AlltoallStringsConfig config, typename StringSet, typename Communicator>
     static void send(
@@ -184,7 +184,7 @@ public:
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
         measuring_tool.start("all_to_all_strings_send_idxs");
-        InputPermutation permutation{container.make_string_set()};
+        SimplePermutation permutation{container.make_string_set()};
         container.delete_all();
 
         // todo does 7-bit compression make sense for PE and string indices
@@ -206,7 +206,7 @@ public:
 
 template <typename Permutation>
     requires std::is_same_v<Permutation, MultiLevelPermutation>
-             || std::is_same_v<Permutation, BikeshedStringRanks>
+             || std::is_same_v<Permutation, NonUniquePermutation>
 class PermutationSendImpl<Permutation> {
 public:
     template <AlltoallStringsConfig config, typename StringSet, typename Communicator>

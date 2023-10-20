@@ -26,6 +26,7 @@
 #include <tlx/sort/strings/string_ptr.hpp>
 
 #include "hash/xxhash.hpp"
+#include "kamping/communicator.hpp"
 #include "mpi/communicator.hpp"
 #include "sorter/distributed/multi_level.hpp"
 #include "util/measuringTool.hpp"
@@ -218,7 +219,6 @@ inline RemoteDuplicates compute_duplicates(
     };
 
     if (!hash_rank_pairs.empty()) {
-        // find position of the first duplicate hash value
         auto const begin = hash_rank_pairs.begin(), end = hash_rank_pairs.end();
 
         // remove all non-duplicate hash_values (similar to std::unique)

@@ -252,7 +252,7 @@ void dispatch_permutation(
     // todo maybe feature gate this
     switch (clamp_enum_value<Permutation>(args.permutation)) {
         case Permutation::simple: {
-            run_prefix_doubling<Args..., InputPermutation>(args, prefix, comm);
+            run_prefix_doubling<Args..., SimplePermutation>(args, prefix, comm);
             return;
         }
         case Permutation::multi_level: {
@@ -302,7 +302,13 @@ int main(int argc, char* argv[]) {
         "type of string generation to use "
         "(0=skewed, [1]=DNGen, 2=file, 3=skewedDNGen, 4=suffixGen)"
     );
-    cp.add_size_t('o', "permutation", args.permutation, "type of permutation to use for PDMS");
+    cp.add_size_t(
+        'o',
+        "permutation",
+        args.permutation,
+        "type of permutation to use for PDMS"
+        "([0]=simple, [1]=multi-level)"
+    );
     cp.add_string('y', "path", args.path, "path to input file");
     cp.add_double('r', "DN-ratio", args.dn_ratio, "D/N ratio of generated strings");
     cp.add_size_t('n', "num-strings", args.num_strings, "number of strings to be generated");

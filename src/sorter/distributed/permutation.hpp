@@ -63,23 +63,23 @@ void write_member(StringSet const& ss, OutputIterator const d_first) {
 
 class NoPermutation {};
 
-class InputPermutation {
+class SimplePermutation {
 public:
     using size_type = std::size_t;
     using rank_type = std::size_t;
     using index_type = std::size_t;
 
-    explicit InputPermutation() = default;
+    explicit SimplePermutation() = default;
 
-    explicit InputPermutation(std::vector<rank_type> ranks, std::vector<index_type> strings)
+    explicit SimplePermutation(std::vector<rank_type> ranks, std::vector<index_type> strings)
         : ranks_{std::move(ranks)},
           strings_{std::move(strings)} {
         assert_equal(ranks.size(), strings.size());
     }
 
     template <PermutationStringSet StringSet>
-    explicit InputPermutation(StringSet const& ss) : ranks_(ss.size()),
-                                                     strings_(ss.size()) {
+    explicit SimplePermutation(StringSet const& ss) : ranks_(ss.size()),
+                                                      strings_(ss.size()) {
         size_type i = 0;
         for (auto it = ss.begin(); it != ss.end(); ++it, ++i) {
             ranks_[i] = ss[it].PEIndex;
@@ -273,7 +273,7 @@ private:
     std::vector<RemotePermutation> remote_permutations_;
 };
 
-class BikeshedStringRanks : private MultiLevelPermutation {
+class NonUniquePermutation : private MultiLevelPermutation {
 public:
     using MultiLevelPermutation::index_type;
     using MultiLevelPermutation::rank_type;
@@ -284,9 +284,9 @@ public:
     using MultiLevelPermutation::LocalPermutation;
     using MultiLevelPermutation::RemotePermutation;
 
-    explicit BikeshedStringRanks(size_type const depth) : MultiLevelPermutation(depth) {}
+    explicit NonUniquePermutation(size_type const depth) : MultiLevelPermutation(depth) {}
 
-    BikeshedStringRanks(
+    NonUniquePermutation(
         LocalPermutation local,
         std::vector<RemotePermutation> remote,
         std::vector<offset_type> index_offsets
@@ -331,7 +331,7 @@ private:
     std::vector<offset_type> index_offsets_;
 };
 
-inline std::ostream& operator<<(std::ostream& stream, InputPermutation const& permutation) {
+inline std::ostream& operator<<(std::ostream& stream, SimplePermutation const& permutation) {
     for (size_t i = 0; i != permutation.size(); ++i) {
         stream << "{" << permutation.rank(i) << ", " << permutation.string(i) << "}, ";
     }
@@ -353,7 +353,7 @@ inline std::ostream& operator<<(std::ostream& stream, MultiLevelPermutation cons
     return stream;
 }
 
-inline std::ostream& operator<<(std::ostream& stream, BikeshedStringRanks const& permutation) {
+inline std::ostream& operator<<(std::ostream& stream, NonUniquePermutation const& permutation) {
     auto const& local = permutation.local();
     std::cout << "local permutation: ";
     std::copy(local.begin(), local.end(), std::ostream_iterator<size_t>(std::cout, ", "));

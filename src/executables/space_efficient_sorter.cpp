@@ -200,7 +200,8 @@ void run_space_efficient_sort(
     auto input_container = generate_compressed_strings<StringSet>(args, comm);
     measuring_tool.enableCommVolume();
 
-    dss_mehnert::SpaceEfficientChecker<StringSet> checker;
+    // todo determine whether using unique permutation
+    dss_mehnert::SpaceEfficientChecker<true, StringSet> checker;
     if (args.check_sorted || args.check_complete) {
         checker.store_container(input_container);
     }
