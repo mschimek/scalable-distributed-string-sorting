@@ -307,7 +307,7 @@ int main(int argc, char* argv[]) {
         "permutation",
         args.permutation,
         "type of permutation to use for PDMS"
-        "([0]=simple, [1]=multi-level)"
+        "([0]=simple, 1=multi-level)"
     );
     cp.add_string('y', "path", args.path, "path to input file");
     cp.add_double('r', "DN-ratio", args.dn_ratio, "D/N ratio of generated strings");

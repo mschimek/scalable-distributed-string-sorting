@@ -34,8 +34,9 @@ enum class CharGenerator { random = 0, file, file_segment, sentinel };
 
 enum class StringGenerator { suffix = 0, window, difference_cover, sentinel };
 
+enum class Permutation { simple = 0, multi_level, non_unqiue, sentinel };
+
 struct SorterArgs : public CommonArgs {
-    bool use_quantile_sampler = false;
     SamplerArgs quantile_sampler;
     size_t combined_gen = static_cast<size_t>(CombinedGenerator::none);
     size_t char_gen = static_cast<size_t>(CharGenerator::random);
@@ -48,6 +49,7 @@ struct SorterArgs : public CommonArgs {
     double dn_ratio = 0.5;
     bool shuffle = false;
     std::string path;
+    size_t permutation = static_cast<size_t>(Permutation::multi_level);
     size_t quantile_size = 100 * 1024 * 1024;
     size_t iteration = 0;
     std::vector<size_t> levels;
@@ -56,8 +58,13 @@ struct SorterArgs : public CommonArgs {
 
     std::string get_prefix(dss_mehnert::Communicator const& comm) const {
         // todo add relevant args
+        // todo what about the permutation
         // clang-format off
         return CommonArgs::get_prefix(comm)
+               + " quantile_chars="   + std::to_string(quantile_sampler.sample_chars)
+               + " quantile_indexed=" + std::to_string(quantile_sampler.sample_indexed)
+               + " quantile_random="  + std::to_string(quantile_sampler.sample_random)
+               + " quantile_factor="  + std::to_string(quantile_sampler.sampling_factor)
                + " num_chars="        + std::to_string(num_chars)
                + " num_strings="      + std::to_string(num_strings)
                + " len_strings="      + std::to_string(len_strings)
@@ -171,17 +178,17 @@ template <
     typename CharType,
     typename AlltoallConfig,
     typename RedistributionPolicy,
-    typename BloomFilterPolicy>
+    typename BloomFilterPolicy,
+    typename Permutation>
 void run_space_efficient_sort(
     SorterArgs const& args, std::string prefix, dss_mehnert::Communicator const& comm
 ) {
-    using namespace dss_schimek;
     namespace sems = dss_mehnert::sorter::space_efficient;
 
     constexpr auto alltoall_config = AlltoallConfig();
+    constexpr bool is_unique = Permutation::is_unique;
 
     using StringSet = dss_mehnert::CompressedStringSet<CharType>;
-    // todo maybe use separate sample policies
     using PartitionPolicy = dss_mehnert::SpaceEfficientPartitionPolicy<CharType>;
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
     using Sorter = sems::SpaceEfficientSort<
@@ -189,7 +196,8 @@ void run_space_efficient_sort(
         RedistributionPolicy,
         PartitionPolicy,
         PartitionPolicy,
-        BloomFilterPolicy>;
+        BloomFilterPolicy,
+        Permutation>;
 
     using dss_mehnert::measurement::MeasuringTool;
     auto& measuring_tool = MeasuringTool::measuringTool();
@@ -200,8 +208,7 @@ void run_space_efficient_sort(
     auto input_container = generate_compressed_strings<StringSet>(args, comm);
     measuring_tool.enableCommVolume();
 
-    // todo determine whether using unique permutation
-    dss_mehnert::SpaceEfficientChecker<true, StringSet> checker;
+    dss_mehnert::SpaceEfficientChecker<is_unique, StringSet> checker;
     if (args.check_sorted || args.check_complete) {
         checker.store_container(input_container);
     }
@@ -214,14 +221,13 @@ void run_space_efficient_sort(
     Subcommunicators comms{first_level, args.levels.end(), comm};
     measuring_tool.stop("none", "create_communicators", comm);
 
-    // todo add CLI options for quantile partition policy
     Sorter merge_sort{
         dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
             args.sampler,
             args.get_splitter_sorter()
         ),
         dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
-            args.use_quantile_sampler ? args.quantile_sampler : args.sampler,
+            args.quantile_sampler,
             args.get_splitter_sorter()
         ),
         args.quantile_size};
@@ -252,7 +258,26 @@ void run(SorterArgs const& args) {
 
     // todo print config
 
-    run_space_efficient_sort<Args...>(args, prefix, comm);
+    using namespace dss_mehnert;
+
+    switch (clamp_enum_value<Permutation>(args.permutation)) {
+        case Permutation::simple: {
+            run_space_efficient_sort<Args..., SimplePermutation>(args, prefix, comm);
+            return;
+        }
+        case Permutation::multi_level: {
+            run_space_efficient_sort<Args..., MultiLevelPermutation>(args, prefix, comm);
+            return;
+        }
+        case Permutation::non_unqiue: {
+            run_space_efficient_sort<Args..., NonUniquePermutation>(args, prefix, comm);
+            return;
+        }
+        case Permutation::sentinel: {
+            break;
+        }
+    }
+    tlx_die("invalid permutation");
 }
 
 int main(int argc, char* argv[]) {
@@ -264,9 +289,10 @@ int main(int argc, char* argv[]) {
 
     add_common_args(args, cp);
 
+    bool use_quantile_sampler = false;
     cp.add_flag(
         "use-quantile-sampler",
-        args.use_quantile_sampler,
+        use_quantile_sampler,
         "use separate quantile sampling policy"
     );
     cp.add_flag(
@@ -319,6 +345,13 @@ int main(int argc, char* argv[]) {
     cp.add_size_t('D', "difference-cover", args.difference_cover, "size of difference cover");
     cp.add_flag("shuffle", args.shuffle, "shuffle the generated strings");
     cp.add_string('y', "path", args.path, "path to input file");
+    cp.add_size_t(
+        'o',
+        "permutation",
+        args.permutation,
+        "type of permutation to use for SEMS"
+        "(0=simple, [1]=multi-level, 2=non-unique)"
+    );
     cp.add_bytes(
         'q',
         "quantile-size",
@@ -337,6 +370,9 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
+    if (!use_quantile_sampler) {
+        args.quantile_sampler = args.sampler;
+    }
     parse_level_arg(levels_param, args.levels);
 
     kamping::Environment env{argc, argv};
