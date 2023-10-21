@@ -65,6 +65,8 @@ class NoPermutation {};
 
 class SimplePermutation {
 public:
+    static constexpr bool is_unique = true;
+
     using size_type = std::size_t;
     using rank_type = std::size_t;
     using index_type = std::size_t;
@@ -77,7 +79,7 @@ public:
         assert_equal(ranks.size(), strings.size());
     }
 
-    template <PermutationStringSet StringSet>
+    template <typename StringSet>
     explicit SimplePermutation(StringSet const& ss) : ranks_(ss.size()),
                                                       strings_(ss.size()) {
         size_type i = 0;
@@ -132,8 +134,9 @@ private:
 
 class MultiLevelPermutation {
 public:
-    using size_type = std::size_t;
+    static constexpr bool is_unique = true;
 
+    using size_type = std::size_t;
     using rank_type = int;
     using index_type = std::size_t;
 
@@ -275,6 +278,8 @@ private:
 
 class NonUniquePermutation : private MultiLevelPermutation {
 public:
+    static constexpr bool is_unique = false;
+
     using MultiLevelPermutation::index_type;
     using MultiLevelPermutation::rank_type;
     using MultiLevelPermutation::size_type;
@@ -368,7 +373,7 @@ inline std::ostream& operator<<(std::ostream& stream, NonUniquePermutation const
 
     auto const& offsets = permutation.index_offsets();
     std::cout << "index offsets: ";
-    std::copy(offsets.begin(), offsets.end(), std::ostream_iterator<uint8_t>(std::cout, ", "));
+    std::copy(offsets.begin(), offsets.end(), std::ostream_iterator<int>(std::cout, ", "));
     std::cout << std::endl;
     return stream;
 }

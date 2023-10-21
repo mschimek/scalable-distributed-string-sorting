@@ -110,7 +110,6 @@ public:
 
     template <PermutationStringSet StringSet>
     void reset(StringSet const& ss) {
-        is_first_quantile_ = false;
         current_depth_ = 0;
         permutation_.local().write(ss);
     }
@@ -127,13 +126,14 @@ public:
         write_offsets(strptr, comms.comm_root());
         permutation_.apply(global_permutation, global_offset_, comms);
 
-        // todo this is being computed/communicated redundantly multiple times
         auto const& offsets = permutation_.index_offsets();
+        // todo this is being computed/communicated redundantly multiple times
         auto const local_offset_sum = std::accumulate(offsets.begin(), offsets.end(), size_t{0});
         global_offset_ += comms.comm_root().allreduce_single(
             kamping::send_buf(local_offset_sum),
             kamping::op(std::plus<>{})
         );
+        is_first_quantile_ = false;
     }
 
 private:
@@ -145,10 +145,9 @@ private:
 
     template <PermutationStringPtr StringPtr>
     void write_offsets(StringPtr const& strptr, Communicator const& comm) {
-        using String = StringPtr::StringSet::String;
-
         auto const& ss = strptr.active();
         auto is_equal = [&ss](auto& buf, auto const& rhs) {
+            using String = StringPtr::StringSet::String;
             String const lhs{buf.data(), Length{buf.size() - 1}};
             return dss_schimek::calc_lcp(ss, lhs, rhs) == rhs.length;
         };
@@ -158,7 +157,7 @@ private:
 
         // compare first string on PE 0 to last string of previous quantile
         if (!is_first_quantile_ && comm.rank() == 0 && !ss.empty()) {
-            index_offsets.front() = is_equal(lower_bound_, *ss.begin());
+            index_offsets.front() = !is_equal(lower_bound_, *ss.begin());
         }
 
         std::vector<CharType> lower_bound{0};
@@ -167,7 +166,7 @@ private:
             lower_bound.resize(last.length + 1);
             std::copy_n(last.string, last.length, lower_bound.begin());
         } else if (comm.rank() == 0) {
-            lower_bound = lower_bound_;
+            lower_bound = lower_bound_; // TODO maybe move
         }
 
         // shift last local string (or string from previous quantile) to the right
@@ -183,14 +182,14 @@ private:
         }
 
         // compare first string to string from (in)directly preceeding PE
-        if (comm.rank() > first_non_empty_rank && !ss.empty()) {
-            index_offsets.front() = is_equal(lower_bound_, *ss.begin());
+        if (!ss.empty() && comm.rank() > first_non_empty_rank) {
+            index_offsets.front() = !is_equal(lower_bound_, *ss.begin());
         }
 
         // compare local strings using LCP values
         if (size_t i = 1; !ss.empty()) {
             for (auto it = ss.begin() + 1; it != ss.end(); ++i, ++it) {
-                index_offsets[i] = (strptr.get_lcp(i) == ss[it].length);
+                index_offsets[i] = (strptr.get_lcp(i) != ss[it].length);
             }
         }
     }
@@ -207,7 +206,8 @@ template <
     typename RedistributionPolicy,
     typename PartitionPolicy,
     typename QuantilePolicy,
-    typename BloomFilter>
+    typename BloomFilter,
+    typename Permutation>
 class SpaceEfficientSort
     : private QuantilePolicyBase<QuantilePolicy>,
       private prefix_doubling::
@@ -277,8 +277,7 @@ public:
         this->measuring_tool_.start("sort_quantiles", "sort_quantiles_overall");
 
         // todo allow this to be selected externally through a template parameter
-        PermutationBuilder<Char, MultiLevelPermutation> builder{strptr.active(), comms};
-        // PermutationBuilder<Char, BikeshedStringRanks> builder{strptr.active(), comms};
+        PermutationBuilder<Char, Permutation> builder{strptr.active(), comms};
 
         for (size_t i = 0, local_offset = 0; i != quantile_sizes.size(); ++i) {
             this->measuring_tool_.setQuantile(i);

@@ -99,6 +99,7 @@ get_predecessor(T const& last_elem, bool const is_empty, Communicator const& com
         values_on_rank_0(top)
     );
 
+    std::optional<T> result;
     if (!is_empty) {
         Request req_succ;
         T pred_elem;
@@ -111,14 +112,11 @@ get_predecessor(T const& last_elem, bool const is_empty, Communicator const& com
         }
         req_succ.wait();
 
-        if (predecessor == bottom) {
-            return {};
-        } else {
-            return pred_elem;
+        if (predecessor != bottom) {
+            result.emplace(pred_elem);
         };
-    } else {
-        return {};
     }
+    return result;
 }
 
 template <typename StringSet>
@@ -449,18 +447,20 @@ public:
         using namespace kamping;
 
         auto recv_ranks = comm.gatherv(send_buf(global_ranks)).extract_recv_buffer();
-        auto const begin = recv_ranks.begin(), end = recv_ranks.end();
-        std::sort(begin, end);
 
-        auto is_complete = true;
-        std::adjacent_difference(begin, end, begin);
+        bool is_complete = true;
+        if (comm.is_root()) {
+            auto const begin = recv_ranks.begin(), end = recv_ranks.end();
+            std::sort(begin, end);
+            std::adjacent_difference(begin, end, begin);
 
-        if (!recv_ranks.empty()) {
-            is_complete &= recv_ranks.front() == 0;
-            if (use_unique_permutation) {
-                is_complete &= std::all_of(begin + 1, end, [](auto const x) { return x == 1; });
-            } else {
-                is_complete &= std::all_of(begin + 1, end, [](auto const x) { return x <= 1; });
+            if (!recv_ranks.empty()) {
+                is_complete &= recv_ranks.front() == 0;
+                if (use_unique_permutation) {
+                    is_complete &= std::all_of(begin + 1, end, [](auto const x) { return x == 1; });
+                } else {
+                    is_complete &= std::all_of(begin + 1, end, [](auto const x) { return x <= 1; });
+                }
             }
         }
         return comm.allreduce_single(send_buf({is_complete}), op(ops::logical_and<>{}));
