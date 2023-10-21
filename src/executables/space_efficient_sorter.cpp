@@ -178,7 +178,7 @@ template <
     typename CharType,
     typename AlltoallConfig,
     typename RedistributionPolicy,
-    typename BloomFilterPolicy,
+    typename BloomFilter,
     typename Permutation>
 void run_space_efficient_sort(
     SorterArgs const& args, std::string prefix, dss_mehnert::Communicator const& comm
@@ -191,13 +191,11 @@ void run_space_efficient_sort(
     using StringSet = dss_mehnert::CompressedStringSet<CharType>;
     using PartitionPolicy = dss_mehnert::SpaceEfficientPartitionPolicy<CharType>;
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
-    using Sorter = sems::SpaceEfficientSort<
-        alltoall_config,
-        RedistributionPolicy,
-        PartitionPolicy,
-        PartitionPolicy,
-        BloomFilterPolicy,
-        Permutation>;
+
+    // todo make this selectable
+    using BloomFilterPolicy =
+        sems::BloomFilterFirst<alltoall_config, RedistributionPolicy, PartitionPolicy, BloomFilter>;
+    using Sorter = sems::SpaceEfficientSort<PartitionPolicy, BloomFilterPolicy, Permutation>;
 
     using dss_mehnert::measurement::MeasuringTool;
     auto& measuring_tool = MeasuringTool::measuringTool();

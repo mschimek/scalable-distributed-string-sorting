@@ -49,6 +49,42 @@ protected:
     using MeasuringTool = measurement::MeasuringTool;
     MeasuringTool& measuring_tool_ = MeasuringTool::measuringTool();
 
+    template <typename StringSet, typename PermutationBuilder>
+        requires(has_member<typename StringSet::String, Length>)
+    void sort(
+        StringLcpContainer<StringSet>& container,
+        Subcommunicators const& comms,
+        size_t const splitter_max_length,
+        PermutationBuilder& builder
+    ) {
+        auto const& comm_root = comms.comm_root();
+
+        sample::MaxLength arg{splitter_max_length};
+
+        if constexpr (!Subcommunicators::is_single_level) {
+            for (size_t round = 0; auto level: comms) {
+                this->measuring_tool_.start("sort_globally", "partial_sorting");
+                auto const& comm = level.comm_exchange;
+                auto const strptr = container.make_string_lcp_ptr();
+                auto const send_counts = compute_sorted_send_counts(strptr, arg, level);
+                exchange_and_merge(container, send_counts, arg, builder, comm);
+                this->measuring_tool_.stop("sort_globally", "partial_sorting", comm_root);
+                this->measuring_tool_.setRound(++round);
+            }
+        }
+
+        {
+            this->measuring_tool_.start("sort_globally", "final_sorting");
+            auto const strptr = container.make_string_lcp_ptr();
+            auto const& comm = comms.comm_final();
+            auto const send_counts = compute_sorted_send_counts(strptr, arg, comm);
+            exchange_and_merge(container, send_counts, arg, builder, comm);
+            this->measuring_tool_.stop("sort_globally", "final_sorting", comm_root);
+        }
+
+        this->measuring_tool_.setRound(0);
+    }
+
     template <typename StringPtr, typename ExtraArg>
     std::vector<int> compute_sorted_send_counts(
         StringPtr const& strptr,
@@ -201,37 +237,15 @@ public:
             this->measuring_tool_.stop("local_sorting", "sort_locally", comm_root);
         }
 
-        _internal::DummyPermutationBuilder builder;
         if (comm_root.size() > 1) {
+            _internal::DummyPermutationBuilder builder;
+
             this->measuring_tool_.start("avg_lcp");
             auto const avg_lcp = compute_global_lcp_average(container.lcps(), comm_root);
-
-            // todo this formula is highly questionable
-            sample::MaxLength arg{2 * avg_lcp + 8};
             this->measuring_tool_.stop("avg_lcp");
 
-            if constexpr (!Subcommunicators::is_single_level) {
-                for (size_t round = 0; auto level: comms) {
-                    this->measuring_tool_.start("sort_globally", "partial_sorting");
-                    auto const& comm = level.comm_exchange;
-                    auto const strptr = container.make_string_lcp_ptr();
-                    auto const send_counts = Base::compute_sorted_send_counts(strptr, arg, level);
-                    Base::exchange_and_merge(container, send_counts, arg, builder, comm);
-                    this->measuring_tool_.stop("sort_globally", "partial_sorting", comm_root);
-                    this->measuring_tool_.setRound(++round);
-                }
-            }
-
-            {
-                this->measuring_tool_.start("sort_globally", "final_sorting");
-                auto const strptr = container.make_string_lcp_ptr();
-                auto const& comm = comms.comm_final();
-                auto const send_counts = Base::compute_sorted_send_counts(strptr, arg, comm);
-                Base::exchange_and_merge(container, send_counts, arg, builder, comm);
-                this->measuring_tool_.stop("sort_globally", "final_sorting", comm_root);
-            }
-
-            this->measuring_tool_.setRound(0);
+            // todo this formula is highly questionable
+            Base::sort(container, comms, 2 * avg_lcp + 8, builder);
         }
     }
 };

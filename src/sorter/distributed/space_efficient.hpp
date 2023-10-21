@@ -195,35 +195,104 @@ private:
     }
 };
 
+template <AlltoallStringsConfig config, typename RedistributionPolicy, typename PartitionPolicy>
+class NoBloomFilter
+    : protected BaseDistributedMergeSort<config, RedistributionPolicy, PartitionPolicy> {
+public:
+    using Base = BaseDistributedMergeSort<config, RedistributionPolicy, PartitionPolicy>;
+    using Subcommunicators = Base::Subcommunicators;
+
+    using Base::BaseDistributedMergeSort;
+
+    class State {
+        size_t max_length;
+
+        sample::MaxLength get_quantile_arg() const { return {max_length}; }
+    };
+
+    template <PermutationStringPtr StringPtr>
+    State init(StringPtr const& strptr, Subcommunicators const& comms) {
+        this->measuring_tool_.start("avg_lcp");
+        std::span const lcps{strptr.lcp(), strptr.size()};
+        auto const avg_lcp = compute_global_lcp_average(lcps, comms.comm_root());
+        this->measuring_tool_.stop("avg_lcp");
+
+        // todo this formulate is still questionable
+        return {2 * avg_lcp + 8};
+    }
+
+    template <PermutationStringSet StringSet, typename PermutationBuilder>
+    void sort(
+        State const& state,
+        StringLcpContainer<StringSet>& quantile,
+        Subcommunicators const& comms,
+        PermutationBuilder& builder,
+        size_t const
+    ) {
+        Base::sort(quantile, comms, state.max_length, builder);
+    }
+};
+
+template <
+    AlltoallStringsConfig config,
+    typename RedistributionPolicy,
+    typename PartitionPolicy,
+    typename BloomFilter>
+class BloomFilterFirst
+    : protected prefix_doubling::
+          BasePrefixDoublingMergeSort<config, RedistributionPolicy, PartitionPolicy, BloomFilter> {
+public:
+    using Base = prefix_doubling::
+        BasePrefixDoublingMergeSort<config, RedistributionPolicy, PartitionPolicy, BloomFilter>;
+    using Subcommunicators = Base::Subcommunicators;
+
+    using Base::BasePrefixDoublingMergeSort;
+
+    struct State {
+        std::vector<size_t> prefixes;
+
+        sample::DistPrefixes get_quantile_arg() const { return {prefixes}; }
+    };
+
+    template <PermutationStringPtr StringPtr>
+    State init(StringPtr const& strptr, Subcommunicators const& comms) {
+        return {Base::run_bloom_filter(strptr, comms, start_depth)};
+    }
+
+    template <PermutationStringSet StringSet, typename PermutationBuilder>
+    void sort(
+        State const& state,
+        StringLcpContainer<StringSet>& quantile,
+        Subcommunicators const& comms,
+        PermutationBuilder& builder,
+        size_t const quantile_offset
+    ) {
+        auto const begin = state.prefixes.begin() + quantile_offset;
+        std::span const quantile_prefixes{begin, quantile.size()};
+        Base::sort(quantile, comms, quantile_prefixes, builder);
+    }
+
+private:
+    static constexpr size_t start_depth = 8;
+};
 
 // this struct is required to disambiguate the PartitionPolicy used
 // in sorting and the one use to compute quantiles
 template <typename PartitionPolicy>
 struct QuantilePolicyBase : public PartitionPolicy {};
 
-template <
-    AlltoallStringsConfig config,
-    typename RedistributionPolicy,
-    typename PartitionPolicy,
-    typename QuantilePolicy,
-    typename BloomFilter,
-    typename Permutation>
-class SpaceEfficientSort
-    : private QuantilePolicyBase<QuantilePolicy>,
-      private prefix_doubling::
-          BasePrefixDoublingMergeSort<config, RedistributionPolicy, PartitionPolicy, BloomFilter> {
+template <typename QuantilePolicy, typename BloomFilterPolicy, typename Permutation>
+class SpaceEfficientSort : private QuantilePolicyBase<QuantilePolicy>, private BloomFilterPolicy {
 public:
     using QuantilePolicy_ = QuantilePolicyBase<QuantilePolicy>;
-    using Base = prefix_doubling::
-        BasePrefixDoublingMergeSort<config, RedistributionPolicy, PartitionPolicy, BloomFilter>;
+    using Subcommunicators = BloomFilterPolicy::Subcommunicators;
 
-    using Subcommunicators = Base::Subcommunicators;
-
+    template <typename PartitionPolicy>
     SpaceEfficientSort(
         PartitionPolicy partition, QuantilePolicy quantile_partition, size_t const quantile_size
     )
         : QuantilePolicy_{std::move(quantile_partition)},
-          Base{std::move(partition)},
+          BloomFilterPolicy{std::move(partition)},
           quantile_size_{quantile_size} {}
 
     template <typename StringSet>
@@ -267,16 +336,14 @@ public:
             return global_permutation;
         }
 
-        auto const prefixes = Base::run_bloom_filter(strptr, comms, start_depth);
+        auto const state = BloomFilterPolicy::init(strptr, comms);
 
         this->measuring_tool_.start("compute_quantiles", "compute_quantiles");
-        sample::DistPrefixes const arg{prefixes};
-        auto const quantile_sizes = compute_quantiles(strptr, arg, comm_root);
+        auto const quantile_sizes = compute_quantiles(strptr, state.get_quantile_arg(), comm_root);
         this->measuring_tool_.stop("compute_quantiles", "compute_quantiles", comm_root);
 
         this->measuring_tool_.start("sort_quantiles", "sort_quantiles_overall");
 
-        // todo allow this to be selected externally through a template parameter
         PermutationBuilder<Char, Permutation> builder{strptr.active(), comms};
 
         for (size_t i = 0, local_offset = 0; i != quantile_sizes.size(); ++i) {
@@ -286,7 +353,6 @@ public:
             this->measuring_tool_.start("sort_quantiles", "init_permutation");
             auto const size = quantile_sizes[i];
             auto const quantile = strptr.sub(local_offset, size);
-            std::span const quantile_prefixes{prefixes.begin() + local_offset, size};
             builder.reset(quantile.active());
             this->measuring_tool_.stop("sort_quantiles", "init_permutation");
 
@@ -302,7 +368,7 @@ public:
             this->measuring_tool_.add(quantile_size_chars, "quantile_size");
 
             // this->measuring_tool_.disable();
-            Base::sort(quantile_container, comms, quantile_prefixes, builder);
+            BloomFilterPolicy::sort(state, quantile_container, comms, builder, local_offset);
             // this->measuring_tool_.enable();
             this->measuring_tool_.stop("sort_globally", "sort_quantile");
 

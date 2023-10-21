@@ -384,7 +384,7 @@ public:
         using namespace kamping;
         namespace pdms = dss_mehnert::sorter::prefix_doubling;
 
-        auto const num_quantiles = compute_num_quantiles(comm);
+        auto const num_quantiles = std::max<size_t>(1, compute_num_quantiles(comm));
         auto const max_elem = std::max_element(global_ranks.begin(), global_ranks.end());
         auto const max_rank = comm.allreduce_single(
             kamping::send_buf(global_ranks.empty() ? static_cast<size_t>(0) : *max_elem),
@@ -437,8 +437,10 @@ public:
                 kamping::op(kamping::ops::max<>{})
             );
 
-            comm.bcast(send_recv_buf(lower_bound), root(last_non_empty));
-            comm.bcast(send_recv_buf(rank_lower_bound), root(last_non_empty));
+            if (comm.is_valid_rank(last_non_empty)) {
+                comm.bcast(send_recv_buf(lower_bound), root(last_non_empty));
+                comm.bcast(send_recv_buf(rank_lower_bound), root(last_non_empty));
+            }
         }
         return comm.allreduce_single(send_buf({is_sorted}), op(ops::logical_and<>{}));
     }
