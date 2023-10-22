@@ -415,7 +415,7 @@ public:
                     lower_bound = std::move(*pred_string);
                 }
 
-                auto const last_rank = ss.empty() ? 0 : global_ranks.back();
+                auto const last_rank = ss.empty() ? 0 : quantile_ranks.back();
                 if (auto pred_rank = get_predecessor(last_rank, ss.empty(), comm)) {
                     rank_lower_bound = *pred_rank;
                 }
