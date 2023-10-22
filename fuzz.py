@@ -51,6 +51,7 @@ def fuzz_merge_sort(target, fixed_args, min_procs, max_procs, repeat):
         procs = random.randint(min_procs, max_procs)
         levels = get_levels(procs)
 
+        permutation = random.randint(0, 1)
         num_strings = random.randint(0, 10000)
         len_strings = random.randint(1, 500)
         dn_ratio = random.random()
@@ -60,8 +61,8 @@ def fuzz_merge_sort(target, fixed_args, min_procs, max_procs, repeat):
               f" target/{target}/distributed_sorter -v -V -i 3"
               f" --num-strings {num_strings} --len-strings {len_strings}"
               f" --DN-ratio {dn_ratio} --sampling-factor {sampling_factor}"
-              f" {' '.join(fixed_args)} {' '.join(args)}"
-              f" {' '.join(map(str, levels))}")
+              f" --permutation {permutation} {' '.join(fixed_args)}"
+              f" {' '.join(args)} {' '.join(map(str, levels))}")
 
 def fuzz_space_efficient_sort(target, fixed_args, min_procs, max_procs, repeat):
     class StringGenerator(enum.Enum):
@@ -78,6 +79,7 @@ def fuzz_space_efficient_sort(target, fixed_args, min_procs, max_procs, repeat):
         procs = random.randint(min_procs, max_procs)
         levels = get_levels(procs)
 
+        permutation = random.randint(0, 2)
         generator = random.choice(list(StringGenerator))
         num_chars = random.randint(1, 50000) \
             if generator == StringGenerator.Suffix \
@@ -90,12 +92,12 @@ def fuzz_space_efficient_sort(target, fixed_args, min_procs, max_procs, repeat):
         step = random.randint(1, 16)
         dc = random.choice([3, 7, 13, 21, 31, 32, 64, 512, 1024, 2048, 4096, 8192])
 
-        quantile_size = random.randint(20, 200000)
+        quantile_size = random.randint(2, 2000)
         sampling_factor = random.randint(1, 10)
         quantile_factor = random.randint(1, 10)
 
         run_or_exit(f"mpirun -n {procs} --oversubscribe"
-            f" target/{target}/space_efficient_sorter -v -V -i 3"
+            f" target/{target}/space_efficient_sorter -v -V -i 3 --permutation {permutation}"
             f" --sampling-factor {sampling_factor} --use-quantile-sampler"
             f" --quantile-factor {quantile_factor} --quantile-size {quantile_size}KiB"
             f" --combined-generator {combined_gnerator} --string-generator {string_generator}"
