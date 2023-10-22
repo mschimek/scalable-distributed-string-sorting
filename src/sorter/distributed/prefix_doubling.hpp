@@ -83,6 +83,9 @@ protected:
         auto const prefixes = filter.compute_distinguishing_prefixes(strptr, comms, start_depth);
         this->measuring_tool_.stop("bloomfilter", "bloomfilter_overall", comms.comm_root());
 
+        auto const total_prefix = std::accumulate(prefixes.begin(), prefixes.end(), size_t{0});
+        this->measuring_tool_.add(total_prefix, "total_dist_prefix");
+
         return prefixes;
     }
 
