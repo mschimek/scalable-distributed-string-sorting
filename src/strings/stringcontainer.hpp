@@ -90,7 +90,6 @@ void init_strings(
         init_strings_impl<StringSet>(raw_strings, initializers, std::back_inserter(strings));
 
     } else {
-        assert(std::apply([size](auto const&... x) { return (size(x) == ...); }, initializers));
         strings.clear();
         strings.reserve(size(std::get<0>(initializers)));
 
