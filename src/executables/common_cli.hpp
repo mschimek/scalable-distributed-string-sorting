@@ -16,6 +16,7 @@
 #include "options.hpp"
 #include "sorter/distributed/bloomfilter.hpp"
 #include "sorter/distributed/partition.hpp"
+#include "sorter/distributed/prefix_doubling.hpp"
 #include "sorter/distributed/redistribution.hpp"
 #include "sorter/distributed/sample.hpp"
 #include "strings/stringset.hpp"
@@ -377,15 +378,15 @@ template <typename Char>
 using MergeSortPartitionPolicy =
     PolymorphicPartitionPolicy<StringSet<Char, Length>, sample::MaxLength>;
 
-template <typename Char>
+template <typename Char, typename LengthType, typename Permutation>
 using PrefixDoublingPartitionPolicy = PolymorphicPartitionPolicy<
-    StringSet<Char, Length, StringIndex, PEIndex>,
+    sorter::AugmentedStringSet<StringSet<Char, LengthType>, Permutation>,
     sample::NoExtraArg,
     sample::DistPrefixes>;
 
-template <typename Char>
+template <typename Char, typename LengthType, typename Permutation>
 using SpaceEfficientPartitionPolicy = PolymorphicPartitionPolicy<
-    CompressedStringSet<Char, StringIndex, PEIndex>,
+    sorter::AugmentedStringSet<CompressedStringSet<Char, LengthType>, Permutation>,
     sample::NoExtraArg,
     sample::MaxLength,
     sample::DistPrefixes>;

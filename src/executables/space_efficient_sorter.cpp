@@ -221,8 +221,10 @@ void run_space_efficient_sort(
 
     constexpr bool is_unique = Permutation::is_unique;
 
-    using StringSet = dss_mehnert::CompressedStringSet<CharType>;
-    using PartitionPolicy = dss_mehnert::SpaceEfficientPartitionPolicy<CharType>;
+    // todo choose correct Length types
+    using StringSet = dss_mehnert::CompressedStringSet<CharType, dss_mehnert::IntLength>;
+    using PartitionPolicy =
+        dss_mehnert::SpaceEfficientPartitionPolicy<CharType, dss_mehnert::IntLength, Permutation>;
     using Subcommunicators = BloomFilterPolicy::Subcommunicators;
 
     using Sorter = sems::SpaceEfficientSort<PartitionPolicy, BloomFilterPolicy, Permutation>;
@@ -282,27 +284,50 @@ void run_space_efficient_sort(
     measuring_tool.reset();
 }
 
-template <typename... Args>
-void dispatch_permutation(SorterArgs const& args) {
+template <
+    typename CharType,
+    typename AlltoallConfig,
+    typename RedistributionPolicy,
+    typename BloomFilter,
+    typename Permutation>
+void dispatch_bloomfilter_policy(SorterArgs const& args) {
+    namespace sems = dss_mehnert::sorter::space_efficient;
+
     dss_mehnert::Communicator comm;
-
     auto prefix = args.get_prefix(comm);
-
     // todo print config
 
+    constexpr auto config = AlltoallConfig();
+    using PartitionPolicy =
+        dss_mehnert::SpaceEfficientPartitionPolicy<CharType, dss_mehnert::IntLength, Permutation>;
+
+    if (args.prefix_doubling) {
+        using BloomFilterPolicy =
+            sems::BloomFilterFirst<config, RedistributionPolicy, PartitionPolicy, BloomFilter>;
+        run_space_efficient_sort<CharType, BloomFilterPolicy, Permutation>(args, prefix, comm);
+    } else {
+        // todo maybe add cmake flag for this
+        using BloomFilterPolicy =
+            sems::NoBloomFilter<config, RedistributionPolicy, PartitionPolicy>;
+        run_space_efficient_sort<CharType, BloomFilterPolicy, Permutation>(args, prefix, comm);
+    }
+}
+
+template <typename... Args>
+void dispatch_permutation(SorterArgs const& args) {
     using namespace dss_mehnert;
 
     switch (clamp_enum_value<Permutation>(args.permutation)) {
         case Permutation::simple: {
-            run_space_efficient_sort<Args..., SimplePermutation>(args, prefix, comm);
+            dispatch_bloomfilter_policy<Args..., SimplePermutation>(args);
             return;
         }
         case Permutation::multi_level: {
-            run_space_efficient_sort<Args..., MultiLevelPermutation>(args, prefix, comm);
+            dispatch_bloomfilter_policy<Args..., MultiLevelPermutation>(args);
             return;
         }
         case Permutation::non_unqiue: {
-            run_space_efficient_sort<Args..., NonUniquePermutation>(args, prefix, comm);
+            dispatch_bloomfilter_policy<Args..., NonUniquePermutation>(args);
             return;
         }
         case Permutation::sentinel: {
@@ -310,29 +335,6 @@ void dispatch_permutation(SorterArgs const& args) {
         }
     }
     tlx_die("invalid permutation");
-}
-
-template <
-    typename CharType,
-    typename AlltoallConfig,
-    typename RedistributionPolicy,
-    typename BloomFilter>
-void dispatch_bloomfilter_policy(SorterArgs const& args) {
-    namespace sems = dss_mehnert::sorter::space_efficient;
-
-    constexpr auto config = AlltoallConfig();
-    using PartitionPolicy = dss_mehnert::SpaceEfficientPartitionPolicy<CharType>;
-
-    if (args.prefix_doubling) {
-        using BloomFilterPolicy =
-            sems::BloomFilterFirst<config, RedistributionPolicy, PartitionPolicy, BloomFilter>;
-        dispatch_permutation<CharType, BloomFilterPolicy>(args);
-    } else {
-        // todo maybe add cmake flag for this
-        using BloomFilterPolicy =
-            sems::NoBloomFilter<config, RedistributionPolicy, PartitionPolicy>;
-        dispatch_permutation<CharType, BloomFilterPolicy>(args);
-    }
 }
 
 int main(int argc, char* argv[]) {
@@ -442,7 +444,7 @@ int main(int argc, char* argv[]) {
 
     for (size_t i = 0; i < args.num_iterations; ++i) {
         args.iteration = i;
-        dispatch_common_args([&]<typename... T> { dispatch_bloomfilter_policy<T...>(args); }, args);
+        dispatch_common_args([&]<typename... T> { dispatch_permutation<T...>(args); }, args);
     }
 
     return EXIT_SUCCESS;

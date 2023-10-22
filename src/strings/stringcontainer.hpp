@@ -56,7 +56,7 @@ void init_strings_impl(
             size_t const str_len = std::distance(str_begin, str_end);
             *d_str = std::apply(
                 [=](Initializer<Member, InputIt> const&... init) {
-                    return String{&*str_begin, Length{str_len}, Member{init.begin[i]}...};
+                    return String{&*str_begin, str_len, Member{init.begin[i]}...};
                 },
                 initializers
             );

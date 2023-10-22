@@ -148,7 +148,7 @@ private:
         auto const& ss = strptr.active();
         auto is_equal = [&ss](auto& buf, auto const& rhs) {
             using String = StringPtr::StringSet::String;
-            String const lhs{buf.data(), Length{buf.size() - 1}};
+            String const lhs{buf.data(), buf.size() - 1};
             return dss_schimek::calc_lcp(ss, lhs, rhs) == rhs.length;
         };
 
@@ -166,7 +166,7 @@ private:
             lower_bound.resize(last.length + 1);
             std::copy_n(last.string, last.length, lower_bound.begin());
         } else if (comm.rank() == 0) {
-            lower_bound = lower_bound_; // TODO maybe move
+            std::swap(lower_bound, lower_bound_);
         }
 
         // shift last local string (or string from previous quantile) to the right
@@ -298,11 +298,12 @@ public:
     template <typename StringSet>
     std::vector<size_t>
     sort(StringLcpContainer<StringSet>&& container, Subcommunicators const& comms)
-        requires(!PermutationStringSet<StringSet>)
+        requires(!has_permutation_members<StringSet>)
     {
         this->measuring_tool_.start("augment_container");
         auto const rank = comms.comm_root().rank();
-        auto augmented_container = augment_string_container(std::move(container), rank);
+        auto augmented_container =
+            augment_string_container<Permutation>(std::move(container), rank);
         this->measuring_tool_.stop("augment_container");
 
         return sort(std::move(augmented_container), comms);
@@ -312,7 +313,6 @@ public:
     std::vector<size_t>
     sort(StringLcpContainer<StringSet>&& container, Subcommunicators const& comms) {
         using Char = StringSet::Char;
-
         auto const strptr = container.make_string_lcp_ptr();
         auto const& comm_root = comms.comm_root();
 
@@ -328,7 +328,7 @@ public:
         if (comm_root.size() == 1) {
             this->measuring_tool_.start("sort_globally", "write_global_permutation");
             for (size_t i = 0; auto const& str: strptr.active()) {
-                global_permutation[str.stringIndex] = i++;
+                global_permutation[str.getStringIndex()] = i++;
             }
             this->measuring_tool_.stop("sort_globally", "write_global_permutation");
 

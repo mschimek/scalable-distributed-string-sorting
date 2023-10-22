@@ -189,8 +189,9 @@ void run_prefix_doubling(
     SorterArgs const& args, std::string prefix, dss_mehnert::Communicator const& comm
 ) {
     constexpr auto alltoall_config = AlltoallConfig();
-    using PartitionPolicy = dss_mehnert::PrefixDoublingPartitionPolicy<CharType>;
-    using StringSet = dss_mehnert::StringSet<CharType, dss_mehnert::Length>;
+    using PartitionPolicy =
+        dss_mehnert::PrefixDoublingPartitionPolicy<CharType, dss_mehnert::IntLength, Permutation>;
+    using StringSet = dss_mehnert::StringSet<CharType, dss_mehnert::IntLength>;
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
     using MergeSort = dss_mehnert::sorter::prefix_doubling::PrefixDoublingMergeSort<
         alltoall_config,

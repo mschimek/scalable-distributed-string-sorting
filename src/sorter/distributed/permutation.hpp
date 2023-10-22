@@ -16,15 +16,15 @@
 #include <kamping/named_parameters.hpp>
 #include <tlx/die.hpp>
 
-#include "strings/stringcontainer.hpp"
 #include "strings/stringset.hpp"
 
 // todo might want to put this into a nested namespace
 namespace dss_mehnert {
 
 template <typename StringSet>
-constexpr bool has_permutation_members = has_member<typename StringSet::String, StringIndex>
-                                         && has_member<typename StringSet::String, PEIndex>;
+constexpr bool has_permutation_members = (has_member<typename StringSet::String, StringIndex>
+                                          && has_member<typename StringSet::String, PEIndex>)
+                                         || has_member<typename StringSet::String, CombinedIndex>;
 
 template <typename StringSet>
 concept PermutationStringSet = has_permutation_members<StringSet>;
@@ -32,34 +32,24 @@ concept PermutationStringSet = has_permutation_members<StringSet>;
 template <typename StringPtr>
 concept PermutationStringPtr = PermutationStringSet<typename StringPtr::StringSet>;
 
-template <typename String>
-using AugmentedString = String::template with_members_t<StringIndex, PEIndex>;
+namespace _internal {
 
 template <typename StringSet>
-using AugmentedStringSet =
-    StringSet::template StringSet<AugmentedString<typename StringSet::String>>;
+struct string_index {
+    auto operator()(typename StringSet::String const& str) const { return str.getStringIndex(); }
+};
 
 template <typename StringSet>
-StringLcpContainer<AugmentedStringSet<StringSet>>
-augment_string_container(StringLcpContainer<StringSet>&& container, size_t const rank)
-    requires(!has_permutation_members<StringSet>)
-{
-    std::vector<AugmentedString<typename StringSet::String>> strings;
-    strings.reserve(container.size());
-
-    for (size_t index = 0; auto const& src: container.get_strings()) {
-        strings.push_back(src.with_members(StringIndex{index++}, PEIndex{rank}));
-    }
-
-    return {container.release_raw_strings(), std::move(strings), container.release_lcps()};
-}
+struct PE_index {
+    auto operator()(typename StringSet::String const& str) const { return str.getPEIndex(); }
+};
 
 template <typename Member, typename StringSet, typename OutputIterator>
-void write_member(StringSet const& ss, OutputIterator const d_first) {
-    std::transform(ss.begin(), ss.end(), d_first, [](auto const& str) {
-        return str.Member::value();
-    });
+void write_member(StringSet const& ss, Member const member, OutputIterator const d_first) {
+    std::transform(ss.begin(), ss.end(), d_first, [=](auto const& str) { return member(str); });
 }
+
+} // namespace _internal
 
 class NoPermutation {};
 
@@ -84,8 +74,8 @@ public:
                                                       strings_(ss.size()) {
         size_type i = 0;
         for (auto it = ss.begin(); it != ss.end(); ++it, ++i) {
-            ranks_[i] = ss[it].PEIndex;
-            strings_[i] = ss[it].stringIndex;
+            ranks_[i] = it->getPEIndex();
+            strings_[i] = it->getStringIndex();
         }
     }
 
@@ -140,18 +130,19 @@ public:
     using rank_type = int;
     using index_type = std::size_t;
 
+    // todo this could use uint32_t in place of index_type
     struct LocalPermutation : public std::vector<index_type> {
         LocalPermutation() = default;
 
         template <typename StringSet>
         explicit LocalPermutation(StringSet const& ss) : std::vector<index_type>(ss.size()) {
-            write_member<StringIndex>(ss, begin());
+            _internal::write_member(ss, _internal::string_index<StringSet>{}, begin());
         }
 
         template <typename StringSet>
         void write(StringSet const& ss) {
             resize(ss.size());
-            write_member<StringIndex>(ss, begin());
+            _internal::write_member(ss, _internal::string_index<StringSet>{}, begin());
         }
     };
 
@@ -165,13 +156,13 @@ public:
         RemotePermutation(StringSet const& ss, std::vector<int> counts)
             : ranks(ss.size()),
               counts{std::move(counts)} {
-            write_member<PEIndex>(ss, ranks.begin());
+            _internal::write_member(ss, _internal::PE_index<StringSet>{}, ranks.begin());
         }
 
         template <PermutationStringSet StringSet>
         void write(StringSet const& ss, std::vector<int> counts) {
             ranks.resize(ss.size());
-            write_member<PEIndex>(ss, ranks.begin());
+            _internal::write_member(ss, _internal::PE_index<StringSet>{}, ranks.begin());
             this->counts = std::move(counts);
         }
     };

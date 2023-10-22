@@ -18,6 +18,7 @@
 #include <kamping/collectives/alltoall.hpp>
 #include <kamping/collectives/bcast.hpp>
 #include <kamping/collectives/gather.hpp>
+#include <kamping/communicator.hpp>
 #include <kamping/named_parameters.hpp>
 #include <tlx/algorithm/multiway_merge.hpp>
 #include <tlx/die.hpp>
@@ -26,7 +27,6 @@
 #include <tlx/sort/strings/string_ptr.hpp>
 
 #include "hash/xxhash.hpp"
-#include "kamping/communicator.hpp"
 #include "mpi/communicator.hpp"
 #include "sorter/distributed/multi_level.hpp"
 #include "util/measuringTool.hpp"

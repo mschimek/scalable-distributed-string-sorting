@@ -14,12 +14,12 @@
 
 #include <kamping/collectives/bcast.hpp>
 #include <kamping/named_parameters.hpp>
+#include <tlx/die/core.hpp>
+#include <tlx/math/div_ceil.hpp>
 
 #include "mpi/communicator.hpp"
 #include "mpi/read_input.hpp"
 #include "strings/stringcontainer.hpp"
-#include "tlx/die/core.hpp"
-#include "tlx/math/div_ceil.hpp"
 
 namespace dss_mehnert {
 
@@ -387,7 +387,7 @@ struct CompressedSuffixGenerator : public std::vector<typename StringSet::String
 
         for (size_t offset = 0; offset < chars.size(); offset += step) {
             size_t const length = static_cast<size_t>(chars.size() - offset);
-            this->emplace_back(chars.data() + offset, Length{length});
+            this->emplace_back(chars.data() + offset, length);
         }
     }
 };
@@ -400,7 +400,7 @@ struct CompressedWindowGenerator : public std::vector<typename StringSet::String
         assert(length > 0 && step > 0);
 
         for (size_t offset = 0; offset + length <= chars.size(); offset += step) {
-            this->emplace_back(chars.data() + offset, Length{length});
+            this->emplace_back(chars.data() + offset, length);
         }
     }
 };
@@ -415,7 +415,7 @@ struct CompressedDifferenceCoverGenerator : public std::vector<typename StringSe
         for (auto const& k: difference_cover) {
             for (size_t offset = k; offset < chars.size(); offset += size) {
                 auto const length = std::min<size_t>(size, chars.size() - offset);
-                this->emplace_back(chars.data() + offset, Length{length});
+                this->emplace_back(chars.data() + offset, length);
             }
         }
     }
@@ -511,7 +511,7 @@ struct CompressedDNRatioGenerator : public StringLcpContainer<StringSet> {
             auto const chunk_size = std::min<size_t>(strings_per_chunk, num_strings - n);
             auto const begin = raw_strings.end() - chars_per_chunk;
             for (size_t i = 0; i < chunk_size; ++i) {
-                strings.emplace_back(&*(begin + i), Length{len_strings});
+                strings.emplace_back(&*(begin + i), len_strings);
             }
         }
         this->lcps_.resize(strings.size());

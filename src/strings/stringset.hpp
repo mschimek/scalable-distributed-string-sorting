@@ -384,6 +384,17 @@ struct Length {
     inline size_t getLength() const { return length; }
 };
 
+struct IntLength {
+    using underlying_t = uint32_t;
+
+    static constexpr std::string_view name{"length"};
+
+    uint32_t length = 0;
+
+    uint32_t value() const { return length; }
+    inline uint32_t getLength() const { return length; }
+};
+
 struct Index {
     using underlying_t = uint64_t;
 
@@ -401,7 +412,8 @@ struct PEIndex {
 
     size_t PEIndex = 0;
     size_t value() const { return PEIndex; }
-    inline size_t getPEIndex() const { return PEIndex; }
+    size_t getPEIndex() const { return PEIndex; }
+    void setPEIndex(size_t const index) { PEIndex = index; }
 };
 
 struct StringIndex {
@@ -411,29 +423,61 @@ struct StringIndex {
 
     size_t stringIndex = 0;
     size_t value() const { return stringIndex; }
-    inline size_t getStringIndex() const { return stringIndex; }
+    size_t getStringIndex() const { return stringIndex; }
+    void setStringIndex(size_t const index) { stringIndex = index; }
+};
+
+// Justification for this type:
+// - multi-level permutation never needs string and PE index simultaneously
+// - MPI ranks always fit an `int`
+// - on distributed system with limited memory per core, local string indices
+//   will always fit a 32-bit integer
+struct CombinedIndex {
+    using underlying_t = uint32_t;
+
+    static constexpr std::string_view name{"combined_index"};
+
+    uint32_t combined_index = 0;
+
+    uint32_t value() const { return combined_index; };
+    uint32_t getPEIndex() const { return combined_index; }
+    uint32_t getStringIndex() const { return combined_index; }
+    void setPEIndex(uint32_t const index) { combined_index = index; }
+    void setStringIndex(uint32_t const index) { combined_index = index; }
 };
 
 template <typename Char_, typename String, typename... Members>
-struct StringData : public Members... {
+class StringData : public Members... {
+public:
     using Char = Char_;
+
+    using LengthType = std::tuple_element_t<0, std::tuple<Members...>>;
+    static_assert(std::is_same_v<LengthType, Length> || std::is_same_v<LengthType, IntLength>);
 
     template <typename T>
     static constexpr bool has_member = (std::is_same_v<T, Members> || ...);
+
+    static constexpr bool is_indexed = has_member<Index>;
+    static constexpr bool has_length = true;
 
     template <typename... NewMembers>
     using with_members_t = StringData<Char, String, Members..., NewMembers...>;
 
     StringData() = default;
 
+    StringData(String string, Members const&... members) noexcept
+        : Members{members}...,
+          string{string} {}
+
     template <typename... Init>
-    StringData(String string, Init... args) noexcept : Init{args}...,
-                                                       string{string} {}
+    StringData(String string, size_t length, Init... args) noexcept
+        : LengthType(length), // todo this (intentionally) allows implicit conversions
+          Init{args}...,
+          string{string} {}
 
     String string;
 
     inline void setChars(String string_) { string = string_; }
-
     inline String getChars() const { return string; }
 
     template <typename... NewMembers>
@@ -457,10 +501,6 @@ std::ostream& operator<<(std::ostream& out, StringData<Char, String, Args...> co
 
 /******************************************************************************/
 
-/*!
- * Traits class implementing StringSet concept for char* and unsigned char*
- * strings with additional length attribute.
- */
 template <typename String_, template <typename> typename StringSet_>
 class GenericStringSetTraits {
 public:
@@ -479,8 +519,8 @@ public:
     template <typename String>
     using StringSet = StringSet_<String>;
 
-    static constexpr bool is_indexed = has_member<String, Index>;
-    static constexpr bool has_length = has_member<String, Length>;
+    static constexpr bool is_indexed = String::is_indexed;
+    static constexpr bool has_length = String::has_length;
 };
 
 /*!
@@ -558,12 +598,12 @@ public:
 
     static String empty_string() {
         static Char zero_char = 0;
-        return {&zero_char};
+        return {&zero_char, 0};
     }
 
     // todo move
     size_t get_length(String const& str) const {
-        if constexpr (has_member<String, Length>) {
+        if constexpr (String::has_length) {
             return str.length;
         } else {
             auto begin = get_chars(str, 0), end = begin;
@@ -588,10 +628,12 @@ using StringSet = GenericStringSet<StringData<Char, Char*, Members...>>;
 
 namespace dss_mehnert {
 
+using dss_schimek::CombinedIndex;
 using dss_schimek::GenericStringSet;
 using dss_schimek::GenericStringSetTraits;
 using dss_schimek::has_member;
 using dss_schimek::Index;
+using dss_schimek::IntLength;
 using dss_schimek::Length;
 using dss_schimek::PEIndex;
 using dss_schimek::StringData;
@@ -616,7 +658,7 @@ public:
     using Iterator = Traits::Iterator;
     using CharIterator = Traits::CharIterator;
 
-    static_assert(has_member<String, Length>);
+    static_assert(String::has_length);
 
     static constexpr bool is_compressed = true;
 
@@ -685,14 +727,15 @@ public:
         }
     }
 
-    static String empty_string() { return {nullptr, Length{0}}; }
+    static String empty_string() { return {nullptr, 0}; }
 
 private:
     //! array of string pointers
     Iterator begin_, end_;
 };
 
-template <typename Char, typename... Members>
-using CompressedStringSet = GenericCompressedStringSet<StringData<Char, Char*, Length, Members...>>;
+template <typename Char, typename LengthType, typename... Members>
+using CompressedStringSet =
+    GenericCompressedStringSet<StringData<Char, Char*, LengthType, Members...>>;
 
 } // namespace dss_mehnert

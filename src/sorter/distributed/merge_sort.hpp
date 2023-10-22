@@ -50,7 +50,7 @@ protected:
     MeasuringTool& measuring_tool_ = MeasuringTool::measuringTool();
 
     template <typename StringSet, typename PermutationBuilder>
-        requires(has_member<typename StringSet::String, Length>)
+        requires(StringSet::has_length)
     void sort(
         StringLcpContainer<StringSet>& container,
         Subcommunicators const& comms,
@@ -222,7 +222,7 @@ public:
 
     template <typename StringSet>
     void sort(StringLcpContainer<StringSet>& container, Subcommunicators const& comms)
-        requires(has_member<typename StringSet::String, Length>)
+        requires(StringSet::has_length)
     {
         auto const& comm_root = comms.comm_root();
 

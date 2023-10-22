@@ -25,6 +25,38 @@
 
 namespace dss_mehnert {
 namespace sorter {
+
+template <typename String, typename Permutation>
+using AugmentedString = std::conditional_t<
+    std::is_same_v<Permutation, SimplePermutation>,
+    typename String::template with_members_t<StringIndex, PEIndex>,
+    typename String::template with_members_t<CombinedIndex>>;
+
+template <typename StringSet, typename Permutation>
+using AugmentedStringSet =
+    StringSet::template StringSet<AugmentedString<typename StringSet::String, Permutation>>;
+
+template <typename Permutation, typename StringSet>
+StringLcpContainer<AugmentedStringSet<StringSet, Permutation>>
+augment_string_container(StringLcpContainer<StringSet>&& container, size_t const rank)
+    requires(!has_permutation_members<StringSet>)
+{
+    std::vector<AugmentedString<typename StringSet::String, Permutation>> strings;
+    strings.reserve(container.size());
+
+    for (size_t index = 0; auto const& src: container.get_strings()) {
+        if constexpr (std::is_same_v<Permutation, SimplePermutation>) {
+            strings.push_back(src.with_members(StringIndex{index++}, PEIndex{rank}));
+        } else {
+            // todo maybe make this an asserting cast
+            auto index_u32 = static_cast<uint32_t>(index++);
+            strings.push_back(src.with_members(CombinedIndex{index_u32}));
+        }
+    }
+    return {container.release_raw_strings(), std::move(strings), container.release_lcps()};
+}
+
+
 namespace prefix_doubling {
 
 template <
@@ -201,7 +233,8 @@ public:
     {
         this->measuring_tool_.start("augment_container");
         auto const rank = comms.comm_root().rank();
-        auto augmented_container = augment_string_container(std::move(container), rank);
+        auto augmented_container =
+            augment_string_container<Permutation>(std::move(container), rank);
         this->measuring_tool_.stop("augment_container");
 
         return sort(std::move(augmented_container), comms);

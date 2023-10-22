@@ -226,7 +226,7 @@ compute_interval_binary(StringSet const& ss, SplitterSet const& splitters)
     intervals.reserve(splitters.size() + 1);
 
     for (auto const& splitter: splitters) {
-        String const splitter_{splitter.string, Length{splitter.length}};
+        String const splitter_{splitter.string, splitter.length};
         intervals.emplace_back(binary_search(ss, splitter_));
     }
     intervals.emplace_back(ss.size());
@@ -248,7 +248,7 @@ inline std::vector<size_t> compute_interval_binary_index(
     intervals.reserve(splitters.size() + 1);
 
     for (auto const& splitter: splitters) {
-        String const splitter_{splitter.string, Length{splitter.length}};
+        String const splitter_{splitter.string, splitter.length};
         intervals.emplace_back(binary_search_indexed(ss, splitter_, splitter.index, local_offset));
     }
     intervals.emplace_back(ss.size());

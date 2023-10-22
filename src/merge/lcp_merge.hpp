@@ -8,8 +8,9 @@
 #include <iostream>
 #include <iterator>
 
+#include <tlx/die.hpp>
+
 #include "strings/stringtools.hpp"
-#include "tlx/die.hpp"
 
 namespace dss_mehnert {
 namespace merge {

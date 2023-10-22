@@ -230,7 +230,7 @@ public:
         auto str = container.get_strings().begin();
         for (size_t rank = 0; rank != recv_counts.size(); ++rank) {
             for (int i = 0; i != recv_counts[rank]; ++i) {
-                (*str++).PEIndex = rank;
+                (*str++).setPEIndex(rank);
             }
         }
         measuring_tool.stop("all_to_all_strings_init_container");

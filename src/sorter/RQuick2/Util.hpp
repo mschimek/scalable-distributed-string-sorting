@@ -155,9 +155,9 @@ public:
             size_t const str_len = std::distance(str_begin, str_end);
 
             if constexpr (has_index) {
-                str = {&*str_begin, Length{str_len}, Index{this->indices[i]}};
+                str = {&*str_begin, str_len, Index{this->indices[i]}};
             } else {
-                str = {&*str_begin, Length{str_len}};
+                str = {&*str_begin, str_len};
             }
 
             assert(char_it != this->raw_strs.end());
@@ -375,10 +375,7 @@ private:
             RawStrings<StringPtr>>,
         "RawStrings must be the first Member"
     );
-    static_assert(
-        dss_schimek::has_member<String, dss_schimek::Length>,
-        "the string set must have a length member"
-    );
+    static_assert(String::has_length, "the string set must have a length member");
 
     MPI_Datatype char_type() const { return kamping::mpi_datatype<CharType>(); }
 
