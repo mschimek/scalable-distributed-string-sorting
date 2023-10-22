@@ -15,9 +15,11 @@
 #include <kamping/collectives/barrier.hpp>
 #include <kamping/communicator.hpp>
 #include <kamping/environment.hpp>
+#include <kamping/named_parameters.hpp>
 #include <tlx/cmdline_parser.hpp>
 #include <tlx/die.hpp>
 #include <tlx/die/core.hpp>
+#include <tlx/math/div_ceil.hpp>
 #include <tlx/sort/strings/string_ptr.hpp>
 
 #include "executables/common_cli.hpp"
@@ -174,6 +176,43 @@ auto generate_compressed_strings(SorterArgs const& args, dss_mehnert::Communicat
     return input_container;
 }
 
+inline std::vector<size_t>
+distribute_ranks(std::vector<size_t> const& global_ranks, dss_mehnert::Communicator const& comm) {
+    namespace kmp = kamping;
+
+    // this is duplicated from is_sorted
+    auto const begin = global_ranks.begin(), end = global_ranks.end();
+    auto const local_max = std::max_element(begin, end);
+    auto const upper_bound = comm.allreduce_single(
+        kmp::send_buf(local_max == end ? 1 : *local_max + 1),
+        kmp::op(kmp::ops::max<>{})
+    );
+    auto const interval_size = tlx::div_ceil(upper_bound, comm.size());
+    auto const dest = [=](auto const rank) { return rank / interval_size; };
+
+    std::vector<int> counts(comm.size()), offsets(comm.size());
+    std::for_each(begin, end, [&](auto const x) { ++counts[dest(x)]; });
+    std::exclusive_scan(counts.begin(), counts.end(), offsets.begin(), 0);
+
+    std::vector<size_t> send_buf(global_ranks.size()), recv_buf;
+    std::for_each(begin, end, [&](auto const x) { send_buf[offsets[dest(x)]++] = x; });
+    comm.alltoallv(kmp::send_buf(send_buf), kmp::send_counts(counts), kmp::recv_buf(recv_buf));
+    return recv_buf;
+}
+
+inline size_t count_duplicate_ranks(
+    std::vector<size_t> const& global_ranks, dss_mehnert::Communicator const& comm
+) {
+    size_t duplicates = 0;
+    if (auto dist_ranks = distribute_ranks(global_ranks, comm); !dist_ranks.empty()) {
+        auto const begin = dist_ranks.begin(), end = dist_ranks.end();
+        std::sort(begin, end);
+        std::adjacent_difference(begin, end, begin);
+        duplicates = std::count(begin + 1, end, 0);
+    }
+    return comm.allreduce_single(kamping::send_buf(duplicates), kamping::op(std::plus<>{}));
+}
+
 template <typename CharType, typename BloomFilterPolicy, typename Permutation>
 void run_space_efficient_sort(
     SorterArgs const& args, std::string prefix, dss_mehnert::Communicator const& comm
@@ -220,18 +259,22 @@ void run_space_efficient_sort(
             args.get_splitter_sorter()
         ),
         args.quantile_size};
-    auto permutation = merge_sort.sort(std::move(input_container), comms);
+    auto global_ranks = merge_sort.sort(std::move(input_container), comms);
     measuring_tool.stop("none", "sorting_overall", comm);
 
-    measuring_tool.disable();
     measuring_tool.disableCommVolume();
 
+    auto const duplicates = count_duplicate_ranks(global_ranks, comm);
+    measuring_tool.add(duplicates, "duplicate_ranks");
+
+    measuring_tool.disable();
+
     if (args.check_sorted) {
-        auto const is_sorted = checker.is_sorted(permutation, comm);
+        auto const is_sorted = checker.is_sorted(global_ranks, comm);
         die_verbose_unless(is_sorted, "output permutation is not sorted");
     }
     if (args.check_complete) {
-        auto const is_complete = checker.is_complete(permutation, comm);
+        auto const is_complete = checker.is_complete(global_ranks, comm);
         die_verbose_unless(is_complete, "output permutation is not complete");
     }
 
