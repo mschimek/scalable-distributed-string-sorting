@@ -174,27 +174,18 @@ auto generate_compressed_strings(SorterArgs const& args, dss_mehnert::Communicat
     return input_container;
 }
 
-template <
-    typename CharType,
-    typename AlltoallConfig,
-    typename RedistributionPolicy,
-    typename BloomFilter,
-    typename Permutation>
+template <typename CharType, typename BloomFilterPolicy, typename Permutation>
 void run_space_efficient_sort(
     SorterArgs const& args, std::string prefix, dss_mehnert::Communicator const& comm
 ) {
     namespace sems = dss_mehnert::sorter::space_efficient;
 
-    constexpr auto alltoall_config = AlltoallConfig();
     constexpr bool is_unique = Permutation::is_unique;
 
     using StringSet = dss_mehnert::CompressedStringSet<CharType>;
     using PartitionPolicy = dss_mehnert::SpaceEfficientPartitionPolicy<CharType>;
-    using Subcommunicators = RedistributionPolicy::Subcommunicators;
+    using Subcommunicators = BloomFilterPolicy::Subcommunicators;
 
-    // todo make this selectable
-    using BloomFilterPolicy =
-        sems::BloomFilterFirst<alltoall_config, RedistributionPolicy, PartitionPolicy, BloomFilter>;
     using Sorter = sems::SpaceEfficientSort<PartitionPolicy, BloomFilterPolicy, Permutation>;
 
     using dss_mehnert::measurement::MeasuringTool;
@@ -249,7 +240,7 @@ void run_space_efficient_sort(
 }
 
 template <typename... Args>
-void run(SorterArgs const& args) {
+void dispatch_permutation(SorterArgs const& args) {
     dss_mehnert::Communicator comm;
 
     auto prefix = args.get_prefix(comm);
@@ -276,6 +267,29 @@ void run(SorterArgs const& args) {
         }
     }
     tlx_die("invalid permutation");
+}
+
+template <
+    typename CharType,
+    typename AlltoallConfig,
+    typename RedistributionPolicy,
+    typename BloomFilter>
+void dispatch_bloomfilter_policy(SorterArgs const& args) {
+    namespace sems = dss_mehnert::sorter::space_efficient;
+
+    constexpr auto config = AlltoallConfig();
+    using PartitionPolicy = dss_mehnert::SpaceEfficientPartitionPolicy<CharType>;
+
+    if (args.prefix_doubling) {
+        using BloomFilterPolicy =
+            sems::BloomFilterFirst<config, RedistributionPolicy, PartitionPolicy, BloomFilter>;
+        dispatch_permutation<CharType, BloomFilterPolicy>(args);
+    } else {
+        // todo maybe add cmake flag for this
+        using BloomFilterPolicy =
+            sems::NoBloomFilter<config, RedistributionPolicy, PartitionPolicy>;
+        dispatch_permutation<CharType, BloomFilterPolicy>(args);
+    }
 }
 
 int main(int argc, char* argv[]) {
@@ -385,7 +399,7 @@ int main(int argc, char* argv[]) {
 
     for (size_t i = 0; i < args.num_iterations; ++i) {
         args.iteration = i;
-        dispatch_common_args([&]<typename... T> { run<T...>(args); }, args);
+        dispatch_common_args([&]<typename... T> { dispatch_bloomfilter_policy<T...>(args); }, args);
     }
 
     return EXIT_SUCCESS;

@@ -387,6 +387,7 @@ template <typename Char>
 using SpaceEfficientPartitionPolicy = PolymorphicPartitionPolicy<
     CompressedStringSet<Char, StringIndex, PEIndex>,
     sample::NoExtraArg,
+    sample::MaxLength,
     sample::DistPrefixes>;
 
 template <typename Char, typename PolymorphicPolicy>

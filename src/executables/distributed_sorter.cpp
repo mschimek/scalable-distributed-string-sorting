@@ -267,7 +267,7 @@ void dispatch_permutation(
 }
 
 template <typename... Args>
-void run(SorterArgs const& args) {
+void dispatch_permutation(SorterArgs const& args) {
     dss_mehnert::Communicator comm;
 
     auto prefix = args.get_prefix(comm);
@@ -353,7 +353,7 @@ int main(int argc, char* argv[]) {
 
     for (size_t i = 0; i < args.num_iterations; ++i) {
         args.iteration = i;
-        dispatch_common_args([&]<typename... T> { run<T...>(args); }, args);
+        dispatch_common_args([&]<typename... T> { dispatch_permutation<T...>(args); }, args);
     }
 
     return EXIT_SUCCESS;

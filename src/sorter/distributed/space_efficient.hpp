@@ -204,7 +204,7 @@ public:
 
     using Base::BaseDistributedMergeSort;
 
-    class State {
+    struct State {
         size_t max_length;
 
         sample::MaxLength get_quantile_arg() const { return {max_length}; }
