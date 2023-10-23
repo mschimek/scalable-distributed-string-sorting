@@ -58,7 +58,7 @@ def fuzz_merge_sort(target, fixed_args, min_procs, max_procs, repeat):
         sampling_factor = random.randint(1, 10)
 
         run_or_exit(f"mpirun -n {procs} --oversubscribe"
-              f" target/{target}/distributed_sorter -v -V -i 3"
+              f" target/{target}/distributed_sorter -v -V -i 5"
               f" --num-strings {num_strings} --len-strings {len_strings}"
               f" --DN-ratio {dn_ratio} --sampling-factor {sampling_factor}"
               f" --permutation {permutation} {' '.join(fixed_args)}"
@@ -91,6 +91,9 @@ def fuzz_space_efficient_sort(target, fixed_args, min_procs, max_procs, repeat):
         dn_ratio = random.random() / 2
         step = random.randint(1, 16)
         dc = random.choice([3, 7, 13, 21, 31, 32, 64, 512, 1024, 2048, 4096, 8192])
+
+        if generator == StringGenerator.DifferenceCover:
+            num_chars = max([dc, num_chars])
 
         quantile_size = random.randint(2, 2000)
         sampling_factor = random.randint(1, 10)

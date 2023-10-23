@@ -409,11 +409,18 @@ template <typename StringSet>
 struct CompressedDifferenceCoverGenerator : public std::vector<typename StringSet::String> {
     using Char = StringSet::Char;
 
-    CompressedDifferenceCoverGenerator(std::vector<Char>& chars, size_t const size) {
+    CompressedDifferenceCoverGenerator(
+        std::vector<Char>& chars, size_t const size, bool const full_cover, Communicator const& comm
+    ) {
+        size_t const chars_size = chars.size();
+        if (full_cover) {
+            shift_chars_left(chars, size, comm);
+        }
+
         auto const difference_cover = get_difference_cover(size);
         this->reserve((chars.size() / size + 1) * difference_cover.size());
         for (auto const& k: difference_cover) {
-            for (size_t offset = k; offset < chars.size(); offset += size) {
+            for (size_t offset = k; offset < chars_size; offset += size) {
                 auto const length = std::min<size_t>(size, chars.size() - offset);
                 this->emplace_back(chars.data() + offset, length);
             }
@@ -472,6 +479,30 @@ private:
             }
         }
         // clang-format on
+    }
+
+    static void
+    shift_chars_left(std::vector<Char>& chars, size_t const size, Communicator const& comm) {
+        using namespace kamping;
+
+        chars.reserve(chars.size() + size - 1);
+        bool const sufficient_chars [[maybe_unused]] = chars.size() >= size;
+        tlx_die_verbose_unless(
+            sufficient_chars && comm.is_same_on_all_ranks(sufficient_chars),
+            "generating a proper difference cover requires sufficient chars on each PE"
+        );
+
+        Request req;
+        if (comm.rank() > 0) {
+            std::span const send_chars{chars.begin(), size - 1};
+            comm.issend(send_buf(send_chars), destination(comm.rank() - 1), request(req));
+        }
+        if (comm.rank() < comm.size() - 1) {
+            std::vector<Char> recv_chars;
+            comm.recv(recv_buf(recv_chars), recv_counts(static_cast<int>(size - 1)));
+            chars.insert(chars.end(), recv_chars.begin(), recv_chars.end());
+        }
+        req.wait();
     }
 };
 

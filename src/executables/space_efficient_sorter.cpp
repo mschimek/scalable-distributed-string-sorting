@@ -127,7 +127,7 @@ auto generate_compressed_strings(SorterArgs const& args, dss_mehnert::Communicat
                 return CompressedWindowGenerator<StringSet>{input_chars, length, step};
             }
             case StringGenerator::difference_cover: {
-                return CompressedDifferenceCoverGenerator<StringSet>{input_chars, dc};
+                return CompressedDifferenceCoverGenerator<StringSet>{input_chars, dc, true, comm};
             }
             case StringGenerator::sentinel: {
                 break;
