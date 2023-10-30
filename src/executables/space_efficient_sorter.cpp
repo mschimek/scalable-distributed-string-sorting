@@ -43,6 +43,7 @@ struct SorterArgs : public CommonArgs {
     size_t combined_gen = static_cast<size_t>(CombinedGenerator::none);
     size_t char_gen = static_cast<size_t>(CharGenerator::random);
     size_t string_gen = static_cast<size_t>(StringGenerator::suffix);
+    bool use_proper_dc = false;
     size_t step = 1;
     size_t num_chars = 100000;
     size_t num_strings = 10000;
@@ -127,7 +128,11 @@ auto generate_compressed_strings(SorterArgs const& args, dss_mehnert::Communicat
                 return CompressedWindowGenerator<StringSet>{input_chars, length, step};
             }
             case StringGenerator::difference_cover: {
-                return CompressedDifferenceCoverGenerator<StringSet>{input_chars, dc, true, comm};
+                return CompressedDifferenceCoverGenerator<StringSet>{
+                    input_chars,
+                    dc,
+                    args.use_proper_dc,
+                    comm};
             }
             case StringGenerator::sentinel: {
                 break;
@@ -136,7 +141,7 @@ auto generate_compressed_strings(SorterArgs const& args, dss_mehnert::Communicat
         tlx_die("invalid string generator");
     }();
 
-    auto input_container = [&]() mutable -> StringLcpContainer<StringSet> {
+    auto input_container = [&]() -> StringLcpContainer<StringSet> {
         switch (clamp_enum_value<CombinedGenerator>(args.combined_gen)) {
             case CombinedGenerator::none: {
                 return {std::move(input_chars), std::move(input_strings)};
@@ -394,6 +399,7 @@ int main(int argc, char* argv[]) {
         "string generator to use "
         "([0]=suffix, 1=window, 2=difference_cover)"
     );
+    cp.add_flag("use-proper-dc", args.use_proper_dc, "use proper difference cover strings");
     cp.add_size_t('n', "num-strings", args.num_strings, "number of strings per PE");
     cp.add_size_t('m', "len-strings", args.len_strings, "number of characters per string");
     cp.add_bytes('N', "num-chars", args.num_chars, "number of chars per rank");
