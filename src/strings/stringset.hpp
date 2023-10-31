@@ -410,10 +410,10 @@ struct PEIndex {
 
     static constexpr std::string_view name{"rank"};
 
-    size_t PEIndex = 0;
-    size_t value() const { return PEIndex; }
-    size_t getPEIndex() const { return PEIndex; }
-    void setPEIndex(size_t const index) { PEIndex = index; }
+    size_t PE_index = 0;
+    size_t value() const { return PE_index; }
+    size_t getPEIndex() const { return PE_index; }
+    void setPEIndex(size_t const index) { PE_index = index; }
 };
 
 struct StringIndex {
@@ -421,10 +421,10 @@ struct StringIndex {
 
     static constexpr std::string_view name{"string"};
 
-    size_t stringIndex = 0;
-    size_t value() const { return stringIndex; }
-    size_t getStringIndex() const { return stringIndex; }
-    void setStringIndex(size_t const index) { stringIndex = index; }
+    size_t string_index = 0;
+    size_t value() const { return string_index; }
+    size_t getStringIndex() const { return string_index; }
+    void setStringIndex(size_t const index) { string_index = index; }
 };
 
 // Justification for this type:
@@ -572,6 +572,7 @@ public:
     //! Compares the given positions of the two given Strings
     std::strong_ordering
     cmp(String const& a, CharIterator const& ai, String const& b, CharIterator const& bi) const {
+        // this is using null termination
         return *ai <=> *bi;
     }
 

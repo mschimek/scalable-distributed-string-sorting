@@ -15,9 +15,15 @@
 #include <tlx/math.hpp>
 
 #include "sorter/distributed/multi_level.hpp"
+#include "sorter/distributed/sample.hpp"
 
 namespace dss_mehnert {
 namespace redistribution {
+
+using dss_mehnert::multi_level::GridwiseSplit;
+using dss_mehnert::multi_level::Level;
+using dss_mehnert::multi_level::NoSplit;
+using dss_mehnert::multi_level::RowwiseSplit;
 
 namespace _internal {
 
@@ -56,47 +62,96 @@ template <typename StringSet>
 std::vector<size_t>
 compute_char_intervals(StringSet const& ss, std::vector<size_t> const& interval_sizes) {
     std::vector<size_t> char_interval_sizes(interval_sizes.size());
-    auto dest = char_interval_sizes.begin();
 
-    for (auto strs = ss.begin(); auto const& interval: interval_sizes) {
-        auto get_length = [&ss](auto const& acc, auto const& str) {
-            return acc + ss.get_length(str) + 1;
-        };
-        *dest++ = std::accumulate(strs, strs + interval, size_t{0}, get_length);
-        strs += interval;
+    auto it = ss.begin();
+    for (size_t i = 0; i != interval_sizes.size(); it += interval_sizes[i++]) {
+        auto get_length = [](auto const& acc, auto const& str) { return acc + str.getLength(); };
+        char_interval_sizes[i] = std::accumulate(it, it + interval_sizes[i], size_t{0}, get_length);
     }
     return char_interval_sizes;
 }
 
+template <typename StringSet>
+std::vector<size_t> compute_char_intervals(
+    StringSet const& ss, std::vector<size_t> const& interval_sizes, std::span<size_t const> prefixes
+) {
+    std::vector<size_t> char_interval_sizes(interval_sizes.size());
+
+    auto it = prefixes.begin();
+    for (size_t i = 0; i != interval_sizes.size(); it += interval_sizes[i++]) {
+        char_interval_sizes[i] = std::accumulate(it, it + interval_sizes[i], size_t{0});
+    }
+    return char_interval_sizes;
+}
+
+
 } // namespace _internal
 
-template <typename Communicator>
-class NoRedistribution {
+template <typename Subcommunicators_, typename Derived>
+class RedistributionBase {
 public:
-    using Subcommunicators = multi_level::NoSplit<Communicator>;
-    using Level = multi_level::Level<Communicator>;
+    using Subcommunicators = Subcommunicators_;
+    using Communicator = Subcommunicators::Communicator;
 
-    static constexpr std::string_view get_name() { return "no_redistribution"; }
+    template <typename StringSet>
+    std::vector<size_t> compute_send_counts(
+        StringSet const& ss,
+        std::vector<size_t> const& send_counts,
+        sample::NoExtraArg arg,
+        Level<Communicator> const& level
+    ) const {
+        auto const derived = static_cast<Derived const*>(this);
+        return derived->impl(ss, send_counts, level);
+    }
 
-    template <typename StringSet, bool false_ = false>
-    static std::vector<size_t>
-    compute_send_counts(StringSet const&, std::vector<size_t> const&, Level const&) {
-        static_assert(false_, "redistribution policy does not support multi-level sort");
-        return {};
+    template <typename StringSet>
+    std::vector<size_t> compute_send_counts(
+        StringSet const& ss,
+        std::vector<size_t> const& send_counts,
+        sample::MaxLength arg,
+        Level<Communicator> const& level
+    ) const {
+        auto const derived = static_cast<Derived const*>(this);
+        return derived->impl(ss, send_counts, level);
+    }
+
+    template <typename StringSet>
+    std::vector<size_t> compute_send_counts(
+        StringSet const& ss,
+        std::vector<size_t> const& send_counts,
+        sample::DistPrefixes arg,
+        Level<Communicator> const& level
+    ) const {
+        auto const derived = static_cast<Derived const*>(this);
+        return derived->impl(ss, send_counts, level, arg.prefixes);
     }
 };
 
 template <typename Communicator>
-class GridwiseRedistribution {
+class NoRedistribution
+    : public RedistributionBase<NoSplit<Communicator>, NoRedistribution<Communicator>> {
 public:
-    using Subcommunicators = multi_level::GridwiseSplit<Communicator>;
-    using Level = multi_level::Level<Communicator>;
+    template <typename StringSet, typename... Prefixes>
+    static std::vector<size_t> impl(
+        StringSet const&,
+        std::vector<size_t> const&,
+        Level<Communicator> const&,
+        Prefixes const&... prefixes
+    ) {
+        tlx_die("redistribution policy does not support multi-level sort");
+    }
+};
 
-    static constexpr std::string_view get_name() { return "gridwise_redistribution"; }
-
-    template <typename StringSet>
-    static std::vector<size_t> compute_send_counts(
-        StringSet const&, std::vector<size_t> const& interval_sizes, Level const& level
+template <typename Communicator>
+class GridwiseRedistribution
+    : public RedistributionBase<GridwiseSplit<Communicator>, GridwiseRedistribution<Communicator>> {
+public:
+    template <typename StringSet, typename... Prefixes>
+    static std::vector<size_t> impl(
+        StringSet const&,
+        std::vector<size_t> const& interval_sizes,
+        Level<Communicator> const& level,
+        Prefixes const&... prefixes
     ) {
         // nothing to do here, intervals are same shape as column communicator
         tlx_assert_equal(interval_sizes.size(), level.comm_exchange.size());
@@ -105,16 +160,15 @@ public:
 };
 
 template <typename Communicator>
-class NaiveRedistribution {
+class NaiveRedistribution
+    : public RedistributionBase<RowwiseSplit<Communicator>, NaiveRedistribution<Communicator>> {
 public:
-    using Subcommunicators = multi_level::RowwiseSplit<Communicator>;
-    using Level = multi_level::Level<Communicator>;
-
-    static constexpr std::string_view get_name() { return "naive_redistribution"; }
-
-    template <typename StringSet>
-    static std::vector<size_t> compute_send_counts(
-        StringSet const&, std::vector<size_t> const& interval_sizes, Level const& level
+    template <typename StringSet, typename... Prefixes>
+    static std::vector<size_t> impl(
+        StringSet const&,
+        std::vector<size_t> const& interval_sizes,
+        Level<Communicator> const& level,
+        Prefixes const&... prefixes
     ) {
         auto const& comm = level.comm_orig;
         auto const group_size = level.group_size();
@@ -134,16 +188,16 @@ public:
 };
 
 template <typename Communicator>
-class SimpleStringRedistribution {
+class SimpleStringRedistribution : public RedistributionBase<
+                                       RowwiseSplit<Communicator>,
+                                       SimpleStringRedistribution<Communicator>> {
 public:
-    using Subcommunicators = multi_level::RowwiseSplit<Communicator>;
-    using Level = multi_level::Level<Communicator>;
-
-    static constexpr std::string_view get_name() { return "simple_string_redistribution"; }
-
-    template <typename StringSet>
-    static std::vector<size_t> compute_send_counts(
-        StringSet const&, std::vector<size_t> const& interval_sizes, Level const& level
+    template <typename StringSet, typename... Prefixes>
+    static std::vector<size_t> impl(
+        StringSet const&,
+        std::vector<size_t> const& interval_sizes,
+        Level<Communicator> const& level,
+        Prefixes const&... prefixes
     ) {
         auto [global_prefixes, global_sizes] =
             _internal::exscan_and_bcast(interval_sizes, level.comm_orig);
@@ -170,18 +224,19 @@ public:
 };
 
 template <typename Communicator>
-class SimpleCharRedistribution {
+class SimpleCharRedistribution : public RedistributionBase<
+                                     RowwiseSplit<Communicator>,
+                                     SimpleCharRedistribution<Communicator>> {
 public:
-    using Subcommunicators = multi_level::RowwiseSplit<Communicator>;
-    using Level = multi_level::Level<Communicator>;
-
-    static constexpr std::string_view get_name() { return "simple_char_redistribution"; }
-
-    template <typename StringSet>
-    static std::vector<size_t> compute_send_counts(
-        StringSet const& ss, std::vector<size_t> const& interval_sizes, Level const& level
+    template <typename StringSet, typename... Prefixes>
+    static std::vector<size_t> impl(
+        StringSet const& ss,
+        std::vector<size_t> const& interval_sizes,
+        Level<Communicator> const& level,
+        Prefixes const&... prefixes
     ) {
-        auto const char_intervals = _internal::compute_char_intervals(ss, interval_sizes);
+        auto const char_intervals =
+            _internal::compute_char_intervals(ss, interval_sizes, prefixes...);
         auto [global_prefixes, global_sizes] =
             _internal::exscan_and_bcast(char_intervals, level.comm_orig);
 
@@ -193,6 +248,7 @@ public:
             auto const strs_per_rank = tlx::div_ceil(global_sizes[group], level.group_size());
             auto const rank_in_group = prefix / strs_per_rank;
 
+            // todo this loop needs reworking and does not respect prefixes
             auto dest = send_counts.begin() + level.group_size() * group + rank_in_group;
 
             size_t sum_chars = prefix, num_strs = 0;
@@ -212,12 +268,11 @@ public:
 
 namespace _internal {
 
-
 template <typename Communicator>
 std::vector<size_t> compute_deterministic_redistribution(
     size_t const local_size,
     std::vector<size_t> const& interval_sizes,
-    multi_level::Level<Communicator> const& level
+    Level<Communicator> const& level
 ) {
     namespace kmp = kamping;
 
@@ -281,62 +336,88 @@ std::vector<size_t> compute_deterministic_redistribution(
 } // namespace _internal
 
 template <typename Communicator>
-class DeterministicStringRedistribution {
+class DeterministicStringRedistribution : public RedistributionBase<
+                                              RowwiseSplit<Communicator>,
+                                              DeterministicStringRedistribution<Communicator>> {
 public:
-    using Subcommunicators = multi_level::RowwiseSplit<Communicator>;
-    using Level = multi_level::Level<Communicator>;
-
-    static constexpr std::string_view get_name() { return "deterministic_string_redistribution"; }
-
-    template <typename StringSet>
-    static std::vector<size_t> compute_send_counts(
-        StringSet const& ss, std::vector<size_t> const& interval_sizes, Level const& level
+    template <typename StringSet, typename... Prefixes>
+    static std::vector<size_t> impl(
+        StringSet const& ss,
+        std::vector<size_t> const& interval_sizes,
+        Level<Communicator> const& level,
+        Prefixes const&... prefixes
     ) {
         return _internal::compute_deterministic_redistribution(ss.size(), interval_sizes, level);
     }
 };
 
 template <typename Communicator>
-class DeterministicCharRedistribution {
+class DeterministicCharRedistribution : public RedistributionBase<
+                                            RowwiseSplit<Communicator>,
+                                            DeterministicCharRedistribution<Communicator>> {
 public:
-    using Subcommunicators = multi_level::RowwiseSplit<Communicator>;
-    using Level = multi_level::Level<Communicator>;
-
-    static constexpr std::string_view get_name() { return "deterministic_char_redistribution"; }
-
-    template <typename StringSet>
-    static std::vector<size_t> compute_send_counts(
-        StringSet const& ss, std::vector<size_t> const& interval_sizes, Level const& level
+    template <typename StringSet, typename... Prefixes>
+    static std::vector<size_t> impl(
+        StringSet const& ss,
+        std::vector<size_t> const& interval_sizes,
+        Level<Communicator> const& level,
+        Prefixes const&... prefixes
     ) {
-        auto const char_intervals = _internal::compute_char_intervals(ss, interval_sizes);
+        auto const char_intervals =
+            _internal::compute_char_intervals(ss, interval_sizes, prefixes...);
         auto const char_size =
             std::accumulate(char_intervals.begin(), char_intervals.end(), size_t{0});
-        auto const char_send_counts =
+        auto const send_counts_char =
             _internal::compute_deterministic_redistribution(char_size, char_intervals, level);
-        std::vector<size_t> send_counts(char_send_counts.size());
 
-        auto const group_size = level.group_size();
-        auto str_offset = ss.begin();
-        for (size_t offset = 0; auto const interval: interval_sizes) {
-            auto const interval_ss = ss.subr(str_offset, interval);
-            auto current = interval_ss.begin();
+        return assign_intervals(ss, send_counts_char, prefixes...);
+    }
 
-            auto char_sum = 0, next_bound = 0;
-            for (size_t i = offset, end = offset + group_size; i != end; ++i) {
-                size_t count = 0;
-                next_bound += char_send_counts[i];
+private:
+    template <typename StringSet>
+    static std::vector<size_t>
+    assign_intervals(StringSet const& ss, std::span<size_t const> send_counts_char) {
+        std::vector<size_t> send_counts(send_counts_char.size());
+        auto it = ss.begin();
+        for (size_t i = 0, sum = 0, next = 0; i != send_counts.size(); ++i) {
+            size_t count = 0;
+            next += send_counts_char[i];
 
-                for (; char_sum < next_bound; ++current, ++count) {
-                    char_sum += current->length;
-                }
-                if (char_sum < next_bound) {
-                    // todo maybe randomize this decision
-                    char_sum += current->length;
-                    ++current, ++count;
-                }
-                send_counts[i] = count;
+            for (; sum < next; ++it, ++count) {
+                sum += it->length;
             }
-            offset += group_size, str_offset += interval;
+            if (sum < next) {
+                // todo maybe randomize this decision
+                sum += it->length;
+                ++it, ++count;
+            }
+            send_counts[i] = count;
+            assert(it <= ss.end());
+        }
+        return send_counts;
+    }
+
+    template <typename StringSet>
+    static std::vector<size_t> assign_intervals(
+        StringSet const& ss,
+        std::span<size_t const> send_counts_char,
+        std::span<size_t const> prefixes
+    ) {
+        std::vector<size_t> send_counts(send_counts_char.size());
+        auto it = prefixes.begin();
+        for (size_t i = 0, sum = 0, next = 0; i != send_counts.size(); ++i) {
+            size_t count = 0;
+            next += send_counts_char[i];
+
+            for (; sum < next; ++count) {
+                sum += *it++;
+            }
+            if (sum < next) {
+                sum += *it++;
+                ++count;
+            }
+            send_counts[i] = count;
+            assert(it <= prefixes.end());
         }
         return send_counts;
     }

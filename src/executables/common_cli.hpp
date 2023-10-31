@@ -277,32 +277,43 @@ inline size_t mpi_warmup(size_t const bytes_per_PE, dss_mehnert::Communicator co
 
 namespace dss_mehnert {
 
-template <typename StringSet, typename Subcommunicators_>
-class PolymorphicRedistributionPolicy {
+template <typename StringSet, typename Subcommunicators>
+class PolymorphicRedistributionPolicy
+    : public redistribution::RedistributionBase<
+          Subcommunicators,
+          PolymorphicRedistributionPolicy<StringSet, Subcommunicators>> {
 public:
-    using This = PolymorphicRedistributionPolicy;
-    using Subcommunicators = Subcommunicators_;
     using Communicator = Subcommunicators::Communicator;
-    using Level = multi_level::Level<Communicator>;
 
     template <typename RedistributionPolicy>
     explicit PolymorphicRedistributionPolicy(RedistributionPolicy policy)
         : self_{new RedistributionObject<RedistributionPolicy>{std::move(policy)}} {}
 
-    static constexpr std::string_view get_name() { return "deterministic_string_redistribution"; }
-
-    std::vector<size_t> compute_send_counts(
-        StringSet const& ss, std::vector<size_t> const& interval_sizes, Level const& level
+    template <typename... Prefixes>
+    std::vector<size_t> impl(
+        StringSet const& ss,
+        std::vector<size_t> const& interval_sizes,
+        multi_level::Level<Communicator> const& level,
+        Prefixes const&... prefixes
     ) const {
-        return self_->compute_send_counts(ss, interval_sizes, level);
+        return self_->impl(ss, interval_sizes, level, prefixes...);
     }
 
 private:
     struct RedistributionConcept {
         virtual ~RedistributionConcept() = default;
 
-        virtual std::vector<size_t> compute_send_counts(
-            StringSet const& ss, std::vector<size_t> const& interval_sizes, Level const& level
+        virtual std::vector<size_t> impl(
+            StringSet const& ss,
+            std::vector<size_t> const& interval_sizes,
+            multi_level::Level<Communicator> const& level
+        ) const = 0;
+
+        virtual std::vector<size_t> impl(
+            StringSet const& ss,
+            std::vector<size_t> const& intervals,
+            multi_level::Level<Communicator> const& level,
+            std::span<size_t const> prefixes
         ) const = 0;
     };
 
@@ -311,10 +322,21 @@ private:
         explicit RedistributionObject(RedistributionPolicy policy)
             : RedistributionPolicy{std::move(policy)} {}
 
-        virtual std::vector<size_t> compute_send_counts(
-            StringSet const& ss, std::vector<size_t> const& interval_sizes, Level const& level
+        virtual std::vector<size_t> impl(
+            StringSet const& ss,
+            std::vector<size_t> const& intervals,
+            multi_level::Level<Communicator> const& level
         ) const override {
-            return RedistributionPolicy::compute_send_counts(ss, interval_sizes, level);
+            return RedistributionPolicy::impl(ss, intervals, level);
+        }
+
+        virtual std::vector<size_t> impl(
+            StringSet const& ss,
+            std::vector<size_t> const& intervals,
+            multi_level::Level<Communicator> const& level,
+            std::span<size_t const> prefixes
+        ) const override {
+            return RedistributionPolicy::impl(ss, intervals, level, prefixes);
         }
     };
 

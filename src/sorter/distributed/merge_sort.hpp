@@ -107,8 +107,12 @@ protected:
         measuring_tool_.stop("sort_globally", "compute_partition");
 
         measuring_tool_.start("sort_globally", "redistribute_strings");
-        auto const send_counts =
-            RedistributionPolicy::compute_send_counts(strptr.active(), interval_sizes, level);
+        auto const send_counts = RedistributionPolicy::compute_send_counts(
+            strptr.active(),
+            interval_sizes,
+            extra_arg,
+            level
+        );
         assert_equal(send_counts.size(), level.comm_exchange.size());
         measuring_tool_.stop("sort_globally", "redistribute_strings");
 
