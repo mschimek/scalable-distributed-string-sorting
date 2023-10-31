@@ -3,10 +3,12 @@
 
 #pragma once
 
+#include <algorithm>
 #include <numeric>
 #include <string_view>
 #include <vector>
 
+#include <kamping/collectives/alltoall.hpp>
 #include <kamping/collectives/bcast.hpp>
 #include <kamping/collectives/exscan.hpp>
 #include <kamping/named_parameters.hpp>
@@ -206,6 +208,78 @@ private:
             strs += interval;
         }
         return char_interval_sizes;
+    }
+};
+
+template <typename Communicator>
+class DeterministicStringRedistribution {
+public:
+    using Subcommunicators = multi_level::RowwiseSplit<Communicator>;
+    using Level = multi_level::Level<Communicator>;
+
+    static constexpr std::string_view get_name() { return "deterministic_string_redistribution"; }
+
+    template <typename StringSet>
+    static std::vector<size_t> compute_send_counts(
+        StringSet const& ss, std::vector<size_t> const& interval_sizes, Level const& level
+    ) {
+        namespace kmp = kamping;
+
+        auto const& comm = level.comm_orig;
+        size_t const group_size = level.group_size(), num_groups = level.num_groups();
+        size_t const total_size =
+            comm.allreduce_single(kmp::send_buf(ss.size()), kmp::op(std::plus<>{}));
+
+        size_t const small_piece = total_size / (2 * comm.size() * num_groups);
+        auto is_small_piece = [small_piece](auto const size) { return size <= small_piece; };
+
+        std::vector<size_t> send_counts(comm.size()), recv_counts;
+        for (auto dest = send_counts.begin(); auto const interval: interval_sizes) {
+            dest = std::fill_n(dest, group_size, interval);
+        }
+        comm.alltoall(kmp::send_buf(send_counts), kmp::recv_buf(recv_counts));
+
+        size_t const capacity = tlx::div_ceil(
+            std::accumulate(recv_counts.begin(), recv_counts.end(), size_t{0}),
+            group_size
+        );
+        std::vector<size_t> capacities(level.group_size(), capacity);
+
+        // assign small pieces and update capacities
+        for (size_t i = 0; i != recv_counts.size(); ++i) {
+            if (is_small_piece(recv_counts[i])) {
+                capacities[i / num_groups] -= recv_counts[i];
+            }
+        }
+
+        std::fill(send_counts.begin(), send_counts.end(), size_t{0});
+        auto add_request = [&](auto const receiver, auto const sender, auto const count) {
+            if (comm.rank() % group_size == receiver) {
+                send_counts[sender] = count;
+            }
+        };
+
+        // create requests for small and large pieces
+        for (size_t i = 0, rank = 0; i != recv_counts.size(); ++i) {
+            auto recv_count = recv_counts[i];
+            if (is_small_piece(recv_count)) {
+                add_request(i / num_groups, i, recv_count);
+            } else {
+                while (capacities[rank] < recv_count) {
+                    add_request(rank, i, capacities[rank]);
+                    recv_count -= capacities[rank++];
+                }
+
+                if (recv_count > 0) {
+                    add_request(rank, i, recv_count);
+                    capacities[rank] -= recv_count;
+                }
+            }
+        }
+
+        comm.alltoall(kmp::send_buf(send_counts), kmp::recv_buf(recv_counts));
+        assert_equal(std::accumulate(recv_counts.begin(), recv_counts.end(), size_t{0}), ss.size());
+        return recv_counts;
     }
 };
 
