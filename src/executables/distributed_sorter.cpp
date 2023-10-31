@@ -319,7 +319,7 @@ int main(int argc, char* argv[]) {
         'o',
         "permutation",
         args.permutation,
-        "type of permutation to use for PDMS"
+        "type of permutation to use for PDMS "
         "([0]=simple, 1=multi-level)"
     );
     cp.add_string('y', "path", args.path, "path to input file");

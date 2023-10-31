@@ -60,7 +60,7 @@ struct CommonArgs {
     bool prefix_compression = false;
     bool lcp_compression = false;
     bool prefix_doubling = false;
-    bool grid_bloomfilter = false;
+    bool grid_bloomfilter = true;
     size_t num_iterations = 5;
     bool check_sorted = false;
     bool check_complete = false;
@@ -354,7 +354,7 @@ void dispatch_redistribution(Callback cb, CommonArgs const& args) {
                 return;
             };
             case Redistribution::det_chars: {
-                tlx_die("not implemented");
+                cb(PolymorphicPolicy{DeterministicCharRedistribution<Communicator>{}});
                 return;
             };
             case Redistribution::grid: {
