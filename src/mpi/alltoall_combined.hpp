@@ -25,17 +25,13 @@
 namespace dss_mehnert {
 namespace mpi {
 
-// todo rename to kind
 enum class AlltoallvCombinedKind { combined, native, direct };
 
 template <typename Comm>
 class AlltoallvCombinedPlugin : public kamping::plugins::PluginBase<Comm, AlltoallvCombinedPlugin> {
 public:
     template <AlltoallvCombinedKind combined_type, typename SendBuf>
-    auto alltoallv_combined(
-        SendBuf&& send_buf, std::span<size_t const> send_counts
-
-    ) const {
+    auto alltoallv_combined(SendBuf&& send_buf, std::span<size_t const> send_counts) const {
         auto const recv_counts =
             this->to_communicator().alltoall(kamping::send_buf(send_counts)).extract_recv_buffer();
         return alltoallv_combined<combined_type, SendBuf>(
@@ -111,7 +107,7 @@ private:
         using DataType = std::remove_reference_t<SendBuf>::value_type;
 
         // todo this should use kamping, once irecv is merged into main
-        auto& measuringTool = measurement::MeasuringTool::measuringTool();
+        auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
         auto const& comm = this->to_communicator();
         std::vector<size_t> send_displs(comm.size()), recv_displs(comm.size());
@@ -119,7 +115,7 @@ private:
         std::exclusive_scan(recv_counts.begin(), recv_counts.end(), recv_displs.begin(), size_t{0});
 
         auto const send_total = send_displs.back() + send_counts.back();
-        measuringTool.addRawCommunication(send_total * sizeof(DataType), "alltoallv_direct");
+        measuring_tool.addRawCommunication(send_total * sizeof(DataType), "alltoallv_direct");
 
         auto const recv_total = recv_displs.back() + recv_counts.back();
         std::vector<DataType> receive_data(recv_total);
@@ -127,29 +123,33 @@ private:
 
         for (int i = 0; i < comm.size_signed(); ++i) {
             int source = (comm.rank_signed() + (comm.size_signed() - i)) % comm.size_signed();
-            auto receive_type = dss_schimek::mpi::get_big_type<DataType>(recv_counts[source]);
-            MPI_Irecv(
-                receive_data.data() + recv_displs[source],
-                1,
-                receive_type,
-                source,
-                44227,
-                comm.mpi_communicator(),
-                &mpi_request[source]
-            );
+            if (recv_counts[source] > 0) {
+                auto receive_type = dss_schimek::mpi::get_big_type<DataType>(recv_counts[source]);
+                MPI_Irecv(
+                    receive_data.data() + recv_displs[source],
+                    1,
+                    receive_type,
+                    source,
+                    44227,
+                    comm.mpi_communicator(),
+                    &mpi_request[source]
+                );
+            }
         }
         for (int i = 0; i < comm.size_signed(); ++i) {
             int target = (comm.rank_signed() + i) % comm.size_signed();
-            auto send_type = dss_schimek::mpi::get_big_type<DataType>(send_counts[target]);
-            MPI_Isend(
-                send_buf.data() + send_displs[target],
-                1,
-                send_type,
-                target,
-                44227,
-                comm.mpi_communicator(),
-                &mpi_request[comm.size() + target]
-            );
+            if (send_counts[target] > 0) {
+                auto send_type = dss_schimek::mpi::get_big_type<DataType>(send_counts[target]);
+                MPI_Isend(
+                    send_buf.data() + send_displs[target],
+                    1,
+                    send_type,
+                    target,
+                    44227,
+                    comm.mpi_communicator(),
+                    &mpi_request[comm.size() + target]
+                );
+            }
         }
         MPI_Waitall(2 * comm.size(), mpi_request.data(), MPI_STATUSES_IGNORE);
         return receive_data;
