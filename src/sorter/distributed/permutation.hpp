@@ -18,7 +18,6 @@
 
 #include "strings/stringset.hpp"
 
-// todo might want to put this into a nested namespace
 namespace dss_mehnert {
 
 template <typename StringSet>

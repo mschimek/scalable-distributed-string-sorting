@@ -13,6 +13,7 @@
 #include <tlx/die/core.hpp>
 
 #include "mpi/alltoall_combined.hpp"
+#include "mpi/communicator.hpp"
 #include "options.hpp"
 #include "sorter/distributed/bloomfilter.hpp"
 #include "sorter/distributed/partition.hpp"
@@ -27,7 +28,12 @@ inline void check_path_exists(std::string const& path) {
 
 enum class MPIRoutineAllToAll { native = 0, direct, combined, sentinel };
 
-enum class Redistribution { none = 0, naive, simple_strings, simple_chars, grid, sentinel };
+// clang-format off
+enum class Redistribution {
+    none = 0, naive, simple_strings, simple_chars,
+    det_strings, det_chars, grid, sentinel
+};
+// clang-format on
 
 enum class SplitterSorter { RQuickV1, RQuickV2, RQuickLcp, Sequential };
 
@@ -132,53 +138,6 @@ void dispatch_bloomfilter(Callback cb, CommonArgs const& args) {
     }
 }
 
-template <typename Callback, typename... Args>
-void dispatch_redistribution(Callback cb, CommonArgs const& args) {
-    using namespace dss_mehnert::redistribution;
-    using dss_mehnert::Communicator;
-
-    auto const redistribution = clamp_enum_value<Redistribution>(args.redistribution);
-    if constexpr (CliOptions::enable_redistribution) {
-        switch (redistribution) {
-            case Redistribution::none: {
-                using Redistribution = NoRedistribution<Communicator>;
-                dispatch_bloomfilter<Callback, Args..., Redistribution>(cb, args);
-                return;
-            }
-            case Redistribution::naive: {
-                using Redistribution = NaiveRedistribution<Communicator>;
-                dispatch_bloomfilter<Callback, Args..., Redistribution>(cb, args);
-                return;
-            };
-            case Redistribution::simple_strings: {
-                using Redistribution = SimpleStringRedistribution<Communicator>;
-                dispatch_bloomfilter<Callback, Args..., Redistribution>(cb, args);
-                return;
-            };
-            case Redistribution::simple_chars: {
-                using Redistribution = SimpleCharRedistribution<Communicator>;
-                dispatch_bloomfilter<Callback, Args..., Redistribution>(cb, args);
-                return;
-            };
-            case Redistribution::grid: {
-                using Redistribution = GridwiseRedistribution<Communicator>;
-                dispatch_bloomfilter<Callback, Args..., Redistribution>(cb, args);
-                return;
-            }
-            case Redistribution::sentinel: {
-                break;
-            }
-        };
-        tlx_die("unknown redistribution policy");
-    } else {
-        if (redistribution == Redistribution::grid) {
-            dispatch_bloomfilter<Callback, Args..., GridwiseRedistribution<Communicator>>(cb, args);
-        } else {
-            die_with_feature("CLI_ENABLE_REDISTRIBUTION");
-        }
-    }
-}
-
 template <typename Callback, typename CharType>
 void dispatch_alltoall_strings(Callback cb, CommonArgs const& args) {
     using AlltoallKind = dss_mehnert::mpi::AlltoallvCombinedKind;
@@ -191,7 +150,7 @@ void dispatch_alltoall_strings(Callback cb, CommonArgs const& args) {
             .compress_prefixes = compress_prefixes,
         };
         using Config = std::integral_constant<AlltoallStringsConfig, config>;
-        dispatch_redistribution<Callback, CharType, Config>(cb, args);
+        dispatch_bloomfilter<Callback, CharType, Config>(cb, args);
     };
 
     auto disptach_prefix_compression = [&]<AlltoallKind kind, bool compress_lcps> {
@@ -294,7 +253,8 @@ inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
         "redistribution",
         args.redistribution,
         "redistribution scheme to use for multi-level sort "
-        "(0=none, 1=naive, 2=simple-strings, 3=simple-chars, [4]=grid)"
+        "(0=none, 1=naive, 2=simple-strings, 3=simple-chars, "
+        " 4=det-strings, 5=det-chars, [6]=grid)"
     );
     cp.add_flag('v', "check-sorted", args.check_sorted, "check that the result is sorted");
     cp.add_flag('V', "check-complete", args.check_complete, "check that the result is complete");
@@ -316,6 +276,104 @@ inline size_t mpi_warmup(size_t const bytes_per_PE, dss_mehnert::Communicator co
 }
 
 namespace dss_mehnert {
+
+template <typename StringSet, typename Subcommunicators_>
+class PolymorphicRedistributionPolicy {
+public:
+    using This = PolymorphicRedistributionPolicy;
+    using Subcommunicators = Subcommunicators_;
+    using Communicator = Subcommunicators::Communicator;
+    using Level = multi_level::Level<Communicator>;
+
+    template <typename RedistributionPolicy>
+    explicit PolymorphicRedistributionPolicy(RedistributionPolicy policy)
+        : self_{new RedistributionObject<RedistributionPolicy>{std::move(policy)}} {}
+
+    static constexpr std::string_view get_name() { return "deterministic_string_redistribution"; }
+
+    std::vector<size_t> compute_send_counts(
+        StringSet const& ss, std::vector<size_t> const& interval_sizes, Level const& level
+    ) const {
+        return self_->compute_send_counts(ss, interval_sizes, level);
+    }
+
+private:
+    struct RedistributionConcept {
+        virtual ~RedistributionConcept() = default;
+
+        virtual std::vector<size_t> compute_send_counts(
+            StringSet const& ss, std::vector<size_t> const& interval_sizes, Level const& level
+        ) const = 0;
+    };
+
+    template <typename RedistributionPolicy>
+    struct RedistributionObject : public RedistributionConcept, private RedistributionPolicy {
+        explicit RedistributionObject(RedistributionPolicy policy)
+            : RedistributionPolicy{std::move(policy)} {}
+
+        virtual std::vector<size_t> compute_send_counts(
+            StringSet const& ss, std::vector<size_t> const& interval_sizes, Level const& level
+        ) const override {
+            return RedistributionPolicy::compute_send_counts(ss, interval_sizes, level);
+        }
+    };
+
+    std::unique_ptr<RedistributionConcept> self_;
+};
+
+template <typename StringSet, typename Callback>
+void dispatch_redistribution(Callback cb, CommonArgs const& args) {
+    using namespace dss_mehnert::redistribution;
+    using dss_mehnert::Communicator;
+
+    auto const redistribution = clamp_enum_value<Redistribution>(args.redistribution);
+    if constexpr (CliOptions::enable_redistribution) {
+        using PolymorphicPolicy =
+            PolymorphicRedistributionPolicy<StringSet, multi_level::RowwiseSplit<Communicator>>;
+
+        switch (redistribution) {
+            case Redistribution::none: {
+                // cb(NoRedistribution<Communicator>{});
+                tlx_die("disabled for compile-time");
+                return;
+            }
+            case Redistribution::naive: {
+                cb(PolymorphicPolicy{NaiveRedistribution<Communicator>{}});
+                return;
+            };
+            case Redistribution::simple_strings: {
+                cb(PolymorphicPolicy{SimpleStringRedistribution<Communicator>{}});
+                return;
+            };
+            case Redistribution::simple_chars: {
+                cb(PolymorphicPolicy{SimpleCharRedistribution<Communicator>{}});
+                return;
+            };
+            case Redistribution::det_strings: {
+                cb(PolymorphicPolicy{DeterministicStringRedistribution<Communicator>{}});
+                return;
+            };
+            case Redistribution::det_chars: {
+                tlx_die("not implemented");
+                return;
+            };
+            case Redistribution::grid: {
+                cb(GridwiseRedistribution<Communicator>{});
+                return;
+            }
+            case Redistribution::sentinel: {
+                break;
+            }
+        };
+        tlx_die("unknown redistribution policy");
+    } else {
+        if (redistribution == Redistribution::grid) {
+            cb(GridwiseRedistribution<Communicator>{});
+        } else {
+            die_with_feature("CLI_ENABLE_REDISTRIBUTION");
+        }
+    }
+}
 
 template <typename StringSet, typename... SamplerArgs>
 class PolymorphicPartitionPolicy {

@@ -120,128 +120,140 @@ auto generate_strings(SorterArgs const& args, dss_mehnert::Communicator const& c
     return input_container;
 }
 
-template <
-    typename CharType,
-    typename AlltoallConfig,
-    typename RedistributionPolicy,
-    typename BloomFilterPolicy>
+template <typename CharType, typename AlltoallConfig, typename BloomFilterPolicy>
 void run_merge_sort(
     SorterArgs const& args, std::string prefix, dss_mehnert::Communicator const& comm
 ) {
     constexpr auto alltoall_config = AlltoallConfig();
-    using PartitionPolicy = dss_mehnert::MergeSortPartitionPolicy<CharType>;
     using StringSet = dss_mehnert::StringSet<CharType, dss_mehnert::Length>;
-    using Subcommunicators = RedistributionPolicy::Subcommunicators;
-    using MergeSort = dss_mehnert::sorter::
-        DistributedMergeSort<alltoall_config, RedistributionPolicy, PartitionPolicy>;
+    using PartitionPolicy = dss_mehnert::MergeSortPartitionPolicy<CharType>;
 
-    using dss_mehnert::measurement::MeasuringTool;
-    auto& measuring_tool = MeasuringTool::measuringTool();
-    measuring_tool.setPrefix(prefix);
-    measuring_tool.setVerbose(args.verbose);
+    auto dispatch = [&]<typename RedistributionPolicy>(RedistributionPolicy redistribution) {
+        using Subcommunicators = RedistributionPolicy::Subcommunicators;
+        using MergeSort = dss_mehnert::sorter::
+            DistributedMergeSort<alltoall_config, RedistributionPolicy, PartitionPolicy>;
 
-    measuring_tool.disableCommVolume();
-    auto input_container = generate_strings<StringSet>(args, comm);
+        using dss_mehnert::measurement::MeasuringTool;
+        auto& measuring_tool = MeasuringTool::measuringTool();
+        measuring_tool.setPrefix(prefix);
+        measuring_tool.setVerbose(args.verbose);
 
-    dss_mehnert::MergeSortChecker<StringSet> checker;
-    if (args.check_sorted || args.check_complete) {
-        checker.store_container(input_container);
-    }
-    measuring_tool.enableCommVolume();
+        measuring_tool.disableCommVolume();
+        auto input_container = generate_strings<StringSet>(args, comm);
 
-    comm.barrier();
+        dss_mehnert::MergeSortChecker<StringSet> checker;
+        if (args.check_sorted || args.check_complete) {
+            checker.store_container(input_container);
+        }
+        measuring_tool.enableCommVolume();
 
-    measuring_tool.start("none", "sorting_overall");
-    measuring_tool.start("none", "create_communicators");
-    auto const first_level = get_first_level(args.levels, comm);
-    Subcommunicators comms{first_level, args.levels.end(), comm};
-    measuring_tool.stop("none", "create_communicators", comm);
+        comm.barrier();
 
-    MergeSort merge_sort{dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
-        args.sampler,
-        args.get_splitter_sorter()
-    )};
-    merge_sort.sort(input_container, comms);
-    measuring_tool.stop("none", "sorting_overall", comm);
+        measuring_tool.start("none", "sorting_overall");
+        measuring_tool.start("none", "create_communicators");
+        auto const first_level = get_first_level(args.levels, comm);
+        Subcommunicators comms{first_level, args.levels.end(), comm};
+        measuring_tool.stop("none", "create_communicators", comm);
 
-    if (args.check_sorted) {
-        auto const is_sorted = checker.is_sorted(input_container.make_string_set(), comm);
-        die_verbose_unless(is_sorted, "output is not sorted");
-        auto const is_complete = checker.is_complete(input_container, comm);
-        die_verbose_unless(is_complete, "output is missing chars or strings");
-    }
-    if (args.check_complete) {
-        auto const is_exact = checker.check_exhaustive(input_container, comm);
-        die_verbose_unless(is_exact, "output is not a permutation of the input");
-    }
+        MergeSort merge_sort{
+            dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
+                args.sampler,
+                args.get_splitter_sorter()
+            ),
+            std::move(redistribution)};
+        merge_sort.sort(input_container, comms);
+        measuring_tool.stop("none", "sorting_overall", comm);
 
-    measuring_tool.write_on_root(std::cout, comm);
-    measuring_tool.reset();
+        if (args.check_sorted) {
+            auto const is_sorted = checker.is_sorted(input_container.make_string_set(), comm);
+            die_verbose_unless(is_sorted, "output is not sorted");
+            auto const is_complete = checker.is_complete(input_container, comm);
+            die_verbose_unless(is_complete, "output is missing chars or strings");
+        }
+        if (args.check_complete) {
+            auto const is_exact = checker.check_exhaustive(input_container, comm);
+            die_verbose_unless(is_exact, "output is not a permutation of the input");
+        }
+
+        measuring_tool.write_on_root(std::cout, comm);
+        measuring_tool.reset();
+    };
+
+    dss_mehnert::dispatch_redistribution<StringSet>(dispatch, args);
 }
 
 template <
     typename CharType,
     typename AlltoallConfig,
-    typename RedistributionPolicy,
     typename BloomFilterPolicy,
     typename Permutation>
 void run_prefix_doubling(
     SorterArgs const& args, std::string prefix, dss_mehnert::Communicator const& comm
 ) {
     constexpr auto alltoall_config = AlltoallConfig();
+    using StringSet = dss_mehnert::StringSet<CharType, dss_mehnert::IntLength>;
     using PartitionPolicy =
         dss_mehnert::PrefixDoublingPartitionPolicy<CharType, dss_mehnert::IntLength, Permutation>;
-    using StringSet = dss_mehnert::StringSet<CharType, dss_mehnert::IntLength>;
-    using Subcommunicators = RedistributionPolicy::Subcommunicators;
-    using MergeSort = dss_mehnert::sorter::prefix_doubling::PrefixDoublingMergeSort<
-        alltoall_config,
-        RedistributionPolicy,
-        PartitionPolicy,
-        BloomFilterPolicy,
-        Permutation>;
 
-    using dss_mehnert::measurement::MeasuringTool;
-    auto& measuring_tool = MeasuringTool::measuringTool();
-    measuring_tool.setPrefix(prefix);
-    measuring_tool.setVerbose(args.verbose);
+    auto dispatch = [&]<typename RedistributionPolicy>(RedistributionPolicy redistribution) {
+        using Subcommunicators = RedistributionPolicy::Subcommunicators;
+        using MergeSort = dss_mehnert::sorter::prefix_doubling::PrefixDoublingMergeSort<
+            alltoall_config,
+            RedistributionPolicy,
+            PartitionPolicy,
+            BloomFilterPolicy,
+            Permutation>;
 
-    measuring_tool.disableCommVolume();
-    auto input_container = generate_strings<StringSet>(args, comm);
+        using dss_mehnert::measurement::MeasuringTool;
+        auto& measuring_tool = MeasuringTool::measuringTool();
+        measuring_tool.setPrefix(prefix);
+        measuring_tool.setVerbose(args.verbose);
 
-    dss_mehnert::PrefixDoublingChecker<StringSet> checker;
-    if (args.check_sorted || args.check_complete) {
-        checker.store_container(input_container);
-    }
-    measuring_tool.enableCommVolume();
+        measuring_tool.disableCommVolume();
 
-    comm.barrier();
-    measuring_tool.start("none", "sorting_overall");
-    measuring_tool.start("none", "create_communicators");
-    auto const first_level = get_first_level(args.levels, comm);
-    Subcommunicators comms{first_level, args.levels.end(), comm};
-    measuring_tool.stop("none", "create_communicators", comm);
+        auto input_container = generate_strings<StringSet>(args, comm);
 
-    MergeSort merge_sort{dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
-        args.sampler,
-        args.get_splitter_sorter()
-    )};
-    auto permutation = merge_sort.sort(std::move(input_container), comms);
-    measuring_tool.stop("none", "sorting_overall", comm);
+        dss_mehnert::PrefixDoublingChecker<StringSet> checker;
+        if (args.check_sorted || args.check_complete) {
+            checker.store_container(input_container);
+        }
+        measuring_tool.enableCommVolume();
 
-    measuring_tool.disable();
-    measuring_tool.disableCommVolume();
+        comm.barrier();
 
-    if (args.check_sorted) {
-        auto const is_sorted = checker.is_sorted(permutation, comms);
-        die_verbose_unless(is_sorted, "output permutation is not sorted");
-    }
-    if (args.check_complete) {
-        auto const is_complete = checker.is_complete(permutation, comms);
-        die_verbose_unless(is_complete, "output permutation is not complete");
-    }
+        measuring_tool.start("none", "sorting_overall");
+        measuring_tool.start("none", "create_communicators");
+        auto const first_level = get_first_level(args.levels, comm);
+        Subcommunicators comms{first_level, args.levels.end(), comm};
+        measuring_tool.stop("none", "create_communicators", comm);
 
-    measuring_tool.write_on_root(std::cout, comm);
-    measuring_tool.reset();
+        MergeSort merge_sort{
+            dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
+                args.sampler,
+                args.get_splitter_sorter()
+            ),
+            std::move(redistribution)};
+        auto permutation = merge_sort.sort(std::move(input_container), comms);
+        measuring_tool.stop("none", "sorting_overall", comm);
+
+        measuring_tool.disable();
+        measuring_tool.disableCommVolume();
+
+        if (args.check_sorted) {
+            auto const is_sorted = checker.is_sorted(permutation, comms);
+            die_verbose_unless(is_sorted, "output permutation is not sorted");
+        }
+        if (args.check_complete) {
+            auto const is_complete = checker.is_complete(permutation, comms);
+            die_verbose_unless(is_complete, "output permutation is not complete");
+        }
+
+        measuring_tool.write_on_root(std::cout, comm);
+        measuring_tool.reset();
+    };
+
+    using AugmentedStringSet = dss_mehnert::sorter::AugmentedStringSet<StringSet, Permutation>;
+    dss_mehnert::dispatch_redistribution<AugmentedStringSet>(dispatch, args);
 }
 
 template <typename... Args>
@@ -268,7 +280,7 @@ void dispatch_permutation(
 }
 
 template <typename... Args>
-void dispatch_permutation(SorterArgs const& args) {
+void dispatch_sorter(SorterArgs const& args) {
     dss_mehnert::Communicator comm;
 
     auto prefix = args.get_prefix(comm);
@@ -354,7 +366,7 @@ int main(int argc, char* argv[]) {
 
     for (size_t i = 0; i < args.num_iterations; ++i) {
         args.iteration = i;
-        dispatch_common_args([&]<typename... T> { dispatch_permutation<T...>(args); }, args);
+        dispatch_common_args([&]<typename... T> { dispatch_sorter<T...>(args); }, args);
     }
 
     return EXIT_SUCCESS;

@@ -37,10 +37,13 @@ namespace sorter {
 using mpi::AlltoallStringsConfig;
 
 template <AlltoallStringsConfig config, typename RedistributionPolicy, typename PartitionPolicy>
-class BaseDistributedMergeSort : protected PartitionPolicy {
+class BaseDistributedMergeSort : protected PartitionPolicy, protected RedistributionPolicy {
 public:
-    explicit BaseDistributedMergeSort(PartitionPolicy partition)
-        : PartitionPolicy{std::move(partition)} {}
+    explicit BaseDistributedMergeSort(
+        PartitionPolicy partition, RedistributionPolicy redistribution
+    )
+        : PartitionPolicy{std::move(partition)},
+          RedistributionPolicy{std::move(redistribution)} {}
 
 protected:
     using Subcommunicators = RedistributionPolicy::Subcommunicators;

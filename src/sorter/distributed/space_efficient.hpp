@@ -287,12 +287,13 @@ public:
     using QuantilePolicy_ = QuantilePolicyBase<QuantilePolicy>;
     using Subcommunicators = BloomFilterPolicy::Subcommunicators;
 
-    template <typename PartitionPolicy>
     SpaceEfficientSort(
-        PartitionPolicy partition, QuantilePolicy quantile_partition, size_t const quantile_size
+        BloomFilterPolicy bloom_filter,
+        QuantilePolicy quantile_partition,
+        size_t const quantile_size
     )
         : QuantilePolicy_{std::move(quantile_partition)},
-          BloomFilterPolicy{std::move(partition)},
+          BloomFilterPolicy{std::move(bloom_filter)},
           quantile_size_{quantile_size} {}
 
     template <typename StringSet>

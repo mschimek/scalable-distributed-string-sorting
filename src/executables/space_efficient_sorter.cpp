@@ -218,121 +218,122 @@ inline size_t count_duplicate_ranks(
     return duplicates;
 }
 
-template <typename CharType, typename BloomFilterPolicy, typename Permutation>
+template <typename CharType, typename AlltoallConfig, typename BloomFilter, typename Permutation>
 void run_space_efficient_sort(
     SorterArgs const& args, std::string prefix, dss_mehnert::Communicator const& comm
 ) {
     namespace sems = dss_mehnert::sorter::space_efficient;
 
+    using dss_mehnert::IntLength;
+    using dss_mehnert::SpaceEfficientPartitionPolicy;
+
     constexpr bool is_unique = Permutation::is_unique;
 
-    // todo choose correct Length types
-    using StringSet = dss_mehnert::CompressedStringSet<CharType, dss_mehnert::IntLength>;
-    using PartitionPolicy =
-        dss_mehnert::SpaceEfficientPartitionPolicy<CharType, dss_mehnert::IntLength, Permutation>;
-    using Subcommunicators = BloomFilterPolicy::Subcommunicators;
-
-    using Sorter = sems::SpaceEfficientSort<PartitionPolicy, BloomFilterPolicy, Permutation>;
-
-    using dss_mehnert::measurement::MeasuringTool;
-    auto& measuring_tool = MeasuringTool::measuringTool();
-    measuring_tool.setPrefix(prefix);
-    measuring_tool.setVerbose(args.verbose);
-
-    measuring_tool.disableCommVolume();
-    auto input_container = generate_compressed_strings<StringSet>(args, comm);
-    measuring_tool.enableCommVolume();
-
-    dss_mehnert::SpaceEfficientChecker<is_unique, StringSet> checker;
-    if (args.check_sorted || args.check_complete) {
-        checker.store_container(input_container);
-    }
-
-    comm.barrier();
-
-    measuring_tool.start("none", "sorting_overall");
-    measuring_tool.start("none", "create_communicators");
-    auto const first_level = get_first_level(args.levels, comm);
-    Subcommunicators comms{first_level, args.levels.end(), comm};
-    measuring_tool.stop("none", "create_communicators", comm);
-
-    Sorter merge_sort{
-        dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
-            args.sampler,
-            args.get_splitter_sorter()
-        ),
-        dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
-            args.quantile_sampler,
-            args.get_splitter_sorter()
-        ),
-        args.quantile_size};
-    auto global_ranks = merge_sort.sort(std::move(input_container), comms);
-    measuring_tool.stop("none", "sorting_overall", comm);
-
-    measuring_tool.disableCommVolume();
-
-    auto const duplicates = count_duplicate_ranks(global_ranks, comm);
-    measuring_tool.add(duplicates, "duplicate_ranks");
-
-    measuring_tool.disable();
-
-    if (args.check_sorted) {
-        auto const is_sorted = checker.is_sorted(global_ranks, comm);
-        die_verbose_unless(is_sorted, "output permutation is not sorted");
-    }
-    if (args.check_complete) {
-        auto const is_complete = checker.is_complete(global_ranks, comm);
-        die_verbose_unless(is_complete, "output permutation is not complete");
-    }
-
-    measuring_tool.write_on_root(std::cout, comm);
-    measuring_tool.reset();
-}
-
-template <
-    typename CharType,
-    typename AlltoallConfig,
-    typename RedistributionPolicy,
-    typename BloomFilter,
-    typename Permutation>
-void dispatch_bloomfilter_policy(SorterArgs const& args) {
-    namespace sems = dss_mehnert::sorter::space_efficient;
-
-    dss_mehnert::Communicator comm;
-    auto prefix = args.get_prefix(comm);
-    // todo print config
-
     constexpr auto config = AlltoallConfig();
-    using PartitionPolicy =
-        dss_mehnert::SpaceEfficientPartitionPolicy<CharType, dss_mehnert::IntLength, Permutation>;
+    using PartitionPolicy = SpaceEfficientPartitionPolicy<CharType, IntLength, Permutation>;
+    using StringSet = dss_mehnert::CompressedStringSet<CharType, IntLength>;
 
-    if (args.prefix_doubling) {
-        using BloomFilterPolicy =
-            sems::BloomFilterFirst<config, RedistributionPolicy, PartitionPolicy, BloomFilter>;
-        run_space_efficient_sort<CharType, BloomFilterPolicy, Permutation>(args, prefix, comm);
-    } else {
-        // todo maybe add cmake flag for this
-        using BloomFilterPolicy =
-            sems::NoBloomFilter<config, RedistributionPolicy, PartitionPolicy>;
-        run_space_efficient_sort<CharType, BloomFilterPolicy, Permutation>(args, prefix, comm);
-    }
+    auto run_sorter = [&]<typename BloomFilterPolicy>(BloomFilterPolicy bloom_filter) {
+        using Subcommunicators = BloomFilterPolicy::Subcommunicators;
+        using Sorter = sems::SpaceEfficientSort<PartitionPolicy, BloomFilterPolicy, Permutation>;
+
+        using dss_mehnert::measurement::MeasuringTool;
+        auto& measuring_tool = MeasuringTool::measuringTool();
+        measuring_tool.setPrefix(prefix);
+        measuring_tool.setVerbose(args.verbose);
+
+        measuring_tool.disableCommVolume();
+        auto input_container = generate_compressed_strings<StringSet>(args, comm);
+        measuring_tool.enableCommVolume();
+
+        dss_mehnert::SpaceEfficientChecker<is_unique, StringSet> checker;
+        if (args.check_sorted || args.check_complete) {
+            checker.store_container(input_container);
+        }
+
+        comm.barrier();
+
+        measuring_tool.start("none", "sorting_overall");
+        measuring_tool.start("none", "create_communicators");
+        auto const first_level = get_first_level(args.levels, comm);
+        Subcommunicators comms{first_level, args.levels.end(), comm};
+        measuring_tool.stop("none", "create_communicators", comm);
+
+        Sorter merge_sort{
+            std::move(bloom_filter),
+            dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
+                args.quantile_sampler,
+                args.get_splitter_sorter()
+            ),
+            args.quantile_size};
+        auto global_ranks = merge_sort.sort(std::move(input_container), comms);
+        measuring_tool.stop("none", "sorting_overall", comm);
+
+        measuring_tool.disableCommVolume();
+
+        auto const duplicates = count_duplicate_ranks(global_ranks, comm);
+        measuring_tool.add(duplicates, "duplicate_ranks");
+
+        measuring_tool.disable();
+
+        if (args.check_sorted) {
+            auto const is_sorted = checker.is_sorted(global_ranks, comm);
+            die_verbose_unless(is_sorted, "output permutation is not sorted");
+        }
+        if (args.check_complete) {
+            auto const is_complete = checker.is_complete(global_ranks, comm);
+            die_verbose_unless(is_complete, "output permutation is not complete");
+        }
+
+        measuring_tool.write_on_root(std::cout, comm);
+        measuring_tool.reset();
+    };
+
+    auto dispatch = [&]<typename RedistributionPolicy>(RedistributionPolicy redistribution) {
+        if (args.prefix_doubling) {
+            using BloomFilterPolicy =
+                sems::BloomFilterFirst<config, RedistributionPolicy, PartitionPolicy, BloomFilter>;
+            run_sorter(BloomFilterPolicy{
+                dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
+                    args.sampler,
+                    args.get_splitter_sorter()
+                ),
+                std::move(redistribution)});
+        } else {
+            // todo maybe add cmake flag for this
+            using BloomFilterPolicy =
+                sems::NoBloomFilter<config, RedistributionPolicy, PartitionPolicy>;
+            run_sorter(BloomFilterPolicy{
+                dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
+                    args.sampler,
+                    args.get_splitter_sorter()
+                ),
+                std::move(redistribution)});
+        }
+    };
+
+    using AugmentedStringSet = dss_mehnert::sorter::AugmentedStringSet<StringSet, Permutation>;
+    dss_mehnert::dispatch_redistribution<AugmentedStringSet>(dispatch, args);
 }
 
 template <typename... Args>
 void dispatch_permutation(SorterArgs const& args) {
     using namespace dss_mehnert;
 
+    dss_mehnert::Communicator comm;
+    auto prefix = args.get_prefix(comm);
+
     switch (clamp_enum_value<Permutation>(args.permutation)) {
         case Permutation::simple: {
-            dispatch_bloomfilter_policy<Args..., SimplePermutation>(args);
+            run_space_efficient_sort<Args..., SimplePermutation>(args, prefix, comm);
             return;
         }
         case Permutation::multi_level: {
-            dispatch_bloomfilter_policy<Args..., MultiLevelPermutation>(args);
+            run_space_efficient_sort<Args..., MultiLevelPermutation>(args, prefix, comm);
             return;
         }
         case Permutation::non_unqiue: {
-            dispatch_bloomfilter_policy<Args..., NonUniquePermutation>(args);
+            run_space_efficient_sort<Args..., NonUniquePermutation>(args, prefix, comm);
             return;
         }
         case Permutation::sentinel: {
