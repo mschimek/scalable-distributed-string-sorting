@@ -215,7 +215,7 @@ inline size_t count_duplicate_ranks(
         std::adjacent_difference(begin, end, begin);
         duplicates = std::count(begin + 1, end, 0);
     }
-    return comm.allreduce_single(kamping::send_buf(duplicates), kamping::op(std::plus<>{}));
+    return duplicates;
 }
 
 template <typename CharType, typename BloomFilterPolicy, typename Permutation>
