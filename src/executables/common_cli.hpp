@@ -276,10 +276,11 @@ inline size_t mpi_warmup(size_t const bytes_per_PE, dss_mehnert::Communicator co
 }
 
 namespace dss_mehnert {
+namespace redistribution {
 
 template <typename StringSet, typename Subcommunicators>
 class PolymorphicRedistributionPolicy
-    : public redistribution::RedistributionBase<
+    : public RedistributionBase<
           Subcommunicators,
           PolymorphicRedistributionPolicy<StringSet, Subcommunicators>> {
 public:
@@ -289,14 +290,13 @@ public:
     explicit PolymorphicRedistributionPolicy(RedistributionPolicy policy)
         : self_{new RedistributionObject<RedistributionPolicy>{std::move(policy)}} {}
 
-    template <typename... Prefixes>
+    template <typename Strings>
     std::vector<size_t> impl(
-        StringSet const& ss,
-        std::vector<size_t> const& interval_sizes,
-        multi_level::Level<Communicator> const& level,
-        Prefixes const&... prefixes
+        Strings const& strings,
+        std::vector<size_t> const& intervals,
+        Level<Communicator> const& level
     ) const {
-        return self_->impl(ss, interval_sizes, level, prefixes...);
+        return self_->impl(strings, intervals, level);
     }
 
 private:
@@ -304,16 +304,15 @@ private:
         virtual ~RedistributionConcept() = default;
 
         virtual std::vector<size_t> impl(
-            StringSet const& ss,
-            std::vector<size_t> const& interval_sizes,
-            multi_level::Level<Communicator> const& level
+            FullStrings<StringSet> const& strings,
+            std::vector<size_t> const& intervals,
+            Level<Communicator> const& level
         ) const = 0;
 
         virtual std::vector<size_t> impl(
-            StringSet const& ss,
+            Prefixes const& prefixes,
             std::vector<size_t> const& intervals,
-            multi_level::Level<Communicator> const& level,
-            std::span<size_t const> prefixes
+            Level<Communicator> const& level
         ) const = 0;
     };
 
@@ -323,25 +322,26 @@ private:
             : RedistributionPolicy{std::move(policy)} {}
 
         virtual std::vector<size_t> impl(
-            StringSet const& ss,
+            FullStrings<StringSet> const& strings,
             std::vector<size_t> const& intervals,
-            multi_level::Level<Communicator> const& level
+            Level<Communicator> const& level
         ) const override {
-            return RedistributionPolicy::impl(ss, intervals, level);
+            return RedistributionPolicy::impl(strings, intervals, level);
         }
 
         virtual std::vector<size_t> impl(
-            StringSet const& ss,
+            Prefixes const& prefixes,
             std::vector<size_t> const& intervals,
-            multi_level::Level<Communicator> const& level,
-            std::span<size_t const> prefixes
+            multi_level::Level<Communicator> const& level
         ) const override {
-            return RedistributionPolicy::impl(ss, intervals, level, prefixes);
+            return RedistributionPolicy::impl(prefixes, intervals, level);
         }
     };
 
     std::unique_ptr<RedistributionConcept> self_;
 };
+
+} // namespace redistribution
 
 template <typename StringSet, typename Callback>
 void dispatch_redistribution(Callback cb, CommonArgs const& args) {
@@ -351,7 +351,7 @@ void dispatch_redistribution(Callback cb, CommonArgs const& args) {
     auto const redistribution = clamp_enum_value<Redistribution>(args.redistribution);
     if constexpr (CliOptions::enable_redistribution) {
         using PolymorphicPolicy =
-            PolymorphicRedistributionPolicy<StringSet, multi_level::RowwiseSplit<Communicator>>;
+            PolymorphicRedistributionPolicy<StringSet, RowwiseSplit<Communicator>>;
 
         switch (redistribution) {
             case Redistribution::none: {
