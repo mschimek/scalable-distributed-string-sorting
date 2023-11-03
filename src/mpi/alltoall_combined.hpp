@@ -119,7 +119,8 @@ private:
 
         auto const recv_total = recv_displs.back() + recv_counts.back();
         std::vector<DataType> receive_data(recv_total);
-        std::vector<MPI_Request> mpi_request(2 * comm.size());
+        std::vector<MPI_Request> requests;
+        requests.reserve(2 * comm.size());
 
         for (int i = 0; i < comm.size_signed(); ++i) {
             int source = (comm.rank_signed() + (comm.size_signed() - i)) % comm.size_signed();
@@ -132,7 +133,7 @@ private:
                     source,
                     44227,
                     comm.mpi_communicator(),
-                    &mpi_request[source]
+                    &requests.emplace_back(MPI_REQUEST_NULL)
                 );
             }
         }
@@ -147,11 +148,11 @@ private:
                     target,
                     44227,
                     comm.mpi_communicator(),
-                    &mpi_request[comm.size() + target]
+                    &requests.emplace_back(MPI_REQUEST_NULL)
                 );
             }
         }
-        MPI_Waitall(2 * comm.size(), mpi_request.data(), MPI_STATUSES_IGNORE);
+        MPI_Waitall(requests.size(), requests.data(), MPI_STATUSES_IGNORE);
         return receive_data;
     }
 };
