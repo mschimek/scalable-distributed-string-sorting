@@ -485,21 +485,17 @@ private:
     shift_chars_left(std::vector<Char>& chars, size_t const size, Communicator const& comm) {
         using namespace kamping;
 
+        // NOTE this only works correctly if ever PE has at least `size` characters
         chars.reserve(chars.size() + size - 1);
-        bool const sufficient_chars [[maybe_unused]] = chars.size() >= size;
-        tlx_die_verbose_unless(
-            sufficient_chars && comm.is_same_on_all_ranks(sufficient_chars),
-            "generating a proper difference cover requires sufficient chars on each PE"
-        );
 
         Request req;
         if (comm.rank() > 0) {
-            std::span const send_chars{chars.begin(), size - 1};
+            std::span const send_chars{chars.begin(), std::min(size - 1, chars.size())};
             comm.issend(send_buf(send_chars), destination(comm.rank() - 1), request(req));
         }
         if (comm.rank() < comm.size() - 1) {
             std::vector<Char> recv_chars;
-            comm.recv(recv_buf(recv_chars), recv_counts(static_cast<int>(size - 1)));
+            comm.recv(recv_buf(recv_chars));
             chars.insert(chars.end(), recv_chars.begin(), recv_chars.end());
         }
         req.wait();
