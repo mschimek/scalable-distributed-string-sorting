@@ -52,16 +52,17 @@ def fuzz_merge_sort(target, fixed_args, min_procs, max_procs, repeat):
         levels = get_levels(procs)
 
         permutation = random.randint(0, 1)
+        redistribution = 6 # random.randint(1, 6)
         num_strings = random.randint(0, 10000)
         len_strings = random.randint(1, 500)
         dn_ratio = random.random()
         sampling_factor = random.randint(1, 10)
 
         run_or_exit(f"mpirun -n {procs} --oversubscribe"
-              f" target/{target}/distributed_sorter -v -V -i 5"
-              f" --num-strings {num_strings} --len-strings {len_strings}"
-              f" --DN-ratio {dn_ratio} --sampling-factor {sampling_factor}"
-              f" --permutation {permutation} {' '.join(fixed_args)}"
+              f" target/{target}/distributed_sorter -v -V -i 5 --permutation {permutation}"
+              f" --redistribution {redistribution} --num-strings {num_strings}"
+              f" --len-strings {len_strings} --DN-ratio {dn_ratio}"
+              f" --sampling-factor {sampling_factor} {' '.join(fixed_args)}"
               f" {' '.join(args)} {' '.join(map(str, levels))}")
 
 def fuzz_space_efficient_sort(target, fixed_args, min_procs, max_procs, repeat):
@@ -73,13 +74,14 @@ def fuzz_space_efficient_sort(target, fixed_args, min_procs, max_procs, repeat):
 
     for _ in repeat:
         random_args = common_args + ["--quantile-chars", "--quantile-indexed",
-                                     "--quantile-random", "--shuffle"]
+                                     "--quantile-random", "--shuffle", "--use-proper-dc"]
 
         args = get_random_args(random_args, fixed_args)
         procs = random.randint(min_procs, max_procs)
         levels = get_levels(procs)
 
         permutation = random.randint(0, 2)
+        redistribution = 6 # random.randint(1, 6)
         generator = random.choice(list(StringGenerator))
         num_chars = random.randint(1, 50000) \
             if generator == StringGenerator.Suffix \
@@ -101,8 +103,8 @@ def fuzz_space_efficient_sort(target, fixed_args, min_procs, max_procs, repeat):
 
         run_or_exit(f"mpirun -n {procs} --oversubscribe"
             f" target/{target}/space_efficient_sorter -v -V -i 3 --permutation {permutation}"
-            f" --sampling-factor {sampling_factor} --use-quantile-sampler"
-            f" --quantile-factor {quantile_factor} --quantile-size {quantile_size}KiB"
+            f" --redistribution {redistribution} --sampling-factor {sampling_factor}"
+            f" --use-quantile-sampler --quantile-factor {quantile_factor} --quantile-size {quantile_size}KiB"
             f" --combined-generator {combined_gnerator} --string-generator {string_generator}"
             f" --char-generator {char_generator} --num-chars {num_chars} --len-strings {len_strings}"
             f" --num-strings {num_strings} --dn-ratio {dn_ratio} --step {step} --difference-cover {dc}"
