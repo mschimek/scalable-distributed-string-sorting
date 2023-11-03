@@ -185,7 +185,7 @@ public:
         for (size_t group = 0; group != intervals.size(); ++group) {
             auto const prefix = global_prefixes[group];
             auto const capacity = tlx::div_ceil(global_sizes[group], level.group_size());
-            auto const rank_in_group = prefix / capacity;
+            auto const rank_in_group = capacity > 0 ? prefix / capacity : 0;
 
             auto rank = level.group_size() * group + rank_in_group;
 
@@ -221,7 +221,7 @@ public:
         for (size_t group = 0; group < intervals.size(); ++group) {
             auto const prefix = global_prefixes[group];
             auto const capacity = tlx::div_ceil(global_sizes[group], level.group_size());
-            auto const rank_in_group = prefix / capacity;
+            auto const rank_in_group = capacity > 0 ? prefix / capacity : 0;
 
             auto rank = level.group_size() * group + rank_in_group;
 

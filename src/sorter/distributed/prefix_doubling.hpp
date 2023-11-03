@@ -68,8 +68,7 @@ class BasePrefixDoublingMergeSort
     : protected BaseDistributedMergeSort<config, RedistributionPolicy, PartitionPolicy> {
 public:
     using Base = BaseDistributedMergeSort<config, RedistributionPolicy, PartitionPolicy>;
-
-    using Base::Base;
+    using Base::BaseDistributedMergeSort;
 
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
 
@@ -152,7 +151,7 @@ protected:
                 this->measuring_tool_.setRound(0);
             }
         } else {
-            tlx_die("unreachable for for a purely single level implementation");
+            tlx_die("unreachable for a purely single level implementation");
         }
     }
 
