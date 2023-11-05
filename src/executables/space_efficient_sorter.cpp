@@ -316,31 +316,39 @@ void run_space_efficient_sort(
     dss_mehnert::dispatch_redistribution<AugmentedStringSet>(dispatch, args);
 }
 
-template <typename... Args>
+template <typename CharType, typename... Args>
 void dispatch_permutation(SorterArgs const& args) {
     using namespace dss_mehnert;
 
     dss_mehnert::Communicator comm;
     auto prefix = args.get_prefix(comm);
 
-    switch (clamp_enum_value<Permutation>(args.permutation)) {
-        case Permutation::simple: {
-            run_space_efficient_sort<Args..., SimplePermutation>(args, prefix, comm);
-            return;
+    if constexpr (CliOptions::use_shared_memory_sort) {
+        using StringSet = dss_mehnert::CompressedStringSet<CharType, Length>;
+        run_shared_memory(args, prefix, comm, generate_compressed_strings<StringSet>);
+    } else {
+        switch (clamp_enum_value<Permutation>(args.permutation)) {
+            case Permutation::simple: {
+                using Permutation_ = SimplePermutation;
+                run_space_efficient_sort<CharType, Args..., Permutation_>(args, prefix, comm);
+                return;
+            }
+            case Permutation::multi_level: {
+                using Permutation_ = MultiLevelPermutation;
+                run_space_efficient_sort<CharType, Args..., Permutation_>(args, prefix, comm);
+                return;
+            }
+            case Permutation::non_unique: {
+                using Permutation_ = NonUniquePermutation;
+                run_space_efficient_sort<CharType, Args..., Permutation_>(args, prefix, comm);
+                return;
+            }
+            case Permutation::sentinel: {
+                break;
+            }
         }
-        case Permutation::multi_level: {
-            run_space_efficient_sort<Args..., MultiLevelPermutation>(args, prefix, comm);
-            return;
-        }
-        case Permutation::non_unqiue: {
-            run_space_efficient_sort<Args..., NonUniquePermutation>(args, prefix, comm);
-            return;
-        }
-        case Permutation::sentinel: {
-            break;
-        }
+        tlx_die("invalid permutation");
     }
-    tlx_die("invalid permutation");
 }
 
 int main(int argc, char* argv[]) {

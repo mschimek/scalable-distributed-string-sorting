@@ -36,6 +36,9 @@ message(STATUS "All-To-All Routines Enabled: ${CLI_ENABLE_ALLTOALL}")
 message(STATUS "RQuick Version 1 Enabled: ${CLI_ENABLE_RQUICK_V1}")
 message(STATUS "RQuick With LCP Enabled: ${CLI_ENABLE_RQUICK_LCP}")
 
+option(USE_SHARED_MEMORY_SORT "sort using a shared memory string sorting algorithm" Off)
+message(STATUS "Shared Memory Enabled: ${USE_SHARED_MEMORY_SORT}")
+
 list(APPEND
   DSS_MEHNERT_WARNING_FLAGS
   "-Werror"

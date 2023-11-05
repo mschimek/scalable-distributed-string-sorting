@@ -151,7 +151,7 @@ public:
 
     size_t get_sum_length() const {
         StringSet const& ss = *static_cast<StringSet const*>(this);
-        auto acc = [](auto const& n, auto const& str) { return n + str.getLength(); };
+        auto acc = [&ss](auto const& n, auto const& str) { return n + ss.get_length(str); };
         return std::accumulate(ss.begin(), ss.end(), size_t{0}, acc);
     }
 
@@ -451,6 +451,25 @@ std::ostream& operator<<(std::ostream& out, StringData<Char, String, Args...> co
     return out << "}";
 }
 
+template <typename Char_, typename String>
+class SimpleString {
+public:
+    using Char = Char_;
+
+    static constexpr bool is_indexed = false;
+    static constexpr bool has_length = false;
+
+    SimpleString() = default;
+
+    template <typename... Init>
+    SimpleString(String string, size_t length = 0) noexcept : string{string} {}
+
+    String string;
+
+    inline void setChars(String string_) { string = string_; }
+    inline String getChars() const { return string; }
+};
+
 /******************************************************************************/
 
 template <typename String_, template <typename> typename StringSet_>
@@ -605,6 +624,7 @@ using dss_schimek::Index;
 using dss_schimek::IntLength;
 using dss_schimek::Length;
 using dss_schimek::PEIndex;
+using dss_schimek::SimpleString;
 using dss_schimek::StringData;
 using dss_schimek::StringIndex;
 using dss_schimek::StringSet;

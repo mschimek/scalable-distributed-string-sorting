@@ -164,6 +164,9 @@ void run_merge_sort(
         merge_sort.sort(input_container, comms);
         measuring_tool.stop("none", "sorting_overall", comm);
 
+        measuring_tool.disable();
+        measuring_tool.disableCommVolume();
+
         if (args.check_sorted) {
             auto const is_sorted = checker.is_sorted(input_container.make_string_set(), comm);
             die_verbose_unless(is_sorted, "output is not sorted");
@@ -279,22 +282,25 @@ void dispatch_permutation(
     tlx_die("invalid permutation");
 }
 
-template <typename... Args>
+template <typename CharType, typename... Args>
 void dispatch_sorter(SorterArgs const& args) {
     dss_mehnert::Communicator comm;
 
+    // todo print config
     auto prefix = args.get_prefix(comm);
 
-    // todo print config
-
-    if (args.prefix_doubling) {
+    if constexpr (CliOptions::use_shared_memory_sort) {
+        using String = dss_mehnert::SimpleString<CharType, CharType*>;
+        using StringSet = dss_mehnert::GenericStringSet<String>;
+        run_shared_memory(args, prefix, comm, generate_strings<StringSet>);
+    } else if (args.prefix_doubling) {
         if constexpr (CliOptions::enable_prefix_doubling) {
-            dispatch_permutation<Args...>(args, prefix, comm);
+            dispatch_permutation<CharType, Args...>(args, prefix, comm);
         } else {
             die_with_feature("CLI_ENABLE_PREFIX_DOUBLING");
         }
     } else {
-        run_merge_sort<Args...>(args, prefix, comm);
+        run_merge_sort<CharType, Args...>(args, prefix, comm);
     }
 }
 

@@ -21,6 +21,7 @@
 #include "sorter/distributed/redistribution.hpp"
 #include "sorter/distributed/sample.hpp"
 #include "strings/stringset.hpp"
+#include "tlx/sort/strings/parallel_sample_sort.hpp"
 
 inline void check_path_exists(std::string const& path) {
     tlx_die_verbose_unless(std::filesystem::exists(path), "file not found: " << path);
@@ -243,7 +244,7 @@ inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
     );
     cp.add_size_t(
         'a',
-        "alltoall-routine",
+        "alltoall",
         args.alltoall_routine,
         "All-To-All routine to use during string exchange "
         "([0]=native, 1=direct, 2=combined)"
@@ -259,6 +260,39 @@ inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
     cp.add_flag('v', "check-sorted", args.check_sorted, "check that the result is sorted");
     cp.add_flag('V', "check-complete", args.check_complete, "check that the result is complete");
     cp.add_flag("verbose", args.verbose, "print some debug output");
+}
+
+template <typename SorterArgs, typename GenerateStrings>
+void run_shared_memory(
+    SorterArgs const& args,
+    std::string prefix,
+    dss_mehnert::Communicator const& comm,
+    GenerateStrings generate_strings
+) {
+    assert_equal(comm.size_signed(), 1);
+
+    using dss_mehnert::measurement::MeasuringTool;
+    auto& measuring_tool = MeasuringTool::measuringTool();
+    measuring_tool.setPrefix(prefix);
+    measuring_tool.setVerbose(args.verbose);
+
+    measuring_tool.disableCommVolume();
+    auto input_container = generate_strings(args, comm);
+
+    measuring_tool.start("none", "sorting_overall");
+    tlx::sort_strings_detail::parallel_sample_sort(input_container.make_string_lcp_ptr(), 0, 0);
+    measuring_tool.stop("none", "sorting_overall", comm);
+
+    measuring_tool.disable();
+    measuring_tool.disableCommVolume();
+
+    if (args.check_sorted) {
+        auto const is_sorted = input_container.make_string_set().check_order();
+        die_verbose_unless(is_sorted, "output is not sorted");
+    }
+
+    measuring_tool.write_on_root(std::cout, comm);
+    measuring_tool.reset();
 }
 
 inline size_t mpi_warmup(size_t const bytes_per_PE, dss_mehnert::Communicator const& comm) {
