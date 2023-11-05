@@ -324,54 +324,6 @@ public:
     }
 };
 
-/*----------------------------------------------------------------------------*/
-
-template <typename Type>
-struct StringSetGetKeyHelper {
-    template <typename StringSet>
-    static Type get_key(StringSet const& ss, typename StringSet::String const& s, size_t depth);
-};
-
-template <>
-struct StringSetGetKeyHelper<uint8_t> {
-    template <typename StringSet>
-    static uint8_t get_key(StringSet const& ss, typename StringSet::String const& s, size_t depth) {
-        return ss.get_uint8(s, depth);
-    }
-};
-
-template <>
-struct StringSetGetKeyHelper<uint16_t> {
-    template <typename StringSet>
-    static uint16_t
-    get_key(StringSet const& ss, typename StringSet::String const& s, size_t depth) {
-        return ss.get_uint16(s, depth);
-    }
-};
-
-template <>
-struct StringSetGetKeyHelper<uint32_t> {
-    template <typename StringSet>
-    static uint32_t
-    get_key(StringSet const& ss, typename StringSet::String const& s, size_t depth) {
-        return ss.get_uint32(s, depth);
-    }
-};
-
-template <>
-struct StringSetGetKeyHelper<uint64_t> {
-    template <typename StringSet>
-    static uint64_t
-    get_key(StringSet const& ss, typename StringSet::String const& s, size_t depth) {
-        return ss.get_uint64(s, depth);
-    }
-};
-
-template <typename Type, typename StringSet>
-Type get_key(StringSet const& ss, typename StringSet::String const& s, size_t depth) {
-    return StringSetGetKeyHelper<Type>::get_key(ss, s, depth);
-}
-
 /******************************************************************************/
 
 struct Length {
@@ -513,6 +465,9 @@ public:
     //! Iterator over string references: pointer over pointers
     using Iterator = String*;
 
+    //! exported alias for assumed string container
+    using Container = std::pair<Iterator, size_t>;
+
     //! iterator of characters in a string
     using CharIterator = Char const*;
 
@@ -539,6 +494,7 @@ public:
     using String = Traits::String;
     using Iterator = Traits::Iterator;
     using CharIterator = Traits::CharIterator;
+    using Container = Traits::Container;
 
     static constexpr bool is_compressed = false;
 
@@ -547,6 +503,9 @@ public:
 
     //! Construct from begin and end string pointers
     GenericStringSet(Iterator begin, Iterator end) : begin_(begin), end_(end) {}
+
+    //! Construct from a string container
+    explicit GenericStringSet(Container const& c) : begin_(c.first), end_(c.first + c.second) {}
 
     //! Return size of string array
     size_t size() const { return end_ - begin_; }
@@ -583,6 +542,15 @@ public:
 
     //! Subset this string set using iterator range.
     GenericStringSet sub(Iterator const begin, Iterator const end) const { return {begin, end}; }
+
+    //! Allocate a new temporary string container with n empty Strings
+    static Container allocate(size_t const n) { return std::make_pair(new String[n], n); }
+
+    //! Deallocate a temporary string container
+    static void deallocate(Container& c) {
+        delete[] c.first;
+        c.first = nullptr;
+    }
 
     //! Return up to 1 characters of string s at iterator i packed into a uint8
     //! (only works correctly for 8-bit characters)
@@ -658,6 +626,7 @@ public:
     using String = Traits::String;
     using Iterator = Traits::Iterator;
     using CharIterator = Traits::CharIterator;
+    using Container = Traits::Container;
 
     static_assert(String::has_length);
 
@@ -670,6 +639,11 @@ public:
     GenericCompressedStringSet(Iterator const begin, Iterator const end)
         : begin_(begin),
           end_(end) {}
+
+    //! Construct from a string container
+    explicit GenericCompressedStringSet(Container const& c)
+        : begin_(c.first),
+          end_(c.first + c.second) {}
 
     //! Return size of string array
     size_t size() const { return end_ - begin_; }
@@ -713,6 +687,15 @@ public:
     //! Subset this string set using iterator range.
     GenericCompressedStringSet sub(Iterator const begin, Iterator const end) const {
         return {begin, end};
+    }
+
+    //! Allocate a new temporary string container with n empty Strings
+    static Container allocate(size_t const n) { return std::make_pair(new String[n], n); }
+
+    //! Deallocate a temporary string container
+    static void deallocate(Container& c) {
+        delete[] c.first;
+        c.first = nullptr;
     }
 
     //! Return up to 1 characters of string s at iterator i packed into a uint8
