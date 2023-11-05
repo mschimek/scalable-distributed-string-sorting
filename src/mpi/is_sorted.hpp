@@ -195,7 +195,6 @@ inline bool check_permutation_complete(
     return local_size == global_indicies.size() && is_complete;
 }
 
-// todo this should maybe be a function of StringContainer
 template <typename StringSet>
 void copy_container(StringLcpContainer<StringSet> const& src, StringLcpContainer<StringSet>& dst) {
     assert(src.is_consistent());
@@ -469,7 +468,7 @@ public:
     }
 
 private:
-    static constexpr size_t quantile_size = 90 * 1024 * 1024;
+    static constexpr size_t quantile_size = 40 * 1024 * 1024;
 
     StringContainer input_container_;
 

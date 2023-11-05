@@ -4,6 +4,7 @@
 #pragma once
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <type_traits>
 #include <utility>
@@ -11,6 +12,7 @@
 #include <kamping/collectives/alltoall.hpp>
 #include <tlx/cmdline_parser.hpp>
 #include <tlx/die/core.hpp>
+#include <tlx/sort/strings/parallel_sample_sort.hpp>
 
 #include "mpi/alltoall_combined.hpp"
 #include "mpi/communicator.hpp"
@@ -21,7 +23,6 @@
 #include "sorter/distributed/redistribution.hpp"
 #include "sorter/distributed/sample.hpp"
 #include "strings/stringset.hpp"
-#include "tlx/sort/strings/parallel_sample_sort.hpp"
 
 inline void check_path_exists(std::string const& path) {
     tlx_die_verbose_unless(std::filesystem::exists(path), "file not found: " << path);
@@ -269,30 +270,23 @@ void run_shared_memory(
     dss_mehnert::Communicator const& comm,
     GenerateStrings generate_strings
 ) {
-    assert_equal(comm.size_signed(), 1);
+    dss_mehnert::Communicator const local_comm{comm.split(comm.rank())};
+    if (comm.is_root()) {
+        auto input_container = generate_strings(args, local_comm);
 
-    using dss_mehnert::measurement::MeasuringTool;
-    auto& measuring_tool = MeasuringTool::measuringTool();
-    measuring_tool.setPrefix(prefix);
-    measuring_tool.setVerbose(args.verbose);
+        auto const before = std::chrono::high_resolution_clock::now();
+        tlx::sort_strings_detail::parallel_sample_sort(input_container.make_string_lcp_ptr(), 0, 0);
+        auto const after = std::chrono::high_resolution_clock::now();
+        auto const delta = std::chrono::duration_cast<std::chrono::nanoseconds>(after - before);
+        size_t const elapsed = delta.count();
 
-    measuring_tool.disableCommVolume();
-    auto input_container = generate_strings(args, comm);
+        std::cout << prefix << " max=" << elapsed << std::endl;
 
-    measuring_tool.start("none", "sorting_overall");
-    tlx::sort_strings_detail::parallel_sample_sort(input_container.make_string_lcp_ptr(), 0, 0);
-    measuring_tool.stop("none", "sorting_overall", comm);
-
-    measuring_tool.disable();
-    measuring_tool.disableCommVolume();
-
-    if (args.check_sorted) {
-        auto const is_sorted = input_container.make_string_set().check_order();
-        die_verbose_unless(is_sorted, "output is not sorted");
+        if (args.check_sorted) {
+            auto const is_sorted = input_container.make_string_set().check_order();
+            die_verbose_unless(is_sorted, "output is not sorted");
+        }
     }
-
-    measuring_tool.write_on_root(std::cout, comm);
-    measuring_tool.reset();
 }
 
 inline size_t mpi_warmup(size_t const bytes_per_PE, dss_mehnert::Communicator const& comm) {
