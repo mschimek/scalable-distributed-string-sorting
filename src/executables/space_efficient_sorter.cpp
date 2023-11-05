@@ -36,7 +36,7 @@ enum class CharGenerator { random = 0, file, file_segment, sentinel };
 
 enum class StringGenerator { suffix = 0, window, difference_cover, sentinel };
 
-enum class Permutation { simple = 0, multi_level, non_unqiue, sentinel };
+enum class Permutation { simple = 0, multi_level, non_unique, sentinel };
 
 struct SorterArgs : public CommonArgs {
     SamplerArgs quantile_sampler;
@@ -185,11 +185,10 @@ inline std::vector<size_t>
 distribute_ranks(std::vector<size_t> const& global_ranks, dss_mehnert::Communicator const& comm) {
     namespace kmp = kamping;
 
-    // this is duplicated from is_sorted
     auto const begin = global_ranks.begin(), end = global_ranks.end();
     auto const local_max = std::max_element(begin, end);
     auto const upper_bound = comm.allreduce_single(
-        kmp::send_buf(local_max == end ? 1 : *local_max + 1),
+        kmp::send_buf(local_max == end ? 0 : *local_max + 1),
         kmp::op(kmp::ops::max<>{})
     );
     auto const interval_size = tlx::div_ceil(upper_bound, comm.size());
@@ -205,17 +204,37 @@ distribute_ranks(std::vector<size_t> const& global_ranks, dss_mehnert::Communica
     return recv_buf;
 }
 
-inline size_t count_duplicate_ranks(
+inline void count_duplicate_ranks(
     std::vector<size_t> const& global_ranks, dss_mehnert::Communicator const& comm
 ) {
-    size_t duplicates = 0;
-    if (auto dist_ranks = distribute_ranks(global_ranks, comm); !dist_ranks.empty()) {
+    auto dist_ranks = distribute_ranks(global_ranks, comm);
+    size_t total_ranks = dist_ranks.size(), distinct_ranks = 0, duplicate_ranks = 0;
+
+    if (!dist_ranks.empty()) {
         auto const begin = dist_ranks.begin(), end = dist_ranks.end();
         std::sort(begin, end);
+
         std::adjacent_difference(begin, end, begin);
-        duplicates = std::count(begin + 1, end, 0);
+        *begin = 1;
+        distinct_ranks = std::count(begin, end, size_t{1});
+
+        std::adjacent_difference(begin, end, begin, [](auto const& lhs, auto const& rhs) {
+            return lhs == 1 && rhs == 0;
+        });
+        *begin = 0;
+        duplicate_ranks = std::count(begin, end, size_t{1});
     }
-    return duplicates;
+
+    using dss_mehnert::measurement::MeasuringTool;
+    auto& measuring_tool = MeasuringTool::measuringTool();
+
+    measuring_tool.add(total_ranks, "total_ranks");
+    measuring_tool.add(distinct_ranks, "distinct_ranks");
+    measuring_tool.add(duplicate_ranks, "duplicate_ranks");
+
+    // first occurrence of repeated ranks plus each additional occurrence
+    size_t const non_unique_ranks = total_ranks - distinct_ranks;
+    measuring_tool.add(non_unique_ranks + duplicate_ranks, "total_duplicates");
 }
 
 template <typename CharType, typename AlltoallConfig, typename BloomFilter, typename Permutation>
@@ -270,10 +289,7 @@ void run_space_efficient_sort(
         measuring_tool.stop("none", "sorting_overall", comm);
 
         measuring_tool.disableCommVolume();
-
-        auto const duplicates = count_duplicate_ranks(global_ranks, comm);
-        measuring_tool.add(duplicates, "duplicate_ranks");
-
+        count_duplicate_ranks(global_ranks, comm);
         measuring_tool.disable();
 
         if (args.check_sorted) {
