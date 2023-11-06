@@ -39,6 +39,9 @@ message(STATUS "RQuick With LCP Enabled: ${CLI_ENABLE_RQUICK_LCP}")
 option(USE_SHARED_MEMORY_SORT "sort using a shared memory string sorting algorithm" Off)
 message(STATUS "Shared Memory Enabled: ${USE_SHARED_MEMORY_SORT}")
 
+option(USE_RQUICK_SORT "sort using RQuick alogrithm" Off)
+message(STATUS "RQuick Sort Enabled: ${USE_RQUICK_SORT}")
+
 list(APPEND
   DSS_MEHNERT_WARNING_FLAGS
   "-Werror"

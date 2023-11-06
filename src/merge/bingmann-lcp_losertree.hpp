@@ -31,6 +31,7 @@
 
 #include "merge/stringtools.hpp"
 #include "strings/stringptr.hpp"
+#include "strings/stringtools.hpp"
 
 namespace bingmann {
 

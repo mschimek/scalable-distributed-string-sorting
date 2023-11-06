@@ -16,6 +16,7 @@
 
 #include "mpi/alltoall_combined.hpp"
 #include "mpi/communicator.hpp"
+#include "mpi/is_sorted.hpp"
 #include "options.hpp"
 #include "sorter/distributed/bloomfilter.hpp"
 #include "sorter/distributed/partition.hpp"
@@ -31,10 +32,8 @@ inline void check_path_exists(std::string const& path) {
 enum class MPIRoutineAllToAll { native = 0, direct, combined, sentinel };
 
 // clang-format off
-enum class Redistribution {
-    none = 0, naive, simple_strings, simple_chars,
-    det_strings, det_chars, grid, sentinel
-};
+enum class Redistribution { none = 0, naive, simple_strings, simple_chars,
+                            det_strings, det_chars, grid, sentinel };
 // clang-format on
 
 enum class SplitterSorter { RQuickV1, RQuickV2, RQuickLcp, Sequential };
@@ -97,12 +96,10 @@ struct CommonArgs {
             return SplitterSorter::Sequential;
         } else if (rquick_v1) {
             return SplitterSorter::RQuickV1;
+        } else if (rquick_lcp) {
+            return SplitterSorter::RQuickLcp;
         } else {
-            if (rquick_lcp) {
-                return SplitterSorter::RQuickLcp;
-            } else {
-                return SplitterSorter::RQuickV2;
-            }
+            return SplitterSorter::RQuickV2;
         }
     }
 };
@@ -289,6 +286,59 @@ void run_shared_memory(
     }
 }
 
+template <typename StringSet, typename SorterArgs, typename GenerateStrings>
+void run_rquick(
+    SorterArgs const& args,
+    std::string prefix,
+    dss_mehnert::Communicator const& comm,
+    GenerateStrings generate_strings
+) {
+    using dss_mehnert::measurement::MeasuringTool;
+    auto& measuring_tool = MeasuringTool::measuringTool();
+    measuring_tool.setPrefix(prefix);
+    measuring_tool.setVerbose(args.verbose);
+
+    measuring_tool.disableCommVolume();
+    auto input_container = generate_strings(args, comm);
+
+    dss_mehnert::MergeSortChecker<StringSet> checker;
+    if (args.check_sorted || args.check_complete) {
+        checker.store_container(input_container);
+    }
+    measuring_tool.enableCommVolume();
+
+    comm.barrier();
+
+    measuring_tool.start("none", "sorting_overall");
+    std::random_device rd;
+    std::mt19937_64 gen{rd()};
+
+    using StringPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
+
+    auto const tag = comm.default_tag();
+    auto const& mpi_comm = comm.mpi_communicator();
+    RQuick2::Data<StringPtr> data{input_container.release_raw_strings()};
+    auto sorted_container = RQuick2::sort(std::move(data), tag, gen, mpi_comm);
+    measuring_tool.stop("none", "sorting_overall", comm);
+
+    measuring_tool.disable();
+    measuring_tool.disableCommVolume();
+
+    if (args.check_sorted) {
+        auto const is_sorted = checker.is_sorted(sorted_container.make_string_set(), comm);
+        die_verbose_unless(is_sorted, "output is not sorted");
+        auto const is_complete = checker.is_complete(sorted_container, comm);
+        die_verbose_unless(is_complete, "output is missing chars or strings");
+    }
+    if (args.check_complete) {
+        auto const is_exact = checker.check_exhaustive(sorted_container, comm);
+        die_verbose_unless(is_exact, "output is not a permutation of the input");
+    }
+
+    measuring_tool.write_on_root(std::cout, comm);
+    measuring_tool.reset();
+}
+
 inline size_t mpi_warmup(size_t const bytes_per_PE, dss_mehnert::Communicator const& comm) {
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -360,7 +410,7 @@ private:
         virtual std::vector<size_t> impl(
             Prefixes const& prefixes,
             std::vector<size_t> const& intervals,
-            multi_level::Level<Communicator> const& level
+            Level<Communicator> const& level
         ) const override {
             return RedistributionPolicy::impl(prefixes, intervals, level);
         }

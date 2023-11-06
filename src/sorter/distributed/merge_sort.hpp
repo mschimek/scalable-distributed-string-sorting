@@ -26,6 +26,7 @@
 
 #include "mpi/alltoall_strings.hpp"
 #include "sorter/distributed/merging.hpp"
+#include "sorter/distributed/misc.hpp"
 #include "sorter/distributed/multi_level.hpp"
 #include "sorter/distributed/permutation.hpp"
 #include "sorter/distributed/sample.hpp"

@@ -112,9 +112,13 @@ public:
 template <typename StringSet>
 class DNRatioGenerator : public StringLcpContainer<StringSet> {
 public:
-    DNRatioGenerator(size_t const num_strings, size_t const len_strings, double const DN_ratio)
-        : StringLcpContainer<StringSet>{
-            get_raw_strings(num_strings, len_strings, DN_ratio, kamping::comm_world())} {
+    DNRatioGenerator(
+        size_t const num_strings,
+        size_t const len_strings,
+        double const DN_ratio,
+        Communicator const& comm
+    )
+        : StringLcpContainer<StringSet>{get_raw_strings(num_strings, len_strings, DN_ratio, comm)} {
         std::random_device rand;
         std::mt19937 gen{rand()};
 
@@ -207,11 +211,13 @@ class SkewedRandomStringLcpContainer : public StringLcpContainer<StringSet> {
 
 public:
     SkewedRandomStringLcpContainer(
-        size_t const size, size_t const min_length = 100, size_t const max_length = 200
+        size_t const size,
+        size_t const min_length,
+        size_t const max_length,
+        Communicator const& comm
     ) {
         std::vector<Char> random_raw_string_data;
         std::random_device rand_seed;
-        Communicator const& comm{kamping::comm_world()};
         std::mt19937 rand_gen(_internal::get_global_seed(comm));
         std::uniform_int_distribution<Char> small_char_dis(65, 70);
         std::uniform_int_distribution<Char> char_dis(65, 90);
@@ -269,7 +275,7 @@ class SkewedDNRatioGenerator : public StringLcpContainer<StringSet> {
     std::tuple<std::vector<unsigned char>, size_t, size_t>
 
     getRawStringsTimoStyle(
-        size_t numStrings, size_t desiredStringLength, double dToN, Communicator const& comm = {}
+        size_t numStrings, size_t desiredStringLength, double dToN, Communicator const& comm
     ) {
         size_t const minInternChar = 65;
         size_t const maxInternChar = 90;
@@ -326,13 +332,13 @@ class SkewedDNRatioGenerator : public StringLcpContainer<StringSet> {
 
 public:
     SkewedDNRatioGenerator(
-        size_t const size, size_t const stringLength = 40, double const dToN = 0.5
+        size_t const size, size_t const stringLength, double const dToN, Communicator const& comm
     ) {
         size_t genStrings = 0;
         size_t genStringLength = 0;
         std::vector<unsigned char> rawStrings;
         std::tie(rawStrings, genStrings, genStringLength) =
-            getRawStringsTimoStyle(size, stringLength, dToN);
+            getRawStringsTimoStyle(size, stringLength, dToN, comm);
         this->update(std::move(rawStrings));
         String* begin = this->strings();
         std::random_device rand;

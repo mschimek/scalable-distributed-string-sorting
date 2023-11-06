@@ -89,14 +89,14 @@ auto generate_strings(SorterArgs const& args, dss_mehnert::Communicator const& c
                 tlx_die("not implemented");
             }
             case StringGenerator::dn_ratio: {
-                return DNRatioGenerator<StringSet>{num_strings, len_strings, DN_ratio};
+                return DNRatioGenerator<StringSet>{num_strings, len_strings, DN_ratio, comm};
             }
             case StringGenerator::file: {
                 check_path_exists(path);
                 return FileDistributer<StringSet>{path, comm};
             }
             case StringGenerator::skewed_dn_ratio: {
-                return SkewedDNRatioGenerator<StringSet>{num_strings, len_strings, DN_ratio};
+                return SkewedDNRatioGenerator<StringSet>{num_strings, len_strings, DN_ratio, comm};
             }
             case StringGenerator::suffix: {
                 check_path_exists(path);
@@ -293,6 +293,9 @@ void dispatch_sorter(SorterArgs const& args) {
         using String = dss_mehnert::SimpleString<CharType, CharType*>;
         using StringSet = dss_mehnert::GenericStringSet<String>;
         run_shared_memory(args, prefix, comm, generate_strings<StringSet>);
+    } else if constexpr (CliOptions::use_rquick_sort) {
+        using StringSet = dss_mehnert::StringSet<CharType, dss_mehnert::Length>;
+        run_rquick<StringSet>(args, prefix, comm, generate_strings<StringSet>);
     } else if (args.prefix_doubling) {
         if constexpr (CliOptions::enable_prefix_doubling) {
             dispatch_permutation<CharType, Args...>(args, prefix, comm);

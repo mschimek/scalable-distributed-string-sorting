@@ -9,6 +9,7 @@
 #cmakedefine01 CLI_ENABLE_RQUICK_V1
 #cmakedefine01 CLI_ENABLE_RQUICK_LCP
 #cmakedefine01 USE_SHARED_MEMORY_SORT
+#cmakedefine01 USE_RQUICK_SORT
 
 struct CliOptions {
     static constexpr bool enable_prefix_doubling = static_cast<bool>(CLI_ENABLE_PREFIX_DOUBLING);
@@ -17,4 +18,5 @@ struct CliOptions {
     static constexpr bool enable_rquick_v1 = static_cast<bool>(CLI_ENABLE_RQUICK_V1);
     static constexpr bool enable_rquick_lcp = static_cast<bool>(CLI_ENABLE_RQUICK_LCP);
     static constexpr bool use_shared_memory_sort = static_cast<bool>(USE_SHARED_MEMORY_SORT);
+    static constexpr bool use_rquick_sort = static_cast<bool>(USE_RQUICK_SORT);
 };
