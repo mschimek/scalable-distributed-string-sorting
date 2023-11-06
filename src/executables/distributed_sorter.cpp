@@ -149,12 +149,12 @@ void run_merge_sort(
 
         comm.barrier();
 
-        measuring_tool.start("none", "sorting_overall");
         measuring_tool.start("none", "create_communicators");
         auto const first_level = get_first_level(args.levels, comm);
         Subcommunicators comms{first_level, args.levels.end(), comm};
         measuring_tool.stop("none", "create_communicators", comm);
 
+        measuring_tool.start("none", "sorting_overall");
         MergeSort merge_sort{
             dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
                 args.sampler,
@@ -224,12 +224,12 @@ void run_prefix_doubling(
 
         comm.barrier();
 
-        measuring_tool.start("none", "sorting_overall");
         measuring_tool.start("none", "create_communicators");
         auto const first_level = get_first_level(args.levels, comm);
         Subcommunicators comms{first_level, args.levels.end(), comm};
         measuring_tool.stop("none", "create_communicators", comm);
 
+        measuring_tool.start("none", "sorting_overall");
         MergeSort merge_sort{
             dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
                 args.sampler,
