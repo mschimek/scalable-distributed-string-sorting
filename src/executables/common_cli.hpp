@@ -262,17 +262,19 @@ inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
 
 template <typename SorterArgs, typename GenerateStrings>
 void run_shared_memory(
-    SorterArgs const& args,
-    std::string prefix,
-    dss_mehnert::Communicator const& comm,
-    GenerateStrings generate_strings
+    SorterArgs args, dss_mehnert::Communicator const& comm, GenerateStrings generate_strings
 ) {
-    using dss_mehnert::measurement::MeasuringTool;
-    auto& measuring_tool = MeasuringTool::measuringTool();
+    tlx_die_unequal(comm.size_signed(), 1);
 
-    dss_mehnert::Communicator const local_comm{comm.split(comm.rank())};
-    if (comm.is_root()) {
-        auto input_container = generate_strings(args, local_comm);
+    auto input_container = generate_strings(args, comm);
+    auto input_strings = input_container.get_strings();
+
+    for (size_t i = 0; i != args.num_iterations; ++i) {
+        args.iteration = i;
+        auto const prefix = args.get_prefix(comm);
+
+        // restore original order of input strings
+        input_container.set(std::vector{input_strings});
 
         auto const before = std::chrono::high_resolution_clock::now();
         tlx::sort_strings_detail::parallel_sample_sort(input_container.make_string_ptr(), 0, 0);
@@ -288,7 +290,9 @@ void run_shared_memory(
         }
     }
 
-    measuring_tool.reset();
+    // botch to allow reuse of `input_container`
+    kamping::mpi_env.finalize();
+    std::exit(0);
 }
 
 template <typename StringSet, typename SorterArgs, typename GenerateStrings>

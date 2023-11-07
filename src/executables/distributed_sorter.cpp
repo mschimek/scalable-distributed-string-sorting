@@ -292,7 +292,7 @@ void dispatch_sorter(SorterArgs const& args) {
     if constexpr (CliOptions::use_shared_memory_sort) {
         using String = dss_mehnert::SimpleString<CharType, CharType*>;
         using StringSet = dss_mehnert::GenericStringSet<String>;
-        run_shared_memory(args, prefix, comm, generate_strings<StringSet>);
+        run_shared_memory(args, comm, generate_strings<StringSet>);
     } else if constexpr (CliOptions::use_rquick_sort) {
         using StringSet = dss_mehnert::StringSet<CharType, dss_mehnert::Length>;
         run_rquick<StringSet>(args, prefix, comm, generate_strings<StringSet>);
