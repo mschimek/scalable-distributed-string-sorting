@@ -179,14 +179,14 @@ public:
         // clang-format off
         {
             int const char_tag = tag;
-            RBC::Isend(this->raw_strs.data(), this->raw_strs.size(), char_type(),
+            RBC::Issend(this->raw_strs.data(), this->raw_strs.size(), char_type(),
                        dest, char_tag, comm, requests.data());
             add_comm_volume<CharType>(this->raw_strs.size());
         }
 
         if constexpr (has_index) {
             int const idx_tag = tag + 1;
-            RBC::Isend(this->indices.data(), this->indices.size(), index_type(),
+            RBC::Issend(this->indices.data(), this->indices.size(), index_type(),
                        dest, idx_tag, comm, requests.data() + 1);
             add_comm_volume<IndexType>(this->indices.size());
         }
@@ -194,7 +194,7 @@ public:
         if constexpr (has_lcp) {
             if (send_lcps) {
                 int const lcp_tag = tag + 2;
-                RBC::Isend(this->lcps.data(), this->lcps.size(), lcp_type(),
+                RBC::Issend(this->lcps.data(), this->lcps.size(), lcp_type(),
                            dest, lcp_tag, comm, requests.data() + 2);
                 add_comm_volume<LcpType<>>(this->lcps.size());
             }
@@ -289,7 +289,7 @@ public:
             recv.indices.resize(recv_cnt);
             RBC::Irecv(recv.indices.data(), recv_cnt, index_type(),
                        partner, idx_tag, comm, requests.data());
-            RBC::Isend(this->indices.data(), this->indices.size(), index_type(),
+            RBC::Issend(this->indices.data(), this->indices.size(), index_type(),
                        partner, idx_tag, comm, requests.data() + 1);
             add_comm_volume<IndexType>(this->indices.size());
         }
@@ -300,7 +300,7 @@ public:
             recv.lcps.resize(recv_cnt);
             RBC::Irecv(recv.lcps.data(), recv_cnt, lcp_type(),
                        partner, lcp_tag, comm, requests.data() + 2);
-            RBC::Isend(this->lcps.data(), this->lcps.size(), lcp_type(),
+            RBC::Issend(this->lcps.data(), this->lcps.size(), lcp_type(),
                        partner, lcp_tag, comm, requests.data() + 3);
             add_comm_volume<LcpType<>>(this->lcps.size());
         }
@@ -309,7 +309,7 @@ public:
             int const char_tag = tag;
 
             int send_cnt_char = this->raw_strs.size(), recv_cnt_char = 0;
-            RBC::Isend(this->raw_strs.data(), send_cnt_char, char_type(),
+            RBC::Issend(this->raw_strs.data(), send_cnt_char, char_type(),
                        partner, char_tag, comm, requests.data() + 4);
             add_comm_volume<CharType>(this->raw_strs.size());
 
