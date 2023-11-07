@@ -267,12 +267,15 @@ void run_shared_memory(
     dss_mehnert::Communicator const& comm,
     GenerateStrings generate_strings
 ) {
+    using dss_mehnert::measurement::MeasuringTool;
+    auto& measuring_tool = MeasuringTool::measuringTool();
+
     dss_mehnert::Communicator const local_comm{comm.split(comm.rank())};
     if (comm.is_root()) {
         auto input_container = generate_strings(args, local_comm);
 
         auto const before = std::chrono::high_resolution_clock::now();
-        tlx::sort_strings_detail::parallel_sample_sort(input_container.make_string_lcp_ptr(), 0, 0);
+        tlx::sort_strings_detail::parallel_sample_sort(input_container.make_string_ptr(), 0, 0);
         auto const after = std::chrono::high_resolution_clock::now();
         auto const delta = std::chrono::duration_cast<std::chrono::nanoseconds>(after - before);
         size_t const elapsed = delta.count();
@@ -284,6 +287,8 @@ void run_shared_memory(
             die_verbose_unless(is_sorted, "output is not sorted");
         }
     }
+
+    measuring_tool.reset();
 }
 
 template <typename StringSet, typename SorterArgs, typename GenerateStrings>
