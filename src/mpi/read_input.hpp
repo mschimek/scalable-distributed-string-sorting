@@ -80,13 +80,9 @@ inline std::vector<unsigned char> distribute_file_segments(
     MPI_File_seek(mpi_file, offset, MPI_SEEK_SET);
 
     std::vector<unsigned char> result(segment_size);
-    MPI_File_read(
-        mpi_file,
-        result.data(),
-        segment_size,
-        kamping::mpi_datatype<unsigned char>(),
-        MPI_STATUS_IGNORE
-    );
+    auto const big_type = dss_schimek::mpi::get_big_type<unsigned char>(segment_size);
+    MPI_File_read(mpi_file, result.data(), 1, big_type, MPI_STATUS_IGNORE);
+
     return result;
 }
 
