@@ -83,6 +83,8 @@ inline std::vector<unsigned char> distribute_file_segments(
     auto const big_type = dss_schimek::mpi::get_big_type<unsigned char>(segment_size);
     MPI_File_read(mpi_file, result.data(), 1, big_type, MPI_STATUS_IGNORE);
 
+    MPI_File_close(&mpi_file);
+
     return result;
 }
 
@@ -120,6 +122,9 @@ distribute_file(std::string const& input_path, size_t const max_size, Communicat
         kamping::mpi_datatype<unsigned char>(),
         MPI_STATUS_IGNORE
     );
+
+    MPI_File_close(&mpi_file);
+
     return result;
 }
 
