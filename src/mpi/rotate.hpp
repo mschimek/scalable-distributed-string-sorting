@@ -32,6 +32,7 @@ void rotate_strings_right(
     int const succ = comm.rank_shifted_cyclic(1);
     int send_count = source.size(), recv_count = 0;
 
+    auto& measuring_tool = measurement::MeasuringTool::measuringTool();
     // clang-format off
     if (skip_rank) {
         comm.recv(kmp::recv_buf(send_count), kmp::recv_counts(1), kmp::source(pred), kmp::tag(tag));
@@ -41,6 +42,7 @@ void rotate_strings_right(
         MPI_Sendrecv(&send_count, 1, kmp::mpi_datatype<int>(), succ, tag,
                      &recv_count, 1, kmp::mpi_datatype<int>(), pred, tag,
                      comm.mpi_communicator(), MPI_STATUS_IGNORE);
+        measuring_tool.addRawCommunication(sizeof(int), "rotate_strings");
     }
     dest.resize(recv_count);
 
@@ -51,6 +53,7 @@ void rotate_strings_right(
         MPI_Sendrecv(source.data(), send_count, kmp::mpi_datatype<CharType>(), succ, tag,
                      dest.data(), recv_count, kmp::mpi_datatype<CharType>(), pred, tag,
                      comm.mpi_communicator(), MPI_STATUS_IGNORE);
+        measuring_tool.addRawCommunication(send_count * sizeof(CharType), "rotate_strings");
     }
     // clang-format on
 }

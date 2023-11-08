@@ -141,7 +141,7 @@ private:
             int target = (comm.rank_signed() + i) % comm.size_signed();
             if (send_counts[target] > 0) {
                 auto send_type = dss_schimek::mpi::get_big_type<DataType>(send_counts[target]);
-                MPI_Isend(
+                MPI_Issend(
                     send_buf.data() + send_displs[target],
                     1,
                     send_type,

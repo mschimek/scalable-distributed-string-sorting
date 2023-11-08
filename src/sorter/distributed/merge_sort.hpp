@@ -174,9 +174,6 @@ protected:
         };
         measuring_tool_.stop("all_to_all_strings");
 
-        measuring_tool_.add(container.size(), "local_num_strings");
-        measuring_tool_.add(container.char_size() - container.size(), "local_num_chars");
-
         measuring_tool_.setPhase("merging");
         measuring_tool_.start("merge_strings");
         measuring_tool_.start("merge_ranges");
@@ -201,6 +198,9 @@ protected:
         }
         measuring_tool_.stop("prefix_decompression");
         measuring_tool_.stop("merge_strings");
+
+        measuring_tool_.add(container.size(), "local_num_strings");
+        measuring_tool_.add(container.char_size() - container.size(), "local_num_chars");
 
         measuring_tool_.stop("sort_globally", "exchange_and_merge");
     }
