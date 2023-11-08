@@ -284,16 +284,13 @@ void dispatch_permutation(
 
 template <typename CharType, typename... Args>
 void dispatch_sorter(SorterArgs const& args) {
+    static_assert(!CliOptions::use_shared_memory_sort);
     dss_mehnert::Communicator comm;
 
     // todo print config
     auto prefix = args.get_prefix(comm);
 
-    if constexpr (CliOptions::use_shared_memory_sort) {
-        using String = dss_mehnert::SimpleString<CharType, CharType*>;
-        using StringSet = dss_mehnert::GenericStringSet<String>;
-        run_shared_memory(args, comm, generate_strings<StringSet>);
-    } else if constexpr (CliOptions::use_rquick_sort) {
+    if constexpr (CliOptions::use_rquick_sort) {
         using StringSet = dss_mehnert::StringSet<CharType, dss_mehnert::Length>;
         run_rquick<StringSet>(args, prefix, comm, generate_strings<StringSet>);
     } else if (args.prefix_doubling) {
@@ -364,18 +361,16 @@ int main(int argc, char* argv[]) {
 
     kamping::Environment env{argc, argv};
 
-    using dss_mehnert::measurement::MeasuringTool;
-    auto& measuring_tool = MeasuringTool::measuringTool();
-
-    // todo does this make sense? maybe discard first round instead?
-    measuring_tool.disableCommVolume();
-    mpi_warmup(std::min<size_t>(args.num_strings * 5, 100000u), kamping::comm_world());
-    measuring_tool.enableCommVolume();
-
-
-    for (size_t i = 0; i < args.num_iterations; ++i) {
-        args.iteration = i;
-        dispatch_common_args([&]<typename... T> { dispatch_sorter<T...>(args); }, args);
+    if constexpr (CliOptions::use_shared_memory_sort) {
+        using CharType = unsigned char;
+        using String = dss_mehnert::SimpleString<CharType, CharType*>;
+        using StringSet = dss_mehnert::GenericStringSet<String>;
+        run_shared_memory(args, kamping::comm_world(), generate_strings<StringSet>);
+    } else {
+        for (size_t i = 0; i < args.num_iterations; ++i) {
+            args.iteration = i;
+            dispatch_common_args([&]<typename... T> { dispatch_sorter<T...>(args); }, args);
+        }
     }
 
     return EXIT_SUCCESS;

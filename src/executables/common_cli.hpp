@@ -289,10 +289,6 @@ void run_shared_memory(
             die_verbose_unless(is_sorted, "output is not sorted");
         }
     }
-
-    // botch to allow reuse of `input_container`
-    kamping::mpi_env.finalize();
-    std::exit(0);
 }
 
 template <typename StringSet, typename SorterArgs, typename GenerateStrings>

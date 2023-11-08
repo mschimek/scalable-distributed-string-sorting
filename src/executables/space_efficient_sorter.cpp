@@ -336,35 +336,32 @@ template <typename CharType, typename... Args>
 void dispatch_permutation(SorterArgs const& args) {
     using namespace dss_mehnert;
 
+    static_assert(!CliOptions::use_shared_memory_sort);
+
     dss_mehnert::Communicator comm;
     auto prefix = args.get_prefix(comm);
 
-    if constexpr (CliOptions::use_shared_memory_sort) {
-        using StringSet = dss_mehnert::CompressedStringSet<CharType, Length>;
-        run_shared_memory(args, prefix, comm, generate_compressed_strings<StringSet>);
-    } else {
-        switch (clamp_enum_value<Permutation>(args.permutation)) {
-            case Permutation::simple: {
-                using Permutation_ = SimplePermutation;
-                run_space_efficient_sort<CharType, Args..., Permutation_>(args, prefix, comm);
-                return;
-            }
-            case Permutation::multi_level: {
-                using Permutation_ = MultiLevelPermutation;
-                run_space_efficient_sort<CharType, Args..., Permutation_>(args, prefix, comm);
-                return;
-            }
-            case Permutation::non_unique: {
-                using Permutation_ = NonUniquePermutation;
-                run_space_efficient_sort<CharType, Args..., Permutation_>(args, prefix, comm);
-                return;
-            }
-            case Permutation::sentinel: {
-                break;
-            }
+    switch (clamp_enum_value<Permutation>(args.permutation)) {
+        case Permutation::simple: {
+            using Permutation_ = SimplePermutation;
+            run_space_efficient_sort<CharType, Args..., Permutation_>(args, prefix, comm);
+            return;
         }
-        tlx_die("invalid permutation");
+        case Permutation::multi_level: {
+            using Permutation_ = MultiLevelPermutation;
+            run_space_efficient_sort<CharType, Args..., Permutation_>(args, prefix, comm);
+            return;
+        }
+        case Permutation::non_unique: {
+            using Permutation_ = NonUniquePermutation;
+            run_space_efficient_sort<CharType, Args..., Permutation_>(args, prefix, comm);
+            return;
+        }
+        case Permutation::sentinel: {
+            break;
+        }
     }
+    tlx_die("invalid permutation");
 }
 
 int main(int argc, char* argv[]) {
@@ -465,18 +462,15 @@ int main(int argc, char* argv[]) {
 
     kamping::Environment env{argc, argv};
 
-    using dss_mehnert::measurement::MeasuringTool;
-    auto& measuring_tool = MeasuringTool::measuringTool();
-
-    // todo does this make sense? maybe discard first round instead?
-    measuring_tool.disableCommVolume();
-    mpi_warmup(std::min<size_t>(100000u, args.num_chars), kamping::comm_world());
-    measuring_tool.enableCommVolume();
-
-    for (size_t i = 0; i < args.num_iterations; ++i) {
-        args.iteration = i;
-        dispatch_common_args([&]<typename... T> { dispatch_permutation<T...>(args); }, args);
+    if constexpr (CliOptions::use_shared_memory_sort) {
+        using CharType = unsigned char;
+        using StringSet = dss_mehnert::CompressedStringSet<CharType, dss_mehnert::Length>;
+        run_shared_memory(args, kamping::comm_world(), generate_compressed_strings<StringSet>);
+    } else {
+        for (size_t i = 0; i < args.num_iterations; ++i) {
+            args.iteration = i;
+            dispatch_common_args([&]<typename... T> { dispatch_permutation<T...>(args); }, args);
+        }
     }
-
     return EXIT_SUCCESS;
 }
