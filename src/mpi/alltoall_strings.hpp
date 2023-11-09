@@ -121,7 +121,6 @@ std::pair<std::vector<unsigned char>, std::vector<size_t>> write_send_buf(
 
     auto const num_send_chars = get_num_send_chars<compress_prefixes>(strptr, prefixes...);
 
-    // todo this should ideally avoid zero initialization
     std::vector<typename StringPtr::StringSet::Char> send_buf_char(num_send_chars);
     std::vector<size_t> send_counts_char(send_counts.size());
 

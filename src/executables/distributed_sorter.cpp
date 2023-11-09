@@ -67,6 +67,10 @@ struct SorterArgs : public CommonArgs {
                + " dn_ratio="       + std::to_string(dn_ratio);
         // clang-format on
     }
+
+    size_t scaled_strings(dss_mehnert::Communicator const& comm) const {
+        return (strong_scaling ? 1 : comm.size()) * num_strings;
+    }
 };
 
 template <typename StringSet>
@@ -78,29 +82,32 @@ auto generate_strings(SorterArgs const& args, dss_mehnert::Communicator const& c
     comm.barrier();
     measuring_tool.start("generate_strings");
 
-    auto input_container = [=]() -> StringLcpContainer<StringSet> {
-        auto const num_strings = (args.strong_scaling ? 1 : comm.size()) * args.num_strings;
-        auto const len_strings = args.len_strings;
-        auto const DN_ratio = args.dn_ratio;
-        auto const& path = args.path;
-
+    auto input_container = [&]() -> StringLcpContainer<StringSet> {
         switch (clamp_enum_value<StringGenerator>(args.string_generator)) {
             case StringGenerator::skewed_random: {
                 tlx_die("not implemented");
             }
             case StringGenerator::dn_ratio: {
-                return DNRatioGenerator<StringSet>{num_strings, len_strings, DN_ratio, comm};
+                return DNRatioGenerator<StringSet>{
+                    args.scaled_strings(comm),
+                    args.len_strings,
+                    args.dn_ratio,
+                    comm};
             }
             case StringGenerator::file: {
-                check_path_exists(path);
-                return FileDistributer<StringSet>{path, comm};
+                check_path_exists(args.path);
+                return FileDistributer<StringSet>{args.path, comm};
             }
             case StringGenerator::skewed_dn_ratio: {
-                return SkewedDNRatioGenerator<StringSet>{num_strings, len_strings, DN_ratio, comm};
+                return SkewedDNRatioGenerator<StringSet>{
+                    args.scaled_strings(comm),
+                    args.len_strings,
+                    args.dn_ratio,
+                    comm};
             }
             case StringGenerator::suffix: {
-                check_path_exists(path);
-                return SuffixGenerator<StringSet>{path, comm};
+                check_path_exists(args.path);
+                return SuffixGenerator<StringSet>{args.path, comm};
             }
             case StringGenerator::sentinel: {
                 break;

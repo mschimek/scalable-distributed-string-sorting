@@ -16,6 +16,7 @@
 
 #include <tlx/logger.hpp>
 #include <tlx/sort/strings/string_ptr.hpp>
+#include <tlx/vector_free.hpp>
 
 #include "strings/stringset.hpp"
 
@@ -171,16 +172,8 @@ public:
         strings_.resize(count, String{});
     }
 
-    void delete_raw_strings() {
-        raw_strings_->clear();
-        raw_strings_->shrink_to_fit();
-    }
-
-    void delete_strings() {
-        strings_.clear();
-        strings_.shrink_to_fit();
-    }
-
+    void delete_raw_strings() { tlx::vector_free(*raw_strings_); }
+    void delete_strings() { tlx::vector_free(strings_); }
     void delete_all() {
         delete_raw_strings();
         delete_strings();
@@ -313,11 +306,7 @@ public:
         lcps_ = std::move(lcps);
     }
 
-    void delete_lcps() {
-        lcps_.clear();
-        lcps_.shrink_to_fit();
-    }
-
+    void delete_lcps() { tlx::vector_free(lcps_); }
     void delete_all() {
         this->delete_raw_strings();
         this->delete_strings();

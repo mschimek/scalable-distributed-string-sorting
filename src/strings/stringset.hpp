@@ -470,6 +470,11 @@ public:
     inline String getChars() const { return string; }
 };
 
+template <typename Char, typename String, typename... Args>
+std::ostream& operator<<(std::ostream& out, SimpleString<Char, String> const&) {
+    return out << "{}";
+}
+
 /******************************************************************************/
 
 template <typename String_, template <typename> typename StringSet_>

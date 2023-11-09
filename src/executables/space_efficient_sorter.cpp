@@ -148,9 +148,9 @@ auto generate_compressed_strings(SorterArgs const& args, dss_mehnert::Communicat
             }
             case CombinedGenerator::dn_ratio: {
                 return CompressedDNRatioGenerator<StringSet>{
-                    args.dn_ratio,
-                    args.len_strings,
                     args.num_strings,
+                    args.len_strings,
+                    args.dn_ratio,
                     comm};
             }
             case CombinedGenerator::sentinel: {
