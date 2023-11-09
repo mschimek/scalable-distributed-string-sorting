@@ -282,7 +282,7 @@ void run_shared_memory(
         auto const delta = std::chrono::duration_cast<std::chrono::nanoseconds>(after - before);
         size_t const elapsed = delta.count();
 
-        std::cout << prefix << " max=" << elapsed << std::endl;
+        std::cout << prefix << " key=sorting_overall max_time=" << elapsed << std::endl;
 
         if (args.check_sorted) {
             auto const is_sorted = input_container.make_string_set().check_order();
