@@ -179,7 +179,7 @@ public:
     explicit PermutationBuilder(StringSet const& ss) {}
 
     template <PermutationStringSet StringSet>
-    void push(StringSet const& ss, std::vector<int>) {}
+    void push(StringSet const& ss, std::vector<size_t> const&) {}
 
     template <PermutationStringSet StringSet>
     Permutation build(StringSet const& ss) {
@@ -196,8 +196,8 @@ public:
     explicit PermutationBuilder(StringSet const& ss) : local_{ss} {}
 
     template <PermutationStringSet StringSet>
-    void push(StringSet const& ss, std::vector<int> counts) {
-        remote_.emplace_back(ss, std::move(counts));
+    void push(StringSet const& ss, std::vector<size_t> counts) {
+        remote_.emplace_back(ss, std::vector<int>{counts.begin(), counts.end()});
     }
 
     template <PermutationStringSet StringSet>

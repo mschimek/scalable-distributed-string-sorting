@@ -90,7 +90,7 @@ protected:
     }
 
     template <typename StringPtr, typename ExtraArg>
-    std::vector<int> compute_sorted_send_counts(
+    std::vector<size_t> compute_sorted_send_counts(
         StringPtr const& strptr,
         ExtraArg const extra_arg,
         multi_level::Level<Communicator> const& level
@@ -117,11 +117,11 @@ protected:
         assert_equal(send_counts.size(), level.comm_exchange.size());
         measuring_tool_.stop("sort_globally", "redistribute_strings");
 
-        return {send_counts.begin(), send_counts.end()};
+        return send_counts;
     }
 
     template <typename StringPtr, typename ExtraArg>
-    std::vector<int> compute_sorted_send_counts(
+    std::vector<size_t> compute_sorted_send_counts(
         StringPtr const& strptr, ExtraArg const extra_arg, Communicator const& comm
     ) {
         measuring_tool_.add(1, "num_groups");
@@ -135,13 +135,13 @@ protected:
         measuring_tool_.start("sort_globally", "redistribute_strings");
         measuring_tool_.stop("sort_globally", "redistribute_strings");
 
-        return {send_counts.begin(), send_counts.end()};
+        return send_counts;
     }
 
     template <typename StringSet, typename ExtraArg, typename PermutationBuilder>
     void exchange_and_merge(
         StringLcpContainer<StringSet>& container,
-        std::vector<int> const& send_counts,
+        std::vector<size_t> const& send_counts,
         ExtraArg const extra_arg,
         PermutationBuilder& builder,
         Communicator const& comm
@@ -154,7 +154,7 @@ protected:
         measuring_tool_.setPhase("string_exchange");
         measuring_tool_.start("all_to_all_strings");
 
-        std::vector<int> recv_counts;
+        std::vector<size_t> recv_counts;
         comm.alltoall(kamping::send_buf(send_counts), kamping::recv_buf(recv_counts));
 
         if constexpr (std::is_same_v<sample::DistPrefixes, ExtraArg>) {
@@ -177,7 +177,7 @@ protected:
         measuring_tool_.setPhase("merging");
         measuring_tool_.start("merge_strings");
         measuring_tool_.start("merge_ranges");
-        std::vector<size_t> merge_counts{recv_counts.begin(), recv_counts.end()};
+        std::vector<size_t> merge_counts = recv_counts;
         std::erase(merge_counts, 0);
 
         if (auto& lcps = container.lcps(); !container.empty()) {
@@ -213,7 +213,7 @@ public:
     using Permutation = NoPermutation;
 
     template <typename StringSet>
-    void push(StringSet const& ss, std::vector<int>) {}
+    void push(StringSet const& ss, std::vector<size_t>) {}
 };
 
 } // namespace _internal

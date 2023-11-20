@@ -19,14 +19,14 @@ namespace dss_mehnert {
 class IntegerCompression {
     struct CompressedIntegersCounts {
         std::vector<uint8_t> integers;
-        std::vector<int> counts;
+        std::vector<size_t> counts;
     };
 
 public:
     template <typename InputIterator>
     static CompressedIntegersCounts
-    writeRanges(std::span<int const> intervals, InputIterator input_it) {
-        int const num_integers = std::accumulate(intervals.begin(), intervals.end(), 0);
+    writeRanges(std::span<size_t const> intervals, InputIterator input_it) {
+        size_t const num_integers = std::accumulate(intervals.begin(), intervals.end(), size_t{});
 
         CompressedIntegersCounts result;
         result.counts.reserve(intervals.size());
@@ -44,8 +44,8 @@ public:
 
     template <typename InputIterator>
     static std::vector<uint64_t>
-    readRanges(std::span<int const> intervals, InputIterator input_it) {
-        int const num_integers = std::accumulate(intervals.begin(), intervals.end(), 0);
+    readRanges(std::span<size_t const> intervals, InputIterator input_it) {
+        size_t const num_integers = std::accumulate(intervals.begin(), intervals.end(), size_t{0});
 
         std::vector<uint64_t> output(num_integers);
         for (auto output_it = output.begin(); auto const interval: intervals) {

@@ -33,7 +33,7 @@ struct AlltoallStringsConfig {
 namespace _internal {
 
 template <typename LcpIt>
-inline void set_interval_start_lcp(LcpIt lcp_it, std::span<int const> interval_sizes) {
+inline void set_interval_start_lcp(LcpIt lcp_it, std::span<size_t const> interval_sizes) {
     for (auto const& interval: interval_sizes) {
         if (interval != 0) {
             *lcp_it = 0;
@@ -115,7 +115,7 @@ size_t get_num_send_chars(StringPtr const& strptr, std::span<size_t const> prefi
 
 template <bool compress_prefixes, typename StringPtr, typename... Prefixes>
 std::pair<std::vector<unsigned char>, std::vector<size_t>> write_send_buf(
-    StringPtr const& strptr, std::span<int const> send_counts, Prefixes const&... prefixes
+    StringPtr const& strptr, std::span<size_t const> send_counts, Prefixes const&... prefixes
 ) {
     set_interval_start_lcp(strptr.lcp(), send_counts);
 
@@ -140,28 +140,20 @@ std::pair<std::vector<unsigned char>, std::vector<size_t>> write_send_buf(
 }
 
 
-template <bool use_compression, typename Communicator>
+template <bool use_compression, AlltoallvCombinedKind kind, typename Communicator>
 inline std::vector<size_t> send_integers(
     std::vector<size_t> const& values,
-    std::span<int const> send_counts,
-    std::span<int const> recv_counts,
+    std::span<size_t const> send_counts,
+    std::span<size_t const> recv_counts,
     Communicator const& comm
 ) {
     if constexpr (use_compression) {
         auto const compressed = IntegerCompression::writeRanges(send_counts, values.begin());
-        auto result = comm.alltoallv(
-            kamping::send_buf(compressed.integers),
-            kamping::send_counts(compressed.counts)
-        );
-        auto const recv_data = result.extract_recv_buffer();
+        auto const recv_data =
+            comm.template alltoallv_combined<kind>(compressed.integers, compressed.counts);
         return IntegerCompression::readRanges(recv_counts, recv_data.begin());
     } else {
-        auto result = comm.alltoallv(
-            kamping::send_buf(values),
-            kamping::send_counts(send_counts),
-            kamping::recv_counts(recv_counts)
-        );
-        return result.extract_recv_buffer();
+        return comm.template alltoallv_combined<kind>(values, send_counts, recv_counts);
     }
 }
 
@@ -176,8 +168,8 @@ public:
         StringLcpContainer<StringSet>& container,
         std::vector<typename StringSet::Char>& recv_buf_char,
         std::vector<size_t>& recv_buf_lcp,
-        std::vector<int> const& send_counts,
-        std::vector<int> const& recv_counts,
+        std::vector<size_t> const& send_counts,
+        std::vector<size_t> const& recv_counts,
         Communicator const& comm
     ) {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
@@ -187,7 +179,9 @@ public:
         container.delete_all();
 
         // todo does 7-bit compression make sense for PE and string indices
-        auto const send_idxs = _internal::send_integers<config.compress_lcps, Communicator>;
+        constexpr bool compress_lcps = config.compress_lcps;
+        constexpr auto alltoall_kind = config.alltoall_kind;
+        auto const send_idxs = _internal::send_integers<compress_lcps, alltoall_kind, Communicator>;
         auto recv_buf_rank = send_idxs(permutation.ranks(), send_counts, recv_counts, comm);
         auto recv_buf_index = send_idxs(permutation.strings(), send_counts, recv_counts, comm);
         measuring_tool.stop("all_to_all_strings_send_idxs");
@@ -213,8 +207,8 @@ public:
         StringLcpContainer<StringSet>& container,
         std::vector<typename StringSet::Char>& recv_buf_char,
         std::vector<size_t>& recv_buf_lcp,
-        std::vector<int> const& send_counts,
-        std::vector<int> const& recv_counts,
+        std::vector<size_t> const& send_counts,
+        std::vector<size_t> const& recv_counts,
         Communicator const& comm
     ) {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
@@ -228,7 +222,7 @@ public:
         // set PEIndex to indicate rank of origin PE
         auto str = container.get_strings().begin();
         for (size_t rank = 0; rank != recv_counts.size(); ++rank) {
-            for (int i = 0; i != recv_counts[rank]; ++i) {
+            for (size_t i = 0; i != recv_counts[rank]; ++i) {
                 (*str++).setPEIndex(rank);
             }
         }
@@ -246,21 +240,24 @@ public:
         StringLcpContainer<StringSet>& container,
         std::vector<typename StringSet::Char>& send_buf_char,
         std::vector<size_t> const& send_counts_char,
-        std::vector<int> const& send_counts,
-        std::vector<int> const& recv_counts,
+        std::vector<size_t> const& send_counts,
+        std::vector<size_t> const& recv_counts,
         Communicator const& comm
     ) {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
+        constexpr bool compress_lcps = config.compress_lcps;
+        constexpr auto alltoall_kind = config.alltoall_kind;
+
         measuring_tool.start("all_to_all_strings_send_chars");
         auto recv_buf_char =
-            comm.template alltoallv_combined<config.alltoall_kind>(send_buf_char, send_counts_char);
+            comm.template alltoallv_combined<alltoall_kind>(send_buf_char, send_counts_char);
         send_buf_char.clear();
         send_buf_char.shrink_to_fit();
         measuring_tool.stop("all_to_all_strings_send_chars");
 
         measuring_tool.start("all_to_all_strings_send_lcps");
-        auto send_lcps = _internal::send_integers<config.compress_lcps, Communicator>;
+        auto send_lcps = _internal::send_integers<compress_lcps, alltoall_kind, Communicator>;
         auto recv_buf_lcp = send_lcps(container.lcps(), send_counts, recv_counts, comm);
         measuring_tool.stop("all_to_all_strings_send_lcps");
 
@@ -283,22 +280,25 @@ public:
         StringLcpContainer<StringSet>& container,
         std::vector<typename StringSet::Char>& send_buf_char,
         std::vector<size_t> const& send_counts_char,
-        std::vector<int> const& send_counts,
-        std::vector<int> const& recv_counts,
+        std::vector<size_t> const& send_counts,
+        std::vector<size_t> const& recv_counts,
         Communicator const& comm
     ) {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
+        constexpr bool compress_lcps = config.compress_lcps;
+        constexpr auto alltoall_kind = config.alltoall_kind;
+
         measuring_tool.start("all_to_all_strings_send_chars");
         auto recv_buf_char =
-            comm.template alltoallv_combined<config.alltoall_kind>(send_buf_char, send_counts_char);
+            comm.template alltoallv_combined<alltoall_kind>(send_buf_char, send_counts_char);
         send_buf_char.clear();
         send_buf_char.shrink_to_fit();
         measuring_tool.stop("all_to_all_strings_send_chars");
 
         // todo it would be possible to combine all three send_u64 calls ...
         measuring_tool.start("all_to_all_strings_send_lcps");
-        auto const send_lcps = _internal::send_integers<config.compress_lcps, Communicator>;
+        auto const send_lcps = _internal::send_integers<compress_lcps, alltoall_kind, Communicator>;
         auto recv_buf_lcp = send_lcps(container.lcps(), send_counts, recv_counts, comm);
         container.delete_lcps();
         measuring_tool.stop("all_to_all_strings_send_lcps");
@@ -317,8 +317,8 @@ public:
     template <AlltoallStringsConfig config, typename Permutation, typename StringSet>
     void alltoall_strings(
         StringLcpContainer<StringSet>& container,
-        std::vector<int> const& send_counts,
-        std::vector<int> const& recv_counts
+        std::vector<size_t> const& send_counts,
+        std::vector<size_t> const& recv_counts
     ) const {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
@@ -341,8 +341,8 @@ public:
     template <AlltoallStringsConfig config, typename Permutation, typename StringSet>
     void alltoall_strings(
         StringLcpContainer<StringSet>& container,
-        std::vector<int> const& send_counts,
-        std::vector<int> const& recv_counts,
+        std::vector<size_t> const& send_counts,
+        std::vector<size_t> const& recv_counts,
         std::span<size_t const> prefixes
     ) const {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();

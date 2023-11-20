@@ -117,20 +117,20 @@ auto generate_compressed_strings(SorterArgs const& args, dss_mehnert::Communicat
             return {};
         }
 
-        auto const step = args.step, length = args.len_strings;
-        auto const dc = args.difference_cover;
-
         switch (clamp_enum_value<StringGenerator>(args.string_gen)) {
             case StringGenerator::suffix: {
-                return CompressedSuffixGenerator<StringSet>{input_chars, step};
+                return CompressedSuffixGenerator<StringSet>{input_chars, args.step};
             }
             case StringGenerator::window: {
-                return CompressedWindowGenerator<StringSet>{input_chars, length, step};
+                return CompressedWindowGenerator<StringSet>{
+                    input_chars,
+                    args.len_strings,
+                    args.step};
             }
             case StringGenerator::difference_cover: {
                 return CompressedDifferenceCoverGenerator<StringSet>{
                     input_chars,
-                    dc,
+                    args.difference_cover,
                     args.use_proper_dc,
                     comm};
             }
@@ -171,11 +171,10 @@ auto generate_compressed_strings(SorterArgs const& args, dss_mehnert::Communicat
 
     comm.barrier();
 
-    auto const num_gen_chars = input_container.char_size();
-    auto const num_gen_strs = input_container.size();
+    measuring_tool.add(input_container.size(), "input_strings");
+    measuring_tool.add(input_container.char_size(), "input_chars");
+
     auto const num_uncompressed_chars = input_container.make_string_set().get_sum_length();
-    measuring_tool.add(num_gen_chars, "input_chars");
-    measuring_tool.add(num_gen_strs, "input_strings");
     measuring_tool.add(num_uncompressed_chars, "uncompressed_input_chars");
 
     return input_container;
@@ -192,7 +191,9 @@ distribute_ranks(std::vector<size_t> const& global_ranks, dss_mehnert::Communica
         kmp::op(kmp::ops::max<>{})
     );
     auto const interval_size = tlx::div_ceil(upper_bound, comm.size());
-    auto const dest = [=](auto const rank) { return rank / interval_size; };
+    auto const dest = [=](auto const rank) {
+        return rank / interval_size;
+    };
 
     std::vector<int> counts(comm.size()), offsets(comm.size());
     std::for_each(begin, end, [&](auto const x) { ++counts[dest(x)]; });

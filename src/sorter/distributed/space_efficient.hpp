@@ -42,7 +42,7 @@ public:
     void reset(StringSet const&) {}
 
     template <PermutationStringSet StringSet>
-    void push(StringSet const&, std::vector<int>) {}
+    void push(StringSet const&, std::vector<size_t>) {}
 
     template <PermutationStringPtr StringPtr, typename Subcommunicators>
     void apply(
@@ -77,8 +77,9 @@ public:
     }
 
     template <PermutationStringSet StringSet>
-    void push(StringSet const& ss, std::vector<int> counts) {
-        permutation_.remote(current_depth_++).write(ss, std::move(counts));
+    void push(StringSet const& ss, std::vector<size_t> counts) {
+        permutation_.remote(current_depth_++)
+            .write(ss, std::vector<int>{counts.begin(), counts.end()});
     }
 
     template <PermutationStringPtr StringPtr, typename Subcommunicators>
@@ -115,8 +116,9 @@ public:
     }
 
     template <PermutationStringSet StringSet>
-    void push(StringSet const& ss, std::vector<int> counts) {
-        permutation_.remote(current_depth_++).write(ss, std::move(counts));
+    void push(StringSet const& ss, std::vector<size_t> counts) {
+        permutation_.remote(current_depth_++)
+            .write(ss, std::vector<int>{counts.begin(), counts.end()});
     }
 
     template <PermutationStringPtr StringPtr, typename Subcommunicators>
