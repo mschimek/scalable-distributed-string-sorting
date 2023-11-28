@@ -314,30 +314,38 @@ void run_rquick(
 
     comm.barrier();
 
-    measuring_tool.start("none", "sorting_overall");
     std::random_device rd;
     std::mt19937_64 gen{rd()};
 
-    using StringPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
-
     auto const tag = comm.default_tag();
     auto const& mpi_comm = comm.mpi_communicator();
-    RQuick2::Data<StringPtr> data{input_container.release_raw_strings()};
-    auto sorted_container = RQuick2::sort(std::move(data), tag, gen, mpi_comm);
-    measuring_tool.stop("none", "sorting_overall", comm);
 
-    measuring_tool.disable();
-    measuring_tool.disableCommVolume();
+    if (args.rquick_lcp) {
+        using StringPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
+        measuring_tool.start("none", "sorting_overall");
+        RQuick2::Data<StringPtr> data{input_container.release_raw_strings()};
+        auto sorted_container = RQuick2::sort(std::move(data), tag, gen, mpi_comm);
+        measuring_tool.stop("none", "sorting_overall", comm);
 
-    if (args.check_sorted) {
-        auto const is_sorted = checker.is_sorted(sorted_container.make_string_set(), comm);
-        die_verbose_unless(is_sorted, "output is not sorted");
-        auto const is_complete = checker.is_complete(sorted_container, comm);
-        die_verbose_unless(is_complete, "output is missing chars or strings");
-    }
-    if (args.check_complete) {
-        auto const is_exact = checker.check_exhaustive(sorted_container, comm);
-        die_verbose_unless(is_exact, "output is not a permutation of the input");
+        measuring_tool.disable();
+        measuring_tool.disableCommVolume();
+
+        if (args.check_sorted) {
+            auto const is_sorted = checker.is_sorted(sorted_container.make_string_set(), comm);
+            die_verbose_unless(is_sorted, "output is not sorted");
+            auto const is_complete = checker.is_complete(sorted_container, comm);
+            die_verbose_unless(is_complete, "output is missing chars or strings");
+        }
+        if (args.check_complete) {
+            auto const is_exact = checker.check_exhaustive(sorted_container, comm);
+            die_verbose_unless(is_exact, "output is not a permutation of the input");
+        }
+    } else {
+        using StringPtr = tlx::sort_strings_detail::StringPtr<StringSet>;
+        measuring_tool.start("none", "sorting_overall");
+        RQuick2::Data<StringPtr> data{input_container.release_raw_strings()};
+        auto sorted_container = RQuick2::sort(std::move(data), tag, gen, mpi_comm);
+        measuring_tool.stop("none", "sorting_overall", comm);
     }
 
     measuring_tool.write_on_root(std::cout, comm);
