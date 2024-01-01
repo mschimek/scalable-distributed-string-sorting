@@ -134,7 +134,7 @@ private:
     static constexpr CharType char_min = 'A', char_max = 'Z';
     static constexpr size_t char_range = char_max - char_min + 1;
 
-    static std::vector<unsigned char> get_raw_strings(
+    static std::vector<CharType> get_raw_strings(
         size_t const global_strings,
         size_t const req_length,
         double const dn_ratio,
@@ -481,12 +481,12 @@ private:
                     1133, 1134, 1135, 1136, 1137, 1138, 1139, 1140 };
             }
             case 4096: {
-                return {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 29, 58, 87, 116, 145, 174,
-                    203, 232, 261, 290, 319, 348, 377, 406, 435, 494, 553, 612, 671, 730, 789, 848,
-                    907, 966, 1025, 1084, 1143, 1202, 1261, 1320, 1379, 1438, 1497, 1556, 1615, 1674,
-                    1733, 1792, 1851, 1910, 1969, 2028, 2087, 2146, 2176, 2206, 2236, 2266, 2296,
-                    2326, 2356, 2386, 2416, 2446, 2476, 2506, 2536, 2566, 2596, 2597, 2598, 2599,
-                    2600, 2601, 2602, 2603, 2604, 2605, 2606, 2607, 2608, 2609, 2610 };
+                return {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 27, 54, 81, 108, 135, 162,
+                    189, 216, 243, 270, 297, 324, 351, 378, 433, 488, 543, 598, 653, 708, 763, 818,
+                    873, 928, 983, 1038, 1093, 1148, 1203, 1258, 1313, 1368, 1423, 1478, 1533, 1588,
+                    1643, 1698, 1753, 1808, 1863, 1891, 1919, 1947, 1975, 2003, 2031, 2059, 2087,
+                    2115, 2143, 2171, 2199, 2227, 2255, 2256, 2257, 2258, 2259, 2260, 2261, 2262,
+                    2263, 2264, 2265, 2266, 2267, 2268};
             }
             case 8192: {
                 return {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 37, 74,
@@ -509,7 +509,7 @@ private:
     shift_chars_left(std::vector<Char>& chars, size_t const size, Communicator const& comm) {
         using namespace kamping;
 
-        // NOTE this only works correctly if ever PE has at least `size` characters
+        // NOTE this only works correctly if every PE has at least `size` characters
         chars.reserve(chars.size() + size - 1);
 
         Request req;
@@ -536,9 +536,9 @@ struct CompressedDNRatioGenerator : public StringLcpContainer<StringSet> {
         double const dn_ratio,
         Communicator const& comm
     ) {
-        tlx_die_verbose_if(dn_ratio > 0.5, "D/N ratios greater than 1/2 are not suppported");
+        tlx_die_verbose_if(dn_ratio < 0.0, "negative D/N ratios are not supported");
+        tlx_die_verbose_if(dn_ratio > 0.5, "D/N ratios greater than 1/2 are not supported");
 
-        assert(0 <= dn_ratio && dn_ratio <= 1);
         size_t const strings_per_chunk = std::max<size_t>(1, 2 * length * dn_ratio);
         size_t const chars_per_chunk = length + strings_per_chunk - 1;
 

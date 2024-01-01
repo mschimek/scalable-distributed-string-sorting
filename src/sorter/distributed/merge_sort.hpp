@@ -252,8 +252,7 @@ public:
             auto const avg_lcp = compute_global_lcp_average(container.lcps(), comm_root);
             this->measuring_tool_.stop("avg_lcp");
 
-            // todo this formula is highly questionable
-            Base::sort(container, comms, 2 * avg_lcp + 8, builder);
+            Base::sort(container, comms, 100 * (avg_lcp + 5), builder);
         }
     }
 };

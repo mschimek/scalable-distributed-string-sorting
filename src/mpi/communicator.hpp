@@ -157,7 +157,7 @@ private:
                     typename std::remove_reference_t<decltype(send_buf)>::value_type;
 
                 auto send_buf_size = send_buf.size() * sizeof(send_value_type);
-                auto total_size = do_multiply ? send_buf_size : send_buf_size * this->size();
+                auto total_size = do_multiply ? send_buf_size * this->size() : send_buf_size;
                 add_comm_volume(total_size, description);
             }
         }
