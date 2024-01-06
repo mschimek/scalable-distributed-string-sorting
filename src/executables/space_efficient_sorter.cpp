@@ -125,14 +125,16 @@ auto generate_compressed_strings(SorterArgs const& args, dss_mehnert::Communicat
                 return CompressedWindowGenerator<StringSet>{
                     input_chars,
                     args.len_strings,
-                    args.step};
+                    args.step
+                };
             }
             case StringGenerator::difference_cover: {
                 return CompressedDifferenceCoverGenerator<StringSet>{
                     input_chars,
                     args.difference_cover,
                     args.use_proper_dc,
-                    comm};
+                    comm
+                };
             }
             case StringGenerator::sentinel: {
                 break;
@@ -151,7 +153,8 @@ auto generate_compressed_strings(SorterArgs const& args, dss_mehnert::Communicat
                     args.num_strings,
                     args.len_strings,
                     args.dn_ratio,
-                    comm};
+                    comm
+                };
             }
             case CombinedGenerator::sentinel: {
                 break;
@@ -191,9 +194,7 @@ distribute_ranks(std::vector<size_t> const& global_ranks, dss_mehnert::Communica
         kmp::op(kmp::ops::max<>{})
     );
     auto const interval_size = tlx::div_ceil(upper_bound, comm.size());
-    auto const dest = [=](auto const rank) {
-        return rank / interval_size;
-    };
+    auto const dest = [=](auto const rank) { return rank / interval_size; };
 
     std::vector<int> counts(comm.size()), offsets(comm.size());
     std::for_each(begin, end, [&](auto const x) { ++counts[dest(x)]; });
@@ -285,12 +286,14 @@ void run_space_efficient_sort(
                 args.quantile_sampler,
                 args.get_splitter_sorter()
             ),
-            args.quantile_size};
+            args.quantile_size
+        };
         auto global_ranks = merge_sort.sort(std::move(input_container), comms);
         measuring_tool.stop("none", "sorting_overall", comm);
 
         measuring_tool.disableCommVolume();
         count_duplicate_ranks(global_ranks, comm);
+
         measuring_tool.disable();
 
         if (args.check_sorted) {
@@ -315,7 +318,8 @@ void run_space_efficient_sort(
                     args.sampler,
                     args.get_splitter_sorter()
                 ),
-                std::move(redistribution)});
+                std::move(redistribution)
+            });
         } else {
             // todo maybe add cmake flag for this
             using BloomFilterPolicy =
@@ -325,7 +329,8 @@ void run_space_efficient_sort(
                     args.sampler,
                     args.get_splitter_sorter()
                 ),
-                std::move(redistribution)});
+                std::move(redistribution)
+            });
         }
     };
 

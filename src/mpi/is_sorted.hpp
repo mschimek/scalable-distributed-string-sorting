@@ -132,7 +132,8 @@ get_permutation_first_last_strings(
     } else {
         SimplePermutation const sentinels{
             {permutation.ranks().front(), permutation.ranks().back()},
-            {permutation.strings().front(), permutation.strings().back()}};
+            {permutation.strings().front(), permutation.strings().back()}
+        };
 
         auto sentinel_strings = pdms::apply_permutation(ss, sentinels, comm);
         first_string = sentinel_strings.get_raw_string(0);

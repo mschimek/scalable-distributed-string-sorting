@@ -92,7 +92,8 @@ auto generate_strings(SorterArgs const& args, dss_mehnert::Communicator const& c
                     args.scaled_strings(comm),
                     args.len_strings,
                     args.dn_ratio,
-                    comm};
+                    comm
+                };
             }
             case StringGenerator::file: {
                 check_path_exists(args.path);
@@ -103,7 +104,8 @@ auto generate_strings(SorterArgs const& args, dss_mehnert::Communicator const& c
                     args.scaled_strings(comm),
                     args.len_strings,
                     args.dn_ratio,
-                    comm};
+                    comm
+                };
             }
             case StringGenerator::suffix: {
                 check_path_exists(args.path);
@@ -167,12 +169,18 @@ void run_merge_sort(
                 args.sampler,
                 args.get_splitter_sorter()
             ),
-            std::move(redistribution)};
+            std::move(redistribution)
+        };
         merge_sort.sort(input_container, comms);
         measuring_tool.stop("none", "sorting_overall", comm);
 
-        measuring_tool.disable();
         measuring_tool.disableCommVolume();
+
+        if (args.count_prefixes) {
+            count_prefix_lengths(input_container, comm);
+        }
+
+        measuring_tool.disable();
 
         if (args.check_sorted) {
             auto const is_sorted = checker.is_sorted(input_container.make_string_set(), comm);
@@ -242,12 +250,14 @@ void run_prefix_doubling(
                 args.sampler,
                 args.get_splitter_sorter()
             ),
-            std::move(redistribution)};
+            std::move(redistribution)
+        };
         auto permutation = merge_sort.sort(std::move(input_container), comms);
         measuring_tool.stop("none", "sorting_overall", comm);
 
-        measuring_tool.disable();
         measuring_tool.disableCommVolume();
+
+        measuring_tool.disable();
 
         if (args.check_sorted) {
             auto const is_sorted = checker.is_sorted(permutation, comms);

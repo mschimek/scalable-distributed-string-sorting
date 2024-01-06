@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <numeric>
 #include <type_traits>
 #include <utility>
 
@@ -14,6 +15,7 @@
 #include <tlx/die/core.hpp>
 #include <tlx/sort/strings/parallel_sample_sort.hpp>
 
+#include "kamping/named_parameters.hpp"
 #include "mpi/alltoall_combined.hpp"
 #include "mpi/communicator.hpp"
 #include "mpi/is_sorted.hpp"
@@ -66,6 +68,7 @@ struct CommonArgs {
     bool check_sorted = false;
     bool check_complete = false;
     bool verbose = false;
+    bool count_prefixes = false;
 
     std::string get_prefix(dss_mehnert::Communicator const& comm) const {
         // clang-format off
@@ -258,6 +261,45 @@ inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
     cp.add_flag('v', "check-sorted", args.check_sorted, "check that the result is sorted");
     cp.add_flag('V', "check-complete", args.check_complete, "check that the result is complete");
     cp.add_flag("verbose", args.verbose, "print some debug output");
+    cp.add_flag("count-prefixes", args.count_prefixes, "count LCPs and dist prefixes");
+}
+
+template <typename Container>
+inline void count_prefix_lengths(Container& container, dss_mehnert::Communicator const& comm) {
+    using namespace kamping;
+
+    using Char = Container::Char;
+    std::vector<Char> const last_string =
+        container.empty() ? std::vector<Char>{0} : container.get_raw_string(container.size() - 1);
+    auto const pred_string = dss_mehnert::get_predecessor(last_string, container.empty(), comm);
+
+    size_t first_lcp = 0;
+    if (pred_string && !container.empty()) {
+        auto const first_string = container.get_raw_string(0);
+        first_lcp = dss_schimek::calc_lcp(pred_string->data(), first_string.data());
+    }
+
+    size_t const last_lcp = container.empty() ? 0 : container.lcps().back();
+    auto const pred_lcp = container.size() == 1
+                              ? first_lcp
+                              : dss_mehnert::get_predecessor(last_lcp, container.empty(), comm);
+
+    auto const begin = container.lcps().begin(), end = container.lcps().end();
+    auto const local_lcp = first_lcp + std::accumulate(begin, end, size_t{0});
+
+    auto const dist = [](auto const lcp1, auto const lcp2) { return std::max(lcp1, lcp2) + 1; };
+
+    auto local_dist = container.empty() || !pred_lcp ? 0 : dist(*pred_lcp, first_lcp);
+    if (!container.empty()) {
+        local_dist =
+            std::transform_reduce(std::next(begin), end, begin, size_t{0}, std::plus<>{}, dist);
+    }
+
+    using dss_mehnert::measurement::MeasuringTool;
+    auto& measuring_tool = MeasuringTool::measuringTool();
+
+    measuring_tool.add(local_lcp, "global_lcp_sum");
+    measuring_tool.add(local_dist, "global_dist_prefix");
 }
 
 template <typename SorterArgs, typename GenerateStrings>
