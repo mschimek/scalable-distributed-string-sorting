@@ -53,25 +53,14 @@ list(APPEND
   "-Wpedantic"
   "-Wnull-dereference"
   "-Wimplicit-fallthrough"
-
-  # todo remove vla usages
   "-Wno-vla"
-
-  # todo remove if possible
   "-Wno-pessimizing-move"
-
-  # todo produce too much noise with existing code
-  # "-Wshadow"
-  # "-Wconversion"
-  # "-Wsign-conversion"
-  # "-Wunused"
 )
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   list(APPEND DSS_MEHNERT_WARNING_FLAGS "-Wno-gnu-zero-variadic-macro-arguments")
 endif()
 
-## todo maybe use -flto, but consider binary size (maybe strip?)
 set(CMAKE_CXX_FLAGS_DEBUG "-ggdb")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG -march=native")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -DDEBUG -march=native -ggdb")
@@ -98,7 +87,6 @@ add_subdirectory(external/kamping)
 set(IPS4O_DISABLE_PARALLEL OFF)
 add_subdirectory(external/ips4o)
 
-# todo propbably don't want to set this globally
 set(CLUSTER_TYPE "SUPERMUCPHASE2")
 add_subdirectory(external/RBC)
 

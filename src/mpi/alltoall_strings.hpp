@@ -296,7 +296,6 @@ public:
         send_buf_char.shrink_to_fit();
         measuring_tool.stop("all_to_all_strings_send_chars");
 
-        // todo it would be possible to combine all three send_u64 calls ...
         measuring_tool.start("all_to_all_strings_send_lcps");
         auto const send_lcps = _internal::send_integers<compress_lcps, alltoall_kind, Communicator>;
         auto recv_buf_lcp = send_lcps(container.lcps(), send_counts, recv_counts, comm);

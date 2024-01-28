@@ -27,7 +27,7 @@ void rotate_strings_right(
 
     assert(!(skip_rank && comm.is_root()));
 
-    // todo this has latency O(p * α) in the worst case
+    // this has latency O(p * α) in the worst case
     int const pred = comm.rank_shifted_cyclic(-1);
     int const succ = comm.rank_shifted_cyclic(1);
     int send_count = source.size(), recv_count = 0;

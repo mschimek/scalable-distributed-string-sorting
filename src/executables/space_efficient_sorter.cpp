@@ -60,8 +60,6 @@ struct SorterArgs : public CommonArgs {
     // todo print config
 
     std::string get_prefix(dss_mehnert::Communicator const& comm) const {
-        // todo add relevant args
-        // todo what about the permutation
         // clang-format off
         return CommonArgs::get_prefix(comm)
                + " quantile_chars="   + std::to_string(quantile_sampler.sample_chars)

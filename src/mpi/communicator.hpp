@@ -55,7 +55,6 @@ public:
     DSS_MPI_TRACKING_DELEGATE(issend)
     DSS_MPI_TRACKING_DELEGATE(irsend)
 
-    // todo is the sum of send_buf sizes correct here?
     DSS_MPI_TRACKING_DELEGATE(reduce)
     DSS_MPI_TRACKING_DELEGATE(allreduce)
     DSS_MPI_TRACKING_DELEGATE(scan)

@@ -462,9 +462,6 @@ private:
             case 31: { return {1, 2, 4, 9, 13, 19}; }
             case 32: { return {1, 2, 3, 4, 8, 12, 20}; }
             case 64: { return {1, 2, 3, 6, 15, 17, 35, 43, 60}; }
-            // todo case 128: { return {}; }
-            // todo case 256: { return {}; } 
-            // todo maybe generate these on the fly?
             case 512: {
                 return {0, 1, 2, 3, 4, 9, 18, 27, 36, 45, 64, 83, 102, 121, 140, 159, 178, 197, 216,
                     226, 236, 246, 256, 266, 267, 268, 269, 270 };

@@ -48,7 +48,6 @@ augment_string_container(StringLcpContainer<StringSet>&& container, size_t const
         if constexpr (std::is_same_v<Permutation, SimplePermutation>) {
             strings.push_back(src.with_members(StringIndex{index++}, PEIndex{rank}));
         } else {
-            // todo maybe make this an asserting cast
             auto index_u32 = static_cast<uint32_t>(index++);
             strings.push_back(src.with_members(CombinedIndex{index_u32}));
         }
@@ -270,7 +269,6 @@ private:
 
 namespace _internal {
 
-// todo maybe move all this stuff to permutation.hpp
 template <typename StringSet>
 StringLcpContainer<StringSet> receive_strings(
     StringSet const& ss, SimplePermutation const& permutation, Communicator const& comm

@@ -128,7 +128,6 @@ inline std::vector<int> compute_interval_sizes(
 
     auto bucket_size = hash_range.bucket_size(num_intervals);
 
-    // todo not a fan of this loop
     auto current_pos = hashes.begin();
     for (size_t i = 1; i < num_intervals; ++i) {
         hash_t upper_limit = hash_range.lower + i * bucket_size - 1;
@@ -301,7 +300,6 @@ class BloomFilter {
 public:
     explicit BloomFilter(size_t size) : hash_values_(reuse_hash_values ? size : 0) {}
 
-    // todo rename
     template <typename StringPtr, typename Subcommunicators>
     std::vector<size_t> compute_distinguishing_prefixes(
         StringPtr const& strptr, Subcommunicators const& comms, size_t const start_depth
@@ -529,7 +527,8 @@ private:
         std::array<IteratorPair, 3> iter_pairs{
             {{local_hash_dups.begin(), local_hash_dups.end()},
              {local_lcp_dups.begin(), local_lcp_dups.end()},
-             {remote_dups.begin(), remote_dups.end()}}};
+             {remote_dups.begin(), remote_dups.end()}}
+        };
         size_t const num_merged_elems =
             local_hash_dups.size() + local_lcp_dups.size() + remote_dups.size();
 

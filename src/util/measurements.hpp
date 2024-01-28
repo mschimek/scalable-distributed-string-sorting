@@ -31,7 +31,6 @@ inline Summary<T> describe(InputIt begin, InputIt end) {
     return {*min, *max, avg, sum};
 }
 
-// todo this code could use tlx functions
 template <typename T, typename InputIt>
 inline T get_median(InputIt begin, InputIt end) {
     auto size = static_cast<size_t>(std::distance(begin, end));

@@ -135,8 +135,8 @@ public:
         initTree(knownCommonLcp);
     }
 
-    void writeElementsToStream(LcpStringPtr outStream, const size_t length) {
-        const LcpStringPtr end = outStream.sub(length, 0);
+    void writeElementsToStream(LcpStringPtr outStream, size_t const length) {
+        LcpStringPtr const end = outStream.sub(length, 0);
         while (outStream < end) {
             // take winner and put into output
             size_t winnerIdx = nodes[1].idx;
@@ -223,23 +223,6 @@ private:
         } else {
             // CASE 3: curr->lcp < contender->lcp => contender < curr  => nothing to do
         }
-
-        // todo is this postcondition correct?
-        // assert(
-        //     scmp(
-        //         streams[contender.idx].firstStringChars(),
-        //         streams[defender.idx].firstStringChars()
-        //     )
-        //     <= 0
-        // );
-        //
-        // assert(
-        //     calc_lcp(
-        //         streams[contender.idx].firstStringChars(),
-        //         streams[defender.idx].firstStringChars()
-        //     )
-        //     == defender.lcp
-        // );
     }
 
     void updateNode(Node& contender, Node& defender) {
@@ -322,7 +305,7 @@ public:
     }
 
     void
-    writeElementsToStream(Stream outStream, const size_t length, std::vector<size_t>& oldLcps) {
+    writeElementsToStream(Stream outStream, size_t const length, std::vector<size_t>& oldLcps) {
         Stream const end = outStream.sub(length, 0);
 
         oldLcps.clear();

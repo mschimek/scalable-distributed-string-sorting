@@ -119,7 +119,8 @@ StringContainer<StringSet> choose_splitters_distributed(
         auto idx_result = comm.allgatherv(kamping::send_buf(splitter_idxs));
         return StringContainer<StringSet>{
             char_result.extract_recv_buffer(),
-            make_initializer<Index>(idx_result.extract_recv_buffer())};
+            make_initializer<Index>(idx_result.extract_recv_buffer())
+        };
     } else {
         return StringContainer<StringSet>{char_result.extract_recv_buffer()};
     }
@@ -217,7 +218,6 @@ inline std::vector<size_t> compute_interval_sizes(
 template <typename StringSet, typename SplitterSet>
 inline std::vector<size_t>
 compute_interval_binary(StringSet const& ss, SplitterSet const& splitters)
-    // todo this restriction could be relaxed if desired
     requires(StringSet::has_length)
 {
     using String = StringSet::String;
@@ -239,7 +239,6 @@ template <typename StringSet, typename SplitterSet>
 inline std::vector<size_t> compute_interval_binary_index(
     StringSet const& ss, SplitterSet const& splitters, uint64_t const local_offset
 ) {
-    // todo this restriction could be relaxed if desired
     static_assert(StringSet::has_length);
 
     using String = StringSet::String;

@@ -423,7 +423,7 @@ public:
 
     template <typename... Init>
     StringData(String string, size_t length, Init... args) noexcept
-        : LengthType(length), // todo this (intentionally) allows implicit conversions
+        : LengthType(length),
           Init{args}...,
           string{string} {}
 
@@ -437,7 +437,8 @@ public:
         return {
             this->string,
             static_cast<Members const&>(*this)...,
-            std::forward<NewMembers>(args)...};
+            std::forward<NewMembers>(args)...
+        };
     }
 };
 

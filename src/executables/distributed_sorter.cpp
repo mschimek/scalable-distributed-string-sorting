@@ -282,7 +282,6 @@ void dispatch_permutation(
 ) {
     using namespace dss_mehnert;
 
-    // todo maybe feature gate this
     switch (clamp_enum_value<Permutation>(args.permutation)) {
         case Permutation::simple: {
             run_prefix_doubling<Args..., SimplePermutation>(args, prefix, comm);

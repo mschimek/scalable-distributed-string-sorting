@@ -234,7 +234,6 @@ public:
     {
         auto const& comm_root = comms.comm_root();
 
-        // todo make phase names consistent
         this->measuring_tool_.setPhase("local_sorting");
         this->measuring_tool_.add(container.char_size(), "chars_in_set");
 

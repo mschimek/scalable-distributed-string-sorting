@@ -218,7 +218,7 @@ public:
         }
 
         for (size_t i = 0; i < sample_size; ++i) {
-            auto const sample_index = sampler.get_sample(i + 1); // todo ???? convert to next
+            auto const sample_index = sampler.get_sample(i + 1);
             auto const& sample = ss.at(sample_index);
             auto const sample_len = get_string_len(ss, sample, sample_index, arg);
             auto const sample_chars = ss.get_chars(sample, 0);
