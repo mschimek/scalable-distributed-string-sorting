@@ -114,14 +114,9 @@ distribute_file(std::string const& input_path, size_t const max_size, Communicat
 
     MPI_File_seek(mpi_file, offset, MPI_SEEK_SET);
 
+    auto const mpi_type = dss_schimek::mpi::get_big_type<unsigned char>(local_slice_size);
     std::vector<unsigned char> result(local_slice_size);
-    MPI_File_read(
-        mpi_file,
-        result.data(),
-        local_slice_size,
-        kamping::mpi_datatype<unsigned char>(),
-        MPI_STATUS_IGNORE
-    );
+    MPI_File_read(mpi_file, result.data(), 1, mpi_type, MPI_STATUS_IGNORE);
 
     MPI_File_close(&mpi_file);
 
@@ -135,17 +130,19 @@ distribute_lines(std::string const& input_path, size_t const max_size, Communica
 
     std::replace(result.begin(), result.end(), '\n', static_cast<char>(0));
 
-    // Shift the first string to the previous PE, so that each PE ends with complete string.
-    // This is still not perfect, e.g. if a string spans multiple PEs ¯\_(ツ)_/¯.
-    auto shifted_string = shift_left(result.data(), first_newline + 1, comm);
+    if (comm.size() > 1) {
+        // Shift the first string to the previous PE, so that each PE ends with complete string.
+        // This is still not perfect, e.g. if a string spans multiple PEs ¯\_(ツ)_/¯.
+        auto shifted_string = shift_left(result.data(), first_newline + 1, comm);
 
-    if (comm.rank() + 1 < comm.size()) {
-        std::copy(shifted_string.begin(), shifted_string.end(), std::back_inserter(result));
+        if (comm.rank() + 1 < comm.size()) {
+            std::copy(shifted_string.begin(), shifted_string.end(), std::back_inserter(result));
+        }
     }
+
     if (!result.empty() && result.back() != 0) {
         result.emplace_back(0);
     }
-
     if (comm.rank() > 0) {
         result.erase(result.begin(), result.begin() + first_newline + 1);
     }
