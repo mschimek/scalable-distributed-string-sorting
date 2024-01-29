@@ -14,8 +14,7 @@ the Karlsruhe Institute of Technology --- Institute of Theoretical Informatics, 
 >     sort, based on a technique that has been used successfully in atomic sorting.
 > The developed algorithm is experimentally demonstrated to perform well for a range of inputs across
 >     a spectrum of magnitudes.
-> We observe speedups up to five over the closest existing competitor on up to \num{24576}
->     processors.
+> We observe speedups up to five over the closest existing competitor on up to 24,576 processors.
 > 
 > To make distributed string sorting more scalable with respect to input size, we develop a
 >     space-efficient sorting framework which primarily distinguishes itself through the use of a
@@ -24,9 +23,9 @@ the Karlsruhe Institute of Technology --- Institute of Theoretical Informatics, 
 >     whole, it is possible to create sorted permutations for inputs that would otherwise exceed the
 >     available memory.
 > We experimentally confirm this claim by demonstrating that an implementation of the framework is
->     able to sort inputs containing \qty{22.4}{\giga\byte} uncompressed characters per processor with
->     only \qty{2}{\giga\byte} memory available on average.
+>     able to sort inputs containing 22.4GB uncompressed characters per processor with only 2GB
+>     memory available on average.
 > Furthermore, an application of space-efficient sorting in suffix array construction, specifically
 >     as subroutine to DCX, is proposed.
 > We show that our implementation is capable of sorting large difference covers for texts containing
->     up to \qty{1.23}{\tera\byte} in characters.
+>     up to 1.23TB in characters.
