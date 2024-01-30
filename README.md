@@ -11,21 +11,22 @@ the Karlsruhe Institute of Technology — [Institute of Theoretical Informatics,
 >     more scalable with respect to two parameters: the number of processors used for sorting and the
 >     input size per processor in terms of characters.
 > For the first aspect, we develop a multi-level generalization of existing multi-way string merge
->     sort, based on a technique that has been used successfully in atomic sorting.
+>     sort algorithms, based on a technique that has been applied successfully in atomic sorting.
 > The developed algorithm is experimentally demonstrated to perform well for a range of inputs across
 >     a spectrum of magnitudes.
-> We observe speedups up to five over the closest existing competitor on up to 24,576 processors.
+> We observe speedups up to five over the closest existing competitor on up to 24,576
+>     processors.
 > 
-> To make distributed string sorting more scalable with respect to input size, we develop a
->     space-efficient sorting framework which primarily distinguishes itself through the use of a
->     compressed input format.
+> For the second aspect, aimed at making distributed string sorting more scalable with respect to
+>     input size, we develop a space-efficient sorting framework which primarily distinguishes itself
+>     through the use of a compressed input representation.
 > By deduplicating overlapping substrings and sorting the input in smaller chunks rather than as a
 >     whole, it is possible to create sorted permutations for inputs that would otherwise exceed the
->     available memory.
+>     available working memory.
 > We experimentally confirm this claim by demonstrating that an implementation of the framework is
->     able to sort inputs containing 22.4GB uncompressed characters per processor with only 2GB
->     memory available on average.
+>     able to sort inputs of uncompressed size up to 22.4GB per processor with only
+>     2GB memory available on average.
 > Furthermore, an application of space-efficient sorting in suffix array construction, specifically
 >     as subroutine to DCX, is proposed.
-> We show that our implementation is capable of sorting large difference covers for texts containing
->     up to 1.23TB in characters.
+> We show that our implementation is capable of sorting large difference cover samples, including for
+>     a difference cover modulo 8192, for texts comprising up to 1.23TB in size.
