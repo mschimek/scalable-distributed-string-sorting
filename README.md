@@ -1,4 +1,4 @@
-# Scalable Distributed String Sorting
+# Scalable Distributed String Sorting Algorithms
 
 This is the source code for my master's thesis on _Scalable Distributed String Sorting Algorithms_ at
 the Karlsruhe Institute of Technology — [Institute of Theoretical Informatics, Algorithm Engineering](https://algo2.iti.kit.edu/).
