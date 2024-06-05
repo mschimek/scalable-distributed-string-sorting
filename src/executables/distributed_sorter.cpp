@@ -345,6 +345,8 @@ int main(int argc, char* argv[]) {
         "([0]=simple, 1=multi-level)"
     );
     cp.add_string('y', "path", args.path, "path to input file");
+    std::string output_path;
+    cp.add_string("json_output_path", output_path, "path to output file");
     cp.add_double('r', "DN-ratio", args.dn_ratio, "D/N ratio of generated strings");
     cp.add_size_t('n', "num-strings", args.num_strings, "number of strings to be generated");
     cp.add_size_t('m', "len-strings", args.len_strings, "length of generated strings");
@@ -363,12 +365,7 @@ int main(int argc, char* argv[]) {
     cp.add_flag('x', "strong-scaling", args.strong_scaling, "perform a strong scaling experiment");
 
     std::vector<std::string> levels_param;
-    cp.add_stringlist(
-        'Y',
-        "group-size",
-        levels_param,
-        "size of groups for multi-level merge sort"
-    );
+    cp.add_stringlist('Y', "group-size", levels_param, "size of groups for multi-level merge sort");
 
     if (!cp.process(argc, argv)) {
         return EXIT_FAILURE;
@@ -376,21 +373,33 @@ int main(int argc, char* argv[]) {
 
     kamping::Environment env{argc, argv};
 
-    if(levels_param.size() == 1 && levels_param.front() == "") {
+    if (levels_param.size() == 1 && levels_param.front() == "") {
         levels_param.clear();
     }
     parse_level_arg(levels_param, args.levels);
 
-    if constexpr (CliOptions::use_shared_memory_sort) {
-        using CharType = unsigned char;
-        using String = dss_mehnert::SimpleString<CharType, CharType*>;
-        using StringSet = dss_mehnert::GenericStringSet<String>;
-        run_shared_memory(args, kamping::comm_world(), generate_strings<StringSet>);
-    } else {
-        for (size_t i = 0; i < args.num_iterations; ++i) {
-            args.iteration = i;
-            dispatch_common_args([&]<typename... T> { dispatch_sorter<T...>(args); }, args);
+    auto run_algo = [&]() {
+        if constexpr (CliOptions::use_shared_memory_sort) {
+            using CharType = unsigned char;
+            using String = dss_mehnert::SimpleString<CharType, CharType*>;
+            using StringSet = dss_mehnert::GenericStringSet<String>;
+            run_shared_memory(args, kamping::comm_world(), generate_strings<StringSet>);
+        } else {
+            for (size_t i = 0; i < args.num_iterations; ++i) {
+                args.iteration = i;
+                dispatch_common_args([&]<typename... T> { dispatch_sorter<T...>(args); }, args);
+            }
         }
+    };
+    // redirect
+    if (kamping::comm_world().is_root()) {
+        std::ofstream out(output_path);
+        std::streambuf* coutbuf = std::cout.rdbuf();
+        std::cout.rdbuf(out.rdbuf());
+        run_algo();
+        std::cout.rdbuf(coutbuf);
+    } else {
+        run_algo();
     }
 
     return EXIT_SUCCESS;
