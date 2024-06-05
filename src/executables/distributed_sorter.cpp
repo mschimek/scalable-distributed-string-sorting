@@ -332,7 +332,7 @@ int main(int argc, char* argv[]) {
 
     cp.add_size_t(
         'k',
-        "generator",
+        "string-generator",
         args.string_generator,
         "type of string generation to use "
         "(0=skewed, [1]=DNGen, 2=file, 3=skewedDNGen, 4=suffixGen)"
@@ -363,7 +363,8 @@ int main(int argc, char* argv[]) {
     cp.add_flag('x', "strong-scaling", args.strong_scaling, "perform a strong scaling experiment");
 
     std::vector<std::string> levels_param;
-    cp.add_opt_param_stringlist(
+    cp.add_stringlist(
+        'Y',
         "group-size",
         levels_param,
         "size of groups for multi-level merge sort"
@@ -373,9 +374,12 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
-    parse_level_arg(levels_param, args.levels);
-
     kamping::Environment env{argc, argv};
+
+    if(levels_param.size() == 1 && levels_param.front() == "") {
+        levels_param.clear();
+    }
+    parse_level_arg(levels_param, args.levels);
 
     if constexpr (CliOptions::use_shared_memory_sort) {
         using CharType = unsigned char;

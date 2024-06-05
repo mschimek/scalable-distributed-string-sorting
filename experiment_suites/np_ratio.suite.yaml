@@ -1,0 +1,21 @@
+name: sorting
+executable: distributed_sorter
+ncores: [48, 96, 192, 384, 768, 1536, 3072, 6144, 12288]
+time_limit: 10
+threads_per_rank: [1]
+graphs:
+  - generator: dummy
+    string-generator: 1
+    name: random_array
+    DN-ration: 0.5
+    len-strings: 500
+    num-strings: 10000
+
+config:
+  - num-iterations: [5]
+    lcp-compression: [True]
+    prefix-compression: [True]
+    grid-bloomfilter: [True]
+    sample-indexed: [True]
+    rquick-lcp: [True]
+    group-size: ['""']

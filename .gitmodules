@@ -10,3 +10,6 @@
 [submodule "external/kamping"]
 	path = external/kamping
 	url = https://github.com/kamping-site/kamping.git
+[submodule "kaval"]
+	path = kaval
+	url = https://github.com/niklas-uhl/kaval.git
