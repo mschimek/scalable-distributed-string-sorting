@@ -320,6 +320,34 @@ void dispatch_sorter(SorterArgs const& args) {
     }
 }
 
+// hack to integrate experiment flags in kaval
+void set_experiment(SorterArgs& args) {
+    std::vector<std::string> const template_values{"np", "dn"};
+    auto it = std::find(template_values.begin(), template_values.end(), args.experiment);
+    if (it == template_values.end()) {
+        // return if no or custom name is given
+        return;
+    }
+    std::string const prefix = args.experiment;
+    if (CliOptions::use_rquick_sort) {
+        args.experiment = prefix + "_ratio_rquick";
+    } else {
+        switch (args.levels.size()) {
+            case 0:
+                args.experiment = prefix + "_ratio_single";
+                break;
+            case 1:
+                args.experiment = prefix + "_ratio_double";
+                break;
+            case 2:
+                args.experiment = prefix + "_ratio_triple_optimal";
+                break;
+            default:
+                break;
+        }
+    }
+}
+
 
 int main(int argc, char* argv[]) {
     SorterArgs args;
@@ -367,6 +395,12 @@ int main(int argc, char* argv[]) {
     std::vector<std::string> levels_param;
     cp.add_stringlist('Y', "group-size", levels_param, "size of groups for multi-level merge sort");
 
+    size_t cpus_per_node = 48;
+    cp.add_size_t("cpus-per-node", cpus_per_node, "number of cpus per node (default 48)");
+    size_t num_levels = 1;
+    cp.add_size_t("num-levels", num_levels, "number of levels (default 1)");
+
+
     if (!cp.process(argc, argv)) {
         return EXIT_FAILURE;
     }
@@ -376,7 +410,8 @@ int main(int argc, char* argv[]) {
     if (levels_param.size() == 1 && levels_param.front() == "") {
         levels_param.clear();
     }
-    parse_level_arg(levels_param, args.levels);
+    parse_level_arg(cpus_per_node, num_levels, levels_param, args.levels);
+    set_experiment(args);
 
     auto run_algo = [&]() {
         if constexpr (CliOptions::use_shared_memory_sort) {

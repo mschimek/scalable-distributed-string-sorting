@@ -116,10 +116,63 @@ inline void parse_level_arg(std::vector<std::string> const& param, std::vector<s
         return std::stoi(str);
     });
 
+
     tlx_die_verbose_unless(
         std::is_sorted(levels.begin(), levels.end(), std::greater_equal<>{}),
         "the given group sizes must be decreasing"
     );
+}
+
+inline void parse_level_arg(
+    int cpus_per_level,
+    int num_levels,
+    std::vector<std::string> const& param,
+    std::vector<size_t>& levels
+) {
+    if (!param.empty()) {
+        std::transform(param.begin(), param.end(), std::back_inserter(levels), [](auto& str) {
+            return std::stoi(str);
+        });
+
+    } else {
+        // compute levels:
+        switch (num_levels) {
+            case 1:
+                break;
+            case 2:
+                levels.push_back(cpus_per_level);
+                break;
+            case 3: {
+                size_t size = kamping::comm_world().size() / cpus_per_level;
+                tlx_die_verbose_unless(
+                    static_cast<size_t>(std::log2(size)) * 2 == size,
+                    "Num procs divided by number cpus per Node must be power of two"
+                );
+                if (static_cast<size_t>(std::sqrt(size)) >= 2) {
+                    size_t const log = std::log2(size);
+                    if (log % 2 == 1) {
+                        size *= 2;
+                    }
+                    levels.push_back(static_cast<size_t>(std::sqrt(size)) * cpus_per_level);
+                }
+                levels.push_back(cpus_per_level);
+                break;
+            }
+            default:
+                tlx_die("not implemented yet");
+                break;
+        }
+    }
+    tlx_die_verbose_unless(
+        std::is_sorted(levels.begin(), levels.end(), std::greater_equal<>{}),
+        "the given group sizes must be decreasing"
+    );
+    if (kamping::comm_world().is_root() == 0) {
+        std::cout << "levels: " << std::endl;
+        for (auto const& level: levels) {
+            std::cout << level << ", ";
+        }
+    }
 }
 
 inline auto
