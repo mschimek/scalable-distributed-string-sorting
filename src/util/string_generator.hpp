@@ -120,8 +120,7 @@ public:
         double const dn_ratio,
         Communicator const& comm
     ) {
-        std::random_device rd;
-        std::mt19937_64 gen{rd()};
+        std::mt19937_64 gen{comm.rank()};
 
         this->update(get_raw_strings(global_strings, length, dn_ratio, gen, comm));
         std::shuffle(this->get_strings().begin(), this->get_strings().end(), gen);
