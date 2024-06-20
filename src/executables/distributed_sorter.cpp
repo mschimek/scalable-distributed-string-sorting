@@ -321,7 +321,7 @@ void dispatch_sorter(SorterArgs const& args) {
 }
 
 // hack to integrate experiment flags in kaval
-void set_experiment(SorterArgs& args) {
+void set_experiment(SorterArgs& args, size_t num_levels) {
     std::vector<std::string> const template_values{"np", "dn"};
     auto it = std::find(template_values.begin(), template_values.end(), args.experiment);
     if (it == template_values.end()) {
@@ -332,14 +332,14 @@ void set_experiment(SorterArgs& args) {
     if (CliOptions::use_rquick_sort) {
         args.experiment = prefix + "_ratio_rquick";
     } else {
-        switch (args.levels.size()) {
-            case 0:
+        switch (num_levels) {
+            case 1:
                 args.experiment = prefix + "_ratio_single";
                 break;
-            case 1:
+            case 2:
                 args.experiment = prefix + "_ratio_double";
                 break;
-            case 2:
+            case 3:
                 args.experiment = prefix + "_ratio_triple_optimal";
                 break;
             default:
@@ -411,7 +411,7 @@ int main(int argc, char* argv[]) {
         levels_param.clear();
     }
     parse_level_arg(cpus_per_node, num_levels, levels_param, args.levels);
-    set_experiment(args);
+    set_experiment(args, num_levels);
 
     auto run_algo = [&]() {
         if constexpr (CliOptions::use_shared_memory_sort) {
