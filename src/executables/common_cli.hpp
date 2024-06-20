@@ -144,8 +144,9 @@ inline void parse_level_arg(
                 break;
             case 3: {
                 size_t size = kamping::comm_world().size() / cpus_per_level;
+                size_t const log = std::log2(size);
                 tlx_die_verbose_unless(
-                    static_cast<size_t>(std::log2(size)) * 2 == size || size == 1,
+                    static_cast<size_t>(std::pow(2, log)) == size,
                     "Num procs divided by number cpus per Node must be power of two"
                 );
                 if (static_cast<size_t>(std::sqrt(size)) >= 2) {
