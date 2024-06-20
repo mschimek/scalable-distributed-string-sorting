@@ -145,7 +145,7 @@ inline void parse_level_arg(
             case 3: {
                 size_t size = kamping::comm_world().size() / cpus_per_level;
                 tlx_die_verbose_unless(
-                    static_cast<size_t>(std::log2(size)) * 2 == size,
+                    static_cast<size_t>(std::log2(size)) * 2 == size || size == 1,
                     "Num procs divided by number cpus per Node must be power of two"
                 );
                 if (static_cast<size_t>(std::sqrt(size)) >= 2) {
@@ -167,7 +167,7 @@ inline void parse_level_arg(
         std::is_sorted(levels.begin(), levels.end(), std::greater_equal<>{}),
         "the given group sizes must be decreasing"
     );
-    if (kamping::comm_world().is_root() == 0) {
+    if (kamping::comm_world().is_root() == 1) {
         std::cout << "levels: " << std::endl;
         for (auto const& level: levels) {
             std::cout << level << ", ";
