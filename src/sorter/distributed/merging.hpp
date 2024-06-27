@@ -99,6 +99,8 @@ choose_merge(StringLcpContainer<StringSet>& recv_strings, std::vector<size_t>& i
         case 4096:  return merge_k.template operator()<4096>();
         case 8192:  return merge_k.template operator()<8192>();
         case 16384: return merge_k.template operator()<16384>();
+        case 32768: return merge_k.template operator()<32768>();
+        case 65536: return merge_k.template operator()<65536>();
         // clang-format on
         default:
             // todo consider increasing this to 2^15

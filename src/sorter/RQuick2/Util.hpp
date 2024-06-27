@@ -423,7 +423,8 @@ std::pair<IteratorT<StringPtr>, size_t> lower_bound_index(
 
         size_t i = 1;
         for (auto it = begin + 1; it != ss.end(); ++it, ++i) {
-            if (strptr.get_lcp(i) != value_length || value_index <= ss[it].getIndex()) {
+            if (it->getLength() != value_length || strptr.get_lcp(i) != value_length
+                || value_index <= ss[it].getIndex()) {
                 return {it, initial_lcp};
             }
         }

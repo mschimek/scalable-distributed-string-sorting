@@ -1,21 +1,27 @@
-name: sorting
+name: sorting_intel_3
 executable: distributed_sorter
 ncores: [48, 96, 192, 384, 768, 1536, 3072, 6144, 12288]
 time_limit: 10
 threads_per_rank: [1]
 graphs:
   - generator: dummy
+    name: gen
     string-generator: 1
-    name: random_array
-    DN-ration: 0.5
+    DN-ratio: 0.5
     len-strings: 500
     num-strings: 10000
+  - generator: dummy
+    name: gen
+    string-generator: 1
+    DN-ratio: 0.5
+    len-strings: 500
+    num-strings: 100000
 
 config:
-  - num-iterations: [5]
+  - num-iterations: [6]
     lcp-compression: [True]
     prefix-compression: [True]
     grid-bloomfilter: [True]
     sample-indexed: [True]
     rquick-lcp: [True]
-    group-size: ['""']
+    group-size: ['""', '"48"']
