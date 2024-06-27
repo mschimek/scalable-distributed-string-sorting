@@ -38,5 +38,6 @@ For reproducing our experiments run
 ```shell
     cd kaval
     python run-experiments.py <np_supermuc|np_supermuc_rquick|dn_supermuc|dn_supermuc_rquick|real_world_supermuc> --machine <supermuc|generic-job-file> --command-template ./command-templates/supermuc-OpenMPI.txt --search-dirs ../experiment_suites
-    
 ```
+
+This will be create jobfiles which can then be executed on your system. Note that it is quite likely that you have to adapt the concrete job and command template as these are often cluster-specific. See `python run-experiments.py --help` for further information. 
