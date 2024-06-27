@@ -1,0 +1,30 @@
+name: real_world_supermuc
+executable: distributed_sorter
+ncores: [192, 384, 768, 1536, 3072, 6144, 12288]
+time_limit: 6
+threads_per_rank: [1]
+graphs:
+  - generator: dummy
+    string-generator: 2
+    name: enwiki
+    path: <path>
+  - generator: dummy
+    string-generator: 2
+    name: wiki-text
+    path: <path>
+  - generator: dummy
+    string-generator: 2
+    name: cc
+    path: <path>
+config:
+  - num-iterations: [6]
+    lcp-compression: [True]
+    prefix-compression: [True]
+    grid-bloomfilter: [True]
+    sample-indexed: [True]
+    rquick-lcp: [True]
+    num-levels: [1, 2]
+    alltoall: [2]
+    cpus-per-node: [48]
+    experiment: ["file"]
+    prefix-doubling: [False, True]
