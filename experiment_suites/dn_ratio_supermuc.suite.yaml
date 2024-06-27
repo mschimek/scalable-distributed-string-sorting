@@ -1,0 +1,48 @@
+name: dn_supermuc
+executable: distributed_sorter
+ncores: [48, 96, 192, 384, 768, 1536, 3072, 6144]
+time_limit: 7
+threads_per_rank: [1]
+graphs:
+  - generator: dummy
+    string-generator: 1
+    name: gen
+    DN-ratio: 0.0
+    len-strings: 500
+    num-strings: 100000
+  - generator: dummy
+    string-generator: 1
+    name: gen
+    DN-ratio: 0.25
+    len-strings: 500
+    num-strings: 100000
+  - generator: dummy
+    string-generator: 1
+    name: gen
+    DN-ratio: 0.5
+    len-strings: 500
+    num-strings: 100000
+  - generator: dummy
+    string-generator: 1
+    name: gen
+    DN-ratio: 0.75
+    len-strings: 500
+    num-strings: 100000
+  - generator: dummy
+    string-generator: 1
+    name: gen
+    DN-ratio: 1.0
+    len-strings: 500
+    num-strings: 100000
+config:
+  - num-iterations: [6]
+    lcp-compression: [True]
+    prefix-compression: [True]
+    grid-bloomfilter: [True]
+    sample-indexed: [True]
+    rquick-lcp: [True]
+    num-levels: [1, 2]
+    cpus-per-node: [48]
+    experiment: ["dn"]
+    prefix-doubling: [False, True]
+~
