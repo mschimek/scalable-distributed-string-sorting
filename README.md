@@ -1,32 +1,42 @@
-# Scalable Distributed String Sorting Algorithms
+# Scalable Distributed String Sorting
 
-This is the source code for my master's thesis on _Scalable Distributed String Sorting Algorithms_ at
-the Karlsruhe Institute of Technology — [Institute of Theoretical Informatics, Algorithm Engineering](https://algo2.iti.kit.edu/).
 
-> String sorting algorithms have been studied extensively for sequential and shared-memory parallel
->     models of computation.
-> There has however been comparatively little and only very recent work covering string sorting in
->     distributed-memory parallel systems.
-> In this thesis, we directly build on the existing work to develop distributed algorithms that are
->     more scalable with respect to two parameters: the number of processors used for sorting and the
->     input size per processor in terms of characters.
-> For the first aspect, we develop a multi-level generalization of existing multi-way string merge
->     sort algorithms, based on a technique that has been applied successfully in atomic sorting.
-> The developed algorithm is experimentally demonstrated to perform well for a range of inputs across
->     a spectrum of magnitudes.
-> We observe speedups up to five over the closest existing competitor on up to 24,576
->     processors.
-> 
-> For the second aspect, aimed at making distributed string sorting more scalable with respect to
->     input size, we develop a space-efficient sorting framework which primarily distinguishes itself
->     through the use of a compressed input representation.
-> By deduplicating overlapping substrings and sorting the input in smaller chunks rather than as a
->     whole, it is possible to create sorted permutations for inputs that would otherwise exceed the
->     available working memory.
-> We experimentally confirm this claim by demonstrating that an implementation of the framework is
->     able to sort inputs of uncompressed size up to 22.4GB per processor with only
->     2GB memory available on average.
-> Furthermore, an application of space-efficient sorting in suffix array construction, specifically
->     as subroutine to DCX, is proposed.
-> We show that our implementation is capable of sorting large difference cover samples, including for
->     a difference cover modulo 8192, for texts comprising up to 1.23TB in size.
+This is the code to accompany our paper:
+_Kurpicz, F., Mehnert, P., Sanders, P., & Schimek, M. (2024). Scalable Distributed String Sorting. arXiv preprint arXiv:2404.16517.
+
+If you use this code in the context of an academic publication, we kindly ask you to [cite it](https://doi.org/10.48550/arXiv.2404.16517):
+
+```bibtex
+@article{kurpicz2024scalable,
+  title={Scalable Distributed String Sorting},
+  author={Kurpicz, Florian and Mehnert, Pascal and Sanders, Peter and Schimek, Matthias},
+  journal={arXiv preprint arXiv:2404.16517},
+  year={2024}
+}
+```
+
+## Abstract
+String sorting is an important part of tasks such as building index data structures. Unfortunately, current string sorting algorithms do not scale to massively parallel distributed-memory machines since they either have latency (at least) proportional to the number of processors p or communicate the data a large number of times (at least logarithmic). We present practical and efficient algorithms for distributed-memory string sorting that scale to large p. Similar to state-of-the-art sorters for atomic objects, the algorithms have latency of about p1/k when allowing the data to be communicated k times. Experiments indicate good scaling behavior on a wide range of inputs on up to 49152 cores. Overall, we achieve speedups of up to 5 over the current state-of-the-art distributed string sorting algorithms.
+
+## Building
+
+```shell
+git submodule update --init --recursive
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+```
+
+Note to run the RQuick variants as standalone algorithms you have to set the CMake option `USE_RQUICK_SORT`.
+
+## Running
+For executing the algorithms, run:
+```shell
+mpiexec -n <NUM_PEs> ./build/distributed_sorter <arguments> # --help provides an overview
+```
+
+For reproducing our experiments run
+```shell
+    cd kaval
+    python run-experiments.py <np_supermuc|np_supermuc_rquick|dn_supermuc|dn_supermuc_rquick|real_world_supermuc> --machine <supermuc|generic-job-file> --command-template ./command-templates/supermuc-OpenMPI.txt --search-dirs ../experiment_suites
+    
+```
