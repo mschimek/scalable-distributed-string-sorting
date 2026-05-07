@@ -155,7 +155,10 @@ protected:
         measuring_tool_.start("all_to_all_strings");
 
         std::vector<size_t> recv_counts;
-        comm.alltoall(kamping::send_buf(send_counts), kamping::recv_buf(recv_counts));
+        comm.alltoall(
+            kamping::send_buf(send_counts),
+            kamping::recv_buf<kamping::BufferResizePolicy::resize_to_fit>(recv_counts)
+        );
 
         if constexpr (std::is_same_v<sample::DistPrefixes, ExtraArg>) {
             auto const& prefixes = extra_arg.prefixes;

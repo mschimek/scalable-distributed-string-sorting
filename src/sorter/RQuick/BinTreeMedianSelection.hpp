@@ -34,8 +34,8 @@
 #include "strings/stringset.hpp"
 #include "util/measuringTool.hpp"
 
-int globalIteration;
-int globalRank;
+inline int globalIteration;
+inline int globalRank;
 namespace BinTreeMedianSelection {
 template <class Data, class Comp, class Communicator>
 Data select(
@@ -142,7 +142,7 @@ Data selectMedians(
     }
 }
 
-int64_t selectMedian(const uint64_t size, std::mt19937_64& async_gen, RandomBitStore& bit_gen) {
+inline int64_t selectMedian(const uint64_t size, std::mt19937_64& async_gen, RandomBitStore& bit_gen) {
     if (size == 0) {
         return -1;
     }

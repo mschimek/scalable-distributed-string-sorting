@@ -44,7 +44,7 @@ public:
             auto result = comm.reduce(send_buf(local_value), op(ops::plus<>{}));
 
             if (comm.is_root()) {
-                record.setValue(result.extract_recv_buffer()[0]);
+                record.setValue(result[0]);
                 output.emplace_back(description, record);
             }
         }

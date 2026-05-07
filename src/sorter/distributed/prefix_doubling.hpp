@@ -286,7 +286,9 @@ StringLcpContainer<StringSet> receive_strings(
         requests[offsets[permutation.rank(i)]++] = permutation.string(i);
     }
 
-    auto result = comm.alltoallv(kamping::send_buf(requests), kamping::send_counts(req_sizes));
+    auto result = comm.alltoallv(
+        kamping::send_buf(requests), kamping::send_counts(req_sizes), kamping::recv_counts_out()
+    );
     auto recv_requests = result.extract_recv_buffer();
     auto recv_req_sizes = result.extract_recv_counts();
 

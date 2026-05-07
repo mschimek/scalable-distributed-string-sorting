@@ -22,6 +22,7 @@
 #include "options.hpp"
 #include "sorter/distributed/bloomfilter.hpp"
 #include "sorter/distributed/partition.hpp"
+#include "sorter/distributed/partition_policy_factory.hpp"
 #include "sorter/distributed/prefix_doubling.hpp"
 #include "sorter/distributed/redistribution.hpp"
 #include "sorter/distributed/sample.hpp"
@@ -38,24 +39,15 @@ enum class Redistribution { none = 0, naive, simple_strings, simple_chars,
                             det_strings, det_chars, grid, sentinel };
 // clang-format on
 
-enum class SplitterSorter { RQuickV1, RQuickV2, RQuickLcp, Sequential };
-
 template <typename T>
 T clamp_enum_value(size_t const i) {
     return static_cast<T>(std::min(i, static_cast<size_t>(T::sentinel)));
 }
 
-struct SamplerArgs {
-    bool sample_chars = false;
-    bool sample_indexed = false;
-    bool sample_random = false;
-    size_t sampling_factor = 2;
-};
-
 struct CommonArgs {
     std::string experiment;
     size_t alltoall_routine = static_cast<size_t>(MPIRoutineAllToAll::native);
-    SamplerArgs sampler;
+    dss_mehnert::SamplerArgs sampler;
     bool rquick_v1 = false;
     bool rquick_lcp = false;
     bool splitter_sequential = false;
@@ -88,7 +80,8 @@ struct CommonArgs {
         // clang-format on
     }
 
-    SplitterSorter get_splitter_sorter() const {
+    dss_mehnert::SplitterSorter get_splitter_sorter() const {
+        using dss_mehnert::SplitterSorter;
         tlx_die_verbose_if(rquick_v1 && rquick_lcp, "RQuick v1 does not support using LCP values");
         tlx_die_verbose_if(
             splitter_sequential && (rquick_v1 || rquick_lcp),
@@ -106,10 +99,6 @@ struct CommonArgs {
         }
     }
 };
-
-inline void die_with_feature [[noreturn]] (std::string_view feature) {
-    tlx_die("feature disabled for compile time; enable with '-D" << feature << "=On'");
-}
 
 inline void parse_level_arg(std::vector<std::string> const& param, std::vector<size_t>& levels) {
     std::transform(param.begin(), param.end(), std::back_inserter(levels), [](auto& str) {
@@ -234,7 +223,7 @@ void dispatch_alltoall_strings(Callback cb, CommonArgs const& args) {
             if constexpr (CliOptions::enable_alltoall) {
                 dispatch_lcp_compression.template operator()<AlltoallKind::direct>();
             } else {
-                die_with_feature("CLI_ENABLE_ALLTOALL");
+                dss_mehnert::die_with_feature("CLI_ENABLE_ALLTOALL");
             }
             return;
         }
@@ -242,7 +231,7 @@ void dispatch_alltoall_strings(Callback cb, CommonArgs const& args) {
             if constexpr (CliOptions::enable_alltoall) {
                 dispatch_lcp_compression.template operator()<AlltoallKind::combined>();
             } else {
-                die_with_feature("CLI_ENABLE_ALLTOALL");
+                dss_mehnert::die_with_feature("CLI_ENABLE_ALLTOALL");
             }
             return;
         }
@@ -456,79 +445,13 @@ inline size_t mpi_warmup(size_t const bytes_per_PE, dss_mehnert::Communicator co
     std::vector<unsigned char> random_data(bytes_per_PE * comm.size());
     std::generate(random_data.begin(), random_data.end(), [&] { return dist(gen); });
 
-    auto recv_data = comm.alltoall(kamping::send_buf(random_data)).extract_recv_buffer();
+    auto recv_data = comm.alltoall(kamping::send_buf(random_data));
 
     auto volatile sum = std::accumulate(recv_data.begin(), recv_data.end(), size_t{0});
     return sum;
 }
 
 namespace dss_mehnert {
-namespace redistribution {
-
-template <typename StringSet, typename Subcommunicators>
-class PolymorphicRedistributionPolicy
-    : public RedistributionBase<
-          Subcommunicators,
-          PolymorphicRedistributionPolicy<StringSet, Subcommunicators>> {
-public:
-    using Communicator = Subcommunicators::Communicator;
-
-    template <typename RedistributionPolicy>
-    explicit PolymorphicRedistributionPolicy(RedistributionPolicy policy)
-        : self_{new RedistributionObject<RedistributionPolicy>{std::move(policy)}} {}
-
-    template <typename Strings>
-    std::vector<size_t> impl(
-        Strings const& strings,
-        std::vector<size_t> const& intervals,
-        Level<Communicator> const& level
-    ) const {
-        return self_->impl(strings, intervals, level);
-    }
-
-private:
-    struct RedistributionConcept {
-        virtual ~RedistributionConcept() = default;
-
-        virtual std::vector<size_t> impl(
-            FullStrings<StringSet> const& strings,
-            std::vector<size_t> const& intervals,
-            Level<Communicator> const& level
-        ) const = 0;
-
-        virtual std::vector<size_t> impl(
-            Prefixes const& prefixes,
-            std::vector<size_t> const& intervals,
-            Level<Communicator> const& level
-        ) const = 0;
-    };
-
-    template <typename RedistributionPolicy>
-    struct RedistributionObject : public RedistributionConcept, private RedistributionPolicy {
-        explicit RedistributionObject(RedistributionPolicy policy)
-            : RedistributionPolicy{std::move(policy)} {}
-
-        virtual std::vector<size_t> impl(
-            FullStrings<StringSet> const& strings,
-            std::vector<size_t> const& intervals,
-            Level<Communicator> const& level
-        ) const override {
-            return RedistributionPolicy::impl(strings, intervals, level);
-        }
-
-        virtual std::vector<size_t> impl(
-            Prefixes const& prefixes,
-            std::vector<size_t> const& intervals,
-            Level<Communicator> const& level
-        ) const override {
-            return RedistributionPolicy::impl(prefixes, intervals, level);
-        }
-    };
-
-    std::unique_ptr<RedistributionConcept> self_;
-};
-
-} // namespace redistribution
 
 template <typename StringSet, typename Callback>
 void dispatch_redistribution(Callback cb, CommonArgs const& args) {
@@ -579,154 +502,8 @@ void dispatch_redistribution(Callback cb, CommonArgs const& args) {
         if (redistribution == Redistribution::grid) {
             cb(GridwiseRedistribution<Communicator>{});
         } else {
-            die_with_feature("CLI_ENABLE_REDISTRIBUTION");
+            dss_mehnert::die_with_feature("CLI_ENABLE_REDISTRIBUTION");
         }
-    }
-}
-
-template <typename StringSet, typename... SamplerArgs>
-class PolymorphicPartitionPolicy {
-public:
-    using This = PolymorphicPartitionPolicy<StringSet, SamplerArgs...>;
-    using StringPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
-
-    template <typename PartitionPolicy>
-    explicit PolymorphicPartitionPolicy(PartitionPolicy policy)
-        : self_{new PartitionObject<PartitionPolicy>{std::move(policy)}} {}
-
-    template <typename SamplerArg>
-    std::vector<size_t> compute_partition(
-        StringPtr const& strptr,
-        size_t const num_partitions,
-        SamplerArg const arg,
-        Communicator const& comm
-    ) const {
-        return self_->compute_partition(strptr, num_partitions, arg, comm);
-    }
-
-private:
-    template <typename SamplerArg>
-    struct PartitionConcept_ {
-        virtual ~PartitionConcept_() = default;
-
-        virtual std::vector<size_t> compute_partition(
-            StringPtr const& strptr,
-            size_t const num_partitions,
-            SamplerArg const arg,
-            Communicator const& comm
-        ) const = 0;
-    };
-
-    struct PartitionConcept : public PartitionConcept_<SamplerArgs>... {
-        using PartitionConcept_<SamplerArgs>::compute_partition...;
-    };
-
-    template <typename PartitionPolicy, typename SamplerArg>
-    struct PartitionObject_ : public virtual PartitionConcept, private virtual PartitionPolicy {
-        virtual std::vector<size_t> compute_partition(
-            StringPtr const& strptr,
-            size_t const num_partitions,
-            SamplerArg const arg,
-            Communicator const& comm
-        ) const override {
-            return PartitionPolicy::compute_partition(strptr, num_partitions, arg, comm);
-        }
-    };
-
-    template <typename PartitionPolicy>
-    struct PartitionObject final : public PartitionObject_<PartitionPolicy, SamplerArgs>... {
-        explicit PartitionObject(PartitionPolicy policy) : PartitionPolicy{std::move(policy)} {}
-    };
-
-    std::unique_ptr<PartitionConcept> self_;
-};
-
-template <typename Char>
-using MergeSortPartitionPolicy =
-    PolymorphicPartitionPolicy<StringSet<Char, Length>, sample::MaxLength>;
-
-template <typename Char, typename LengthType, typename Permutation>
-using PrefixDoublingPartitionPolicy = PolymorphicPartitionPolicy<
-    sorter::AugmentedStringSet<StringSet<Char, LengthType>, Permutation>,
-    sample::NoExtraArg,
-    sample::DistPrefixes>;
-
-template <typename Char, typename LengthType, typename Permutation>
-using SpaceEfficientPartitionPolicy = PolymorphicPartitionPolicy<
-    sorter::AugmentedStringSet<CompressedStringSet<Char, LengthType>, Permutation>,
-    sample::NoExtraArg,
-    sample::MaxLength,
-    sample::DistPrefixes>;
-
-template <typename Char, typename PolymorphicPolicy>
-PolymorphicPolicy
-init_partition_policy(SamplerArgs const& sampler, SplitterSorter splitter_sorter) {
-    auto disptach_policy = [&]<typename PartitionPolicy> {
-        return PolymorphicPolicy{PartitionPolicy{sampler.sampling_factor}};
-    };
-
-    auto dispatch_sorter = [&]<typename SamplePolicy> {
-        using namespace dss_mehnert::partition;
-
-        constexpr bool indexed = SamplePolicy::is_indexed;
-
-        switch (splitter_sorter) {
-            case SplitterSorter::RQuickV1: {
-                if constexpr (CliOptions::enable_rquick_v1) {
-                    using SplitterPolicy = RQuickV1<Char, indexed>;
-                    using PartitionPolicy = PartitionPolicy<SamplePolicy, SplitterPolicy>;
-                    return disptach_policy.template operator()<PartitionPolicy>();
-                } else {
-                    die_with_feature("CLI_ENABLE_RQUICK_V1");
-                }
-            }
-            case SplitterSorter::RQuickV2: {
-                using SplitterPolicy = RQuickV2<Char, indexed, false>;
-                using PartitionPolicy = PartitionPolicy<SamplePolicy, SplitterPolicy>;
-                return disptach_policy.template operator()<PartitionPolicy>();
-            }
-            case SplitterSorter::RQuickLcp: {
-                if constexpr (CliOptions::enable_rquick_lcp) {
-                    using SplitterPolicy = RQuickV2<Char, indexed, true>;
-                    using PartitionPolicy = PartitionPolicy<SamplePolicy, SplitterPolicy>;
-                    return disptach_policy.template operator()<PartitionPolicy>();
-                } else {
-                    die_with_feature("CLI_ENABLE_RQUICK_LCP");
-                }
-            }
-            case SplitterSorter::Sequential: {
-                using SplitterPolicy = Sequential<Char, indexed>;
-                using PartitionPolicy = PartitionPolicy<SamplePolicy, SplitterPolicy>;
-                return disptach_policy.template operator()<PartitionPolicy>();
-            }
-        }
-        tlx_die("unknown splitter sorter");
-    };
-
-    auto dispatch_sampler = [&]<bool indexed, bool random> {
-        using namespace dss_mehnert::sample;
-
-        if (sampler.sample_chars) {
-            using SamplePolicy = CharBasedSampling<indexed, random>;
-            return dispatch_sorter.template operator()<SamplePolicy>();
-        } else {
-            using SamplePolicy = StringBasedSampling<indexed, random>;
-            return dispatch_sorter.template operator()<SamplePolicy>();
-        }
-    };
-
-    auto dispatch_random = [&]<bool indexed> {
-        if (sampler.sample_random) {
-            return dispatch_sampler.template operator()<indexed, true>();
-        } else {
-            return dispatch_sampler.template operator()<indexed, false>();
-        }
-    };
-
-    if (sampler.sample_indexed) {
-        return dispatch_random.template operator()<true>();
-    } else {
-        return dispatch_random.template operator()<false>();
     }
 }
 

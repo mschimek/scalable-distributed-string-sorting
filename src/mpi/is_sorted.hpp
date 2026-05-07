@@ -244,12 +244,12 @@ public:
             std::cout << "strings are not sorted globally\n";
             is_sorted = false;
         }
-        return comm.allreduce_single(send_buf({is_sorted}), op(ops::logical_and<>{}));
+        return comm.allreduce_single(send_buf(is_sorted), op(ops::logical_and<>{}));
     }
 
     bool is_complete(StringContainer const& sorted_container, Communicator const& comm) {
         auto const allreduce_sum = [&comm](size_t const x) {
-            return comm.allreduce_single(kamping::send_buf({x}), kamping::op(std::plus<>{}));
+            return comm.allreduce_single(kamping::send_buf(x), kamping::op(std::plus<>{}));
         };
 
         auto const initial_num_chars = allreduce_sum(input_container_.char_size());
@@ -299,7 +299,7 @@ public:
             bool const sorted_correctly = global_sorted_chars == container.raw_strings();
             overall_correct = lcps_correct && sorted_correctly;
         }
-        return comm.allreduce_single(send_buf({overall_correct}), op(ops::logical_and<>{}));
+        return comm.allreduce_single(send_buf(overall_correct), op(ops::logical_and<>{}));
     }
 
 private:
@@ -340,7 +340,7 @@ public:
             std::cout << "strings are not lexicographically increasing\n";
             is_sorted = false;
         }
-        return comm.allreduce_single(send_buf({is_sorted}), op(ops::logical_and<>{}));
+        return comm.allreduce_single(send_buf(is_sorted), op(ops::logical_and<>{}));
     }
 
     template <typename Subcommunicators>
@@ -353,7 +353,7 @@ public:
         using namespace kamping;
         auto const& comm = comms.comm_root();
         auto is_complete = check_permutation_complete(permutation, input_container_.size(), comm);
-        return comm.allreduce_single(send_buf({is_complete}), op(ops::logical_and<>{}));
+        return comm.allreduce_single(send_buf(is_complete), op(ops::logical_and<>{}));
     }
 
 private:
@@ -442,13 +442,13 @@ public:
                 comm.bcast(send_recv_buf(rank_lower_bound), root(last_non_empty));
             }
         }
-        return comm.allreduce_single(send_buf({is_sorted}), op(ops::logical_and<>{}));
+        return comm.allreduce_single(send_buf(is_sorted), op(ops::logical_and<>{}));
     }
 
     bool is_complete(std::vector<size_t> const& global_ranks, Communicator const& comm) {
         using namespace kamping;
 
-        auto recv_ranks = comm.gatherv(send_buf(global_ranks)).extract_recv_buffer();
+        auto recv_ranks = comm.gatherv(send_buf(global_ranks));
 
         bool is_complete = true;
         if (comm.is_root()) {
@@ -465,7 +465,7 @@ public:
                 }
             }
         }
-        return comm.allreduce_single(send_buf({is_complete}), op(ops::logical_and<>{}));
+        return comm.allreduce_single(send_buf(is_complete), op(ops::logical_and<>{}));
     }
 
 private:

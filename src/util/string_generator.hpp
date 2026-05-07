@@ -187,8 +187,7 @@ private:
             strings[offsets[rank]++] = i++;
         }
 
-        return comm.alltoallv(kamping::send_buf(strings), kamping::send_counts(counts))
-            .extract_recv_buffer();
+        return comm.alltoallv(kamping::send_buf(strings), kamping::send_counts(counts));
     }
 };
 

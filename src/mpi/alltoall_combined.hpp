@@ -16,10 +16,10 @@
 #include <kamping/named_parameter_selection.hpp>
 #include <kamping/named_parameter_types.hpp>
 #include <kamping/named_parameters.hpp>
+#include <kamping/plugin/plugin_helpers.hpp>
 #include <tlx/die/core.hpp>
 
 #include "mpi/big_type.hpp"
-#include "mpi/plugin_helpers.hpp"
 #include "util/measuringTool.hpp"
 
 namespace dss_mehnert {
@@ -27,13 +27,17 @@ namespace mpi {
 
 enum class AlltoallvCombinedKind { combined, native, direct };
 
-template <typename Comm>
-class AlltoallvCombinedPlugin : public kamping::plugins::PluginBase<Comm, AlltoallvCombinedPlugin> {
+template <auto>
+inline constexpr bool always_false_v = false;
+
+template <typename Comm, template <typename...> typename DefaultContainerType>
+class AlltoallvCombinedPlugin
+    : public kamping::plugin::PluginBase<Comm, DefaultContainerType, AlltoallvCombinedPlugin> {
 public:
     template <AlltoallvCombinedKind combined_type, typename SendBuf>
     auto alltoallv_combined(SendBuf&& send_buf, std::span<size_t const> send_counts) const {
         auto const recv_counts =
-            this->to_communicator().alltoall(kamping::send_buf(send_counts)).extract_recv_buffer();
+            this->to_communicator().alltoall(kamping::send_buf(send_counts));
         return alltoallv_combined<combined_type, SendBuf>(
             std::forward<SendBuf>(send_buf),
             send_counts,
@@ -67,7 +71,7 @@ public:
             return alltoallv_direct(send_buf, send_counts, recv_counts);
         } else {
             []<AlltoallvCombinedKind type_ = kind> {
-                static_assert(type_ != type_, "invalid alltoallv combined kind used");
+                static_assert(always_false_v<type_>, "invalid alltoallv combined kind used");
             }
             ();
         }
@@ -78,12 +82,12 @@ private:
     auto alltoallv_native(
         SendBuf&& send_buf, std::span<size_t const> send_counts, std::span<size_t const> recv_counts
     ) const {
-        KASSERT(
+        KAMPING_ASSERT(
             std::all_of(send_counts.begin(), send_counts.end(), std::in_range<int, size_t>),
             "all send counts need to fit into an int",
             kamping::assert::normal
         );
-        KASSERT(
+        KAMPING_ASSERT(
             std::all_of(recv_counts.begin(), recv_counts.end(), std::in_range<int, size_t>),
             "all recv counts need to fit into an int",
             kamping::assert::normal
@@ -96,8 +100,7 @@ private:
                 kamping::send_buf(send_buf),
                 kamping::send_counts(send_counts_int),
                 kamping::recv_counts(recv_counts_int)
-            )
-            .extract_recv_buffer();
+            );
     }
 
     template <typename SendBuf>

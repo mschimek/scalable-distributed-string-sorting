@@ -272,7 +272,7 @@ inline std::optional<std::vector<int>> send_duplicates(
     Communicator const& comm_global
 ) {
     auto any_global_dups = comm_global.allreduce_single(
-        kamping::send_buf({!duplicates.empty()}),
+        kamping::send_buf(!duplicates.empty()),
         kamping::op(std::logical_or<>{})
     );
 
@@ -282,7 +282,7 @@ inline std::optional<std::vector<int>> send_duplicates(
             kamping::send_counts(send_counts),
             kamping::send_displs(send_displs)
         );
-        return result.extract_recv_buffer();
+        return result;
     } else {
         return {};
     }
@@ -315,7 +315,7 @@ public:
             measuring_tool_.add(candidates.size(), "bloomfilter_num_candidates");
             measuring_tool_.start("bloomfilter_allreduce");
             auto const all_empty = comms.comm_root().allreduce_single(
-                kamping::send_buf({candidates.empty()}),
+                kamping::send_buf(candidates.empty()),
                 kamping::op(std::logical_and<>{})
             );
             measuring_tool_.stop("bloomfilter_allreduce");
@@ -752,7 +752,7 @@ private:
             kamping::send_counts(send_counts),
             kamping::send_displs(send_displs)
         );
-        return result.extract_recv_buffer();
+        return result;
     }
 };
 

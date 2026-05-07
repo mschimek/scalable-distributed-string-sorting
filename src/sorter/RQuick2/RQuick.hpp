@@ -54,13 +54,14 @@
 
 namespace Tools {
 
-class DummyTimer {
+class DummyTimerRQuick {
 public:
-    DummyTimer() {}
+    DummyTimerRQuick() {}
 
     void start(RBC::Comm const&) {}
     void stop() {}
 };
+
 
 } // namespace Tools
 
@@ -466,13 +467,13 @@ Container<StringPtr> sort(
 
 class DummyTracker {
 public:
-    Tools::DummyTimer local_sort_t;
-    Tools::DummyTimer exchange_t;
-    Tools::DummyTimer merge_t;
-    Tools::DummyTimer median_select_t;
-    Tools::DummyTimer partition_t;
-    Tools::DummyTimer comm_split_t;
-    Tools::DummyTimer move_to_pow_of_two_t;
+    Tools::DummyTimerRQuick local_sort_t;
+    Tools::DummyTimerRQuick exchange_t;
+    Tools::DummyTimerRQuick merge_t;
+    Tools::DummyTimerRQuick median_select_t;
+    Tools::DummyTimerRQuick partition_t;
+    Tools::DummyTimerRQuick comm_split_t;
+    Tools::DummyTimerRQuick move_to_pow_of_two_t;
 };
 
 } // namespace _internal

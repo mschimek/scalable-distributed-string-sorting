@@ -15,6 +15,7 @@
 #include <tuple>
 #include <vector>
 
+#include <kamping/collectives/barrier.hpp>
 #include <kamping/collectives/gather.hpp>
 #include <kamping/environment.hpp>
 #include <kamping/mpi_ops.hpp>
@@ -116,8 +117,8 @@ public:
             auto loss = get_loss(key);
 
             std::vector<size_t> recv_time, recv_loss;
-            comm.gather(send_buf(time), root(comm.root()), recv_buf(recv_time));
-            comm.gather(send_buf(loss), root(comm.root()), recv_buf(recv_loss));
+            comm.gather(send_buf(time), root(comm.root()), recv_buf<BufferResizePolicy::resize_to_fit>(recv_time));
+            comm.gather(send_buf(loss), root(comm.root()), recv_buf<BufferResizePolicy::resize_to_fit>(recv_loss));
 
             if (comm.is_root()) {
                 auto summary_time = describe<size_t>(recv_time.begin(), recv_time.end());

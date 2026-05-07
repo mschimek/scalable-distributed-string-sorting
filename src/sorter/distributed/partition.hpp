@@ -185,10 +185,10 @@ private:
         if constexpr (is_indexed) {
             auto recv_indices = comm.allgatherv(kamping::send_buf(sample.indices));
             global_samples = StringLcpContainer<StringSet>{
-                recv_sample.extract_recv_buffer(),
-                make_initializer<Index>(recv_indices.extract_recv_buffer())};
+                std::move(recv_sample),
+                make_initializer<Index>(std::move(recv_indices))};
         } else {
-            global_samples = StringLcpContainer<StringSet>{recv_sample.extract_recv_buffer()};
+            global_samples = StringLcpContainer<StringSet>{std::move(recv_sample)};
         }
 
         tlx::sort_strings_detail::radixsort_CI3(global_samples.make_string_lcp_ptr(), 0, 0);

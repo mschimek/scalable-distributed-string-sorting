@@ -23,11 +23,12 @@ namespace mpi {
 template <
     template <typename...>
     typename DefaultContainerType,
-    template <typename>
+    template <typename, template <typename...> typename>
     typename... Plugins>
 class TrackingCommunicator
     : public kamping::Communicator<DefaultContainerType>,
-      public Plugins<TrackingCommunicator<DefaultContainerType, Plugins...>>... {
+      public Plugins<TrackingCommunicator<DefaultContainerType, Plugins...>,
+                     DefaultContainerType>... {
 private:
     using Base = kamping::Communicator<DefaultContainerType>;
 

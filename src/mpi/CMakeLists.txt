@@ -6,7 +6,6 @@ target_sources(dss_base
         byte_encoder.hpp
         communicator.hpp
         is_sorted.hpp
-        plugin_helpers.hpp
         read_input.hpp
         rotate.hpp
 )

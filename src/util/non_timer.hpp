@@ -56,7 +56,7 @@ public:
 
         for (auto const& [record, value, collect]: entries) {
             std::vector<size_t> values;
-            comm.gather(send_buf(value.getValue()), root(comm.root()), recv_buf(values));
+            comm.gather(send_buf(value.getValue()), root(comm.root()), recv_buf<BufferResizePolicy::resize_to_fit>(values));
 
             if (comm.is_root()) {
                 if (collect) {
