@@ -6,7 +6,6 @@
 #include "dss/dss.hpp"
 #include "example_common.hpp"
 #include "mpi/communicator.hpp"
-#include "sorter/distributed/partition_policy_factory.hpp"
 
 int main(int argc, char** argv) {
     kamping::Environment env{argc, argv};
@@ -17,7 +16,7 @@ int main(int argc, char** argv) {
     auto input_copy  = local_input;
 
     auto sorted_local =
-        dss::run_sorter(local_input, comm, SplitterSorter::RQuickV2);
+        dss::run_sorter(local_input, comm, dss::SplitterSorter::RQuickV2);
 
     return dss::examples::verify_and_report(
         comm, sorted_local, input_copy, "example-rquick");

@@ -39,7 +39,7 @@ enum class StringGenerator { suffix = 0, window, difference_cover, sentinel };
 enum class Permutation { simple = 0, multi_level, non_unique, sentinel };
 
 struct SorterArgs : public CommonArgs {
-    SamplerArgs quantile_sampler;
+    dss_mehnert::SamplerArgs quantile_sampler;
     size_t combined_gen = static_cast<size_t>(CombinedGenerator::none);
     size_t char_gen = static_cast<size_t>(CharGenerator::random);
     size_t string_gen = static_cast<size_t>(StringGenerator::suffix);

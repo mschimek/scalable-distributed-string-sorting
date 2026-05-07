@@ -19,6 +19,8 @@
 #include "sorter/distributed/sample.hpp"
 #include "strings/stringset.hpp"
 
+namespace dss_mehnert {
+
 enum class SplitterSorter { RQuickV1, RQuickV2, RQuickLcp, Sequential };
 
 struct SamplerArgs {
@@ -28,11 +30,10 @@ struct SamplerArgs {
     size_t sampling_factor = 2;
 };
 
-inline void die_with_feature [[noreturn]] (std::string_view feature) {
+[[noreturn]] inline void die_with_feature(std::string_view feature) {
     tlx_die("feature disabled for compile time; enable with '-D" << feature << "=On'");
 }
 
-namespace dss_mehnert {
 namespace redistribution {
 
 template <typename StringSet, typename Subcommunicators>
@@ -177,7 +178,7 @@ using SpaceEfficientPartitionPolicy = PolymorphicPartitionPolicy<
 template <typename Char, typename PolymorphicPolicy>
 PolymorphicPolicy
 init_partition_policy(SamplerArgs const& sampler, SplitterSorter splitter_sorter) {
-    auto disptach_policy = [&]<typename PartitionPolicy> {
+    auto dispatch_policy = [&]<typename PartitionPolicy> {
         return PolymorphicPolicy{PartitionPolicy{sampler.sampling_factor}};
     };
 
@@ -191,7 +192,7 @@ init_partition_policy(SamplerArgs const& sampler, SplitterSorter splitter_sorter
                 if constexpr (CliOptions::enable_rquick_v1) {
                     using SplitterPolicy = RQuickV1<Char, indexed>;
                     using PartitionPolicy = PartitionPolicy<SamplePolicy, SplitterPolicy>;
-                    return disptach_policy.template operator()<PartitionPolicy>();
+                    return dispatch_policy.template operator()<PartitionPolicy>();
                 } else {
                     die_with_feature("CLI_ENABLE_RQUICK_V1");
                 }
@@ -199,13 +200,13 @@ init_partition_policy(SamplerArgs const& sampler, SplitterSorter splitter_sorter
             case SplitterSorter::RQuickV2: {
                 using SplitterPolicy = RQuickV2<Char, indexed, false>;
                 using PartitionPolicy = PartitionPolicy<SamplePolicy, SplitterPolicy>;
-                return disptach_policy.template operator()<PartitionPolicy>();
+                return dispatch_policy.template operator()<PartitionPolicy>();
             }
             case SplitterSorter::RQuickLcp: {
                 if constexpr (CliOptions::enable_rquick_lcp) {
                     using SplitterPolicy = RQuickV2<Char, indexed, true>;
                     using PartitionPolicy = PartitionPolicy<SamplePolicy, SplitterPolicy>;
-                    return disptach_policy.template operator()<PartitionPolicy>();
+                    return dispatch_policy.template operator()<PartitionPolicy>();
                 } else {
                     die_with_feature("CLI_ENABLE_RQUICK_LCP");
                 }
@@ -213,7 +214,7 @@ init_partition_policy(SamplerArgs const& sampler, SplitterSorter splitter_sorter
             case SplitterSorter::Sequential: {
                 using SplitterPolicy = Sequential<Char, indexed>;
                 using PartitionPolicy = PartitionPolicy<SamplePolicy, SplitterPolicy>;
-                return disptach_policy.template operator()<PartitionPolicy>();
+                return dispatch_policy.template operator()<PartitionPolicy>();
             }
         }
         tlx_die("unknown splitter sorter");

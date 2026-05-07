@@ -11,6 +11,9 @@
 
 namespace dss {
 
+using SamplerArgs = dss_mehnert::SamplerArgs;
+using SplitterSorter = dss_mehnert::SplitterSorter;
+
 inline constexpr dss_mehnert::mpi::AlltoallStringsConfig kDefaultAlltoallConfig{
     .alltoall_kind     = dss_mehnert::mpi::AlltoallvCombinedKind::native,
     .compress_lcps     = true,

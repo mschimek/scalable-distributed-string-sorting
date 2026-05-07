@@ -313,7 +313,7 @@ void dispatch_sorter(SorterArgs const& args) {
         if constexpr (CliOptions::enable_prefix_doubling) {
             dispatch_permutation<CharType, Args...>(args, prefix, comm);
         } else {
-            die_with_feature("CLI_ENABLE_PREFIX_DOUBLING");
+            dss_mehnert::die_with_feature("CLI_ENABLE_PREFIX_DOUBLING");
         }
     } else {
         run_merge_sort<CharType, Args...>(args, prefix, comm);

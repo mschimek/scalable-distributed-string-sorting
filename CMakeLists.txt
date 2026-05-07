@@ -112,18 +112,6 @@ message(STATUS "Build Flags: ${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_
 find_package(MPI REQUIRED)
 message(STATUS "Run: ${MPIEXEC} ${MPIEXEC_NUMPROC_FLAG} ${MPIEXEC_MAX_NUMPROCS} ${MPIEXEC_PREFLAGS} EXECUTABLE ${MPIEXEC_POSTFLAGS} ARGS")
 
-#set(TLX_USE_LTO ON)
-#add_subdirectory(external/tlx)
-
-#add_subdirectory(external/kamping)
-
-# IPS40 doesn't compile wihtout linking to TBB
-set(IPS4O_DISABLE_PARALLEL OFF)
-#add_subdirectory(external/ips4o)
-
-#set(CLUSTER_TYPE "SUPERMUCPHASE2")
-#add_subdirectory(external/RBC)
-
 configure_file("options.hpp.in" "include/options.hpp")
 
 # Create a library containing all implementation, to be linked against by executables

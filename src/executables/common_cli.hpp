@@ -47,7 +47,7 @@ T clamp_enum_value(size_t const i) {
 struct CommonArgs {
     std::string experiment;
     size_t alltoall_routine = static_cast<size_t>(MPIRoutineAllToAll::native);
-    SamplerArgs sampler;
+    dss_mehnert::SamplerArgs sampler;
     bool rquick_v1 = false;
     bool rquick_lcp = false;
     bool splitter_sequential = false;
@@ -80,7 +80,8 @@ struct CommonArgs {
         // clang-format on
     }
 
-    SplitterSorter get_splitter_sorter() const {
+    dss_mehnert::SplitterSorter get_splitter_sorter() const {
+        using dss_mehnert::SplitterSorter;
         tlx_die_verbose_if(rquick_v1 && rquick_lcp, "RQuick v1 does not support using LCP values");
         tlx_die_verbose_if(
             splitter_sequential && (rquick_v1 || rquick_lcp),
@@ -222,7 +223,7 @@ void dispatch_alltoall_strings(Callback cb, CommonArgs const& args) {
             if constexpr (CliOptions::enable_alltoall) {
                 dispatch_lcp_compression.template operator()<AlltoallKind::direct>();
             } else {
-                die_with_feature("CLI_ENABLE_ALLTOALL");
+                dss_mehnert::die_with_feature("CLI_ENABLE_ALLTOALL");
             }
             return;
         }
@@ -230,7 +231,7 @@ void dispatch_alltoall_strings(Callback cb, CommonArgs const& args) {
             if constexpr (CliOptions::enable_alltoall) {
                 dispatch_lcp_compression.template operator()<AlltoallKind::combined>();
             } else {
-                die_with_feature("CLI_ENABLE_ALLTOALL");
+                dss_mehnert::die_with_feature("CLI_ENABLE_ALLTOALL");
             }
             return;
         }
@@ -501,7 +502,7 @@ void dispatch_redistribution(Callback cb, CommonArgs const& args) {
         if (redistribution == Redistribution::grid) {
             cb(GridwiseRedistribution<Communicator>{});
         } else {
-            die_with_feature("CLI_ENABLE_REDISTRIBUTION");
+            dss_mehnert::die_with_feature("CLI_ENABLE_REDISTRIBUTION");
         }
     }
 }

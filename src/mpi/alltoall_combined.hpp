@@ -27,6 +27,9 @@ namespace mpi {
 
 enum class AlltoallvCombinedKind { combined, native, direct };
 
+template <auto>
+inline constexpr bool always_false_v = false;
+
 template <typename Comm, template <typename...> typename DefaultContainerType>
 class AlltoallvCombinedPlugin
     : public kamping::plugin::PluginBase<Comm, DefaultContainerType, AlltoallvCombinedPlugin> {
@@ -68,7 +71,7 @@ public:
             return alltoallv_direct(send_buf, send_counts, recv_counts);
         } else {
             []<AlltoallvCombinedKind type_ = kind> {
-                //static_assert(type_ != type_, "invalid alltoallv combined kind used");
+                static_assert(always_false_v<type_>, "invalid alltoallv combined kind used");
             }
             ();
         }
