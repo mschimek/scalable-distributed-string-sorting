@@ -71,6 +71,7 @@ struct CommonArgs {
                + " sample_indexed="     + std::to_string(sampler.sample_indexed)
                + " sample_random="      + std::to_string(sampler.sample_random)
                + " sampling_factor="    + std::to_string(sampler.sampling_factor)
+               + " splitter_length_factor=" + std::to_string(sampler.splitter_length_factor)
                + " rquick_v1="          + std::to_string(rquick_v1)
                + " rquick_lcp="         + std::to_string(rquick_lcp)
                + " lcp_compression="    + std::to_string(lcp_compression)
@@ -263,6 +264,11 @@ inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
         "sampling-factor",
         args.sampler.sampling_factor,
         "use the given oversampling factor"
+    );
+    cp.add_size_t(
+        "splitter-length-factor",
+        args.sampler.splitter_length_factor,
+        "maximum splitter length as a multiple of (avg_lcp + 5)"
     );
     cp.add_flag('Q', "rquick-v1", args.rquick_v1, "use version 1 of RQuick (defaults to v2)");
     cp.add_flag('L', "rquick-lcp", args.rquick_lcp, "use LCP values in RQuick (only with v2)");

@@ -28,6 +28,10 @@ struct SamplerArgs {
     bool sample_indexed = false;
     bool sample_random = false;
     size_t sampling_factor = 2;
+    // Maximum splitter length is derived as splitter_length_factor * (avg_lcp + 5);
+    // a larger factor allows longer (more discriminating) splitters at the cost of
+    // larger samples.
+    size_t splitter_length_factor = 100;
 };
 
 [[noreturn]] inline void die_with_feature(std::string_view feature) {

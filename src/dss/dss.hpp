@@ -21,10 +21,11 @@ inline constexpr dss_mehnert::mpi::AlltoallStringsConfig kDefaultAlltoallConfig{
 };
 
 inline constexpr SamplerArgs kDefaultSamplerArgs{
-    .sample_chars    = false,
-    .sample_indexed  = true,
-    .sample_random   = false,
-    .sampling_factor = 2,
+    .sample_chars           = false,
+    .sample_indexed         = true,
+    .sample_random          = false,
+    .sampling_factor        = 2,
+    .splitter_length_factor = 100,
 };
 
 template <

@@ -171,7 +171,7 @@ void run_merge_sort(
             ),
             std::move(redistribution)
         };
-        merge_sort.sort(input_container, comms);
+        merge_sort.sort(input_container, comms, args.sampler.splitter_length_factor);
         measuring_tool.stop("none", "sorting_overall", comm);
 
         measuring_tool.disableCommVolume();

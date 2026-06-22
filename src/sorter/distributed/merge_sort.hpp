@@ -232,7 +232,11 @@ public:
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
 
     template <typename StringSet>
-    void sort(StringLcpContainer<StringSet>& container, Subcommunicators const& comms)
+    void sort(
+        StringLcpContainer<StringSet>& container,
+        Subcommunicators const& comms,
+        size_t const splitter_length_factor = 100
+    )
         requires(StringSet::has_length)
     {
         auto const& comm_root = comms.comm_root();
@@ -254,7 +258,7 @@ public:
             auto const avg_lcp = compute_global_lcp_average(container.lcps(), comm_root);
             this->measuring_tool_.stop("avg_lcp");
 
-            Base::sort(container, comms, 100 * (avg_lcp + 5), builder);
+            Base::sort(container, comms, splitter_length_factor * (avg_lcp + 5), builder);
         }
     }
 };
