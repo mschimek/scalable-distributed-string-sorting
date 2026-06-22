@@ -37,7 +37,7 @@ std::vector<CharType> dss::run_sorter(
         RedistributionPolicy{},
     };
     dss_mehnert::StringLcpContainer<StringSet> container{std::move(to_sort)};
-    sorter.sort(container, comms);
+    sorter.sort(container, comms, sampler.splitter_length_factor);
 
     auto strings = container.release_strings();
     std::vector<CharType> out;
