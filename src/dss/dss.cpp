@@ -8,4 +8,12 @@ template std::vector<unsigned char>
 run_sorter<kDefaultAlltoallConfig, unsigned char, dss_mehnert::Communicator>(
     std::vector<unsigned char>&, dss_mehnert::Communicator const&,
     SamplerArgs const&, SplitterSorter);
+
+template std::vector<unsigned char>
+run_rquick<unsigned char, dss_mehnert::Communicator>(
+    std::vector<unsigned char>&, dss_mehnert::Communicator const&);
+
+template std::pair<std::vector<unsigned char>, std::vector<std::uint64_t>>
+run_rquick<unsigned char, dss_mehnert::Communicator>(
+    std::vector<unsigned char>&, std::vector<std::uint64_t>&, dss_mehnert::Communicator const&);
 }

@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <cstdint>
+#include <utility>
 #include <vector>
 
 #include "mpi/alltoall_strings.hpp"
@@ -48,6 +50,26 @@ std::vector<CharType> run_sorter(
         to_sort, comm, kDefaultSamplerArgs, splitter_sorter);
 }
 
+// Sorts a distributed set of (null-free) strings, packed as a single buffer of
+// '\0'-terminated strings, with the LCP-aware hypercube quicksort (RQuick2) as
+// the top-level sorter. Returns this PE's share of the globally sorted strings
+// in the same packed representation. Note that, as with RQuick, the output is
+// distributed across PEs and may be unbalanced (some PEs can end up empty).
+template <typename CharType, typename Communicator>
+std::vector<CharType> run_rquick(std::vector<CharType>& to_sort, Communicator const& comm);
+
+// Indexed variant of the above: each string carries a 64-bit index, and strings
+// are ordered lexicographically with the index as a tie-breaker (the same
+// indexed RQuick2 configuration used to globally sort splitter candidates).
+// `indices` must hold exactly one index per string in `to_sort`. Returns this
+// PE's share of the globally sorted strings (packed, '\0'-terminated) together
+// with their indices in matching order.
+template <typename CharType, typename Communicator>
+std::pair<std::vector<CharType>, std::vector<std::uint64_t>> run_rquick(
+    std::vector<CharType>& to_sort,
+    std::vector<std::uint64_t>& indices,
+    Communicator const& comm);
+
 }  // namespace dss
 
 #include "dss/dss_impl.hpp"
@@ -57,4 +79,12 @@ extern template std::vector<unsigned char>
 run_sorter<kDefaultAlltoallConfig, unsigned char, dss_mehnert::Communicator>(
     std::vector<unsigned char>&, dss_mehnert::Communicator const&,
     SamplerArgs const&, SplitterSorter);
+
+extern template std::vector<unsigned char>
+run_rquick<unsigned char, dss_mehnert::Communicator>(
+    std::vector<unsigned char>&, dss_mehnert::Communicator const&);
+
+extern template std::pair<std::vector<unsigned char>, std::vector<std::uint64_t>>
+run_rquick<unsigned char, dss_mehnert::Communicator>(
+    std::vector<unsigned char>&, std::vector<std::uint64_t>&, dss_mehnert::Communicator const&);
 }
