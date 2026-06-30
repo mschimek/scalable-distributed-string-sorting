@@ -42,7 +42,7 @@ exscan_and_bcast(std::vector<size_t> const& values, Communicator const& comm) {
     std::vector<size_t> global_prefixes;
     comm.exscan(
         kamping::send_buf(values),
-        kamping::recv_buf(global_prefixes),
+        kamping::recv_buf<kamping::BufferResizePolicy::resize_to_fit>(global_prefixes),
         kamping::op(std::plus<>{})
     );
 
@@ -268,7 +268,10 @@ std::vector<size_t> compute_deterministic_redistribution(
     for (auto dest = send_counts.begin(); auto const interval: intervals) {
         dest = std::fill_n(dest, group_size, interval);
     }
-    comm.alltoall(kmp::send_buf(send_counts), kmp::recv_buf(recv_counts));
+    comm.alltoall(
+        kmp::send_buf(send_counts),
+        kmp::recv_buf<kamping::BufferResizePolicy::resize_to_fit>(recv_counts)
+    );
 
     size_t const capacity = tlx::div_ceil(
         std::accumulate(recv_counts.begin(), recv_counts.end(), size_t{0}),
@@ -308,7 +311,10 @@ std::vector<size_t> compute_deterministic_redistribution(
         }
     }
 
-    comm.alltoall(kmp::send_buf(send_counts), kmp::recv_buf(recv_counts));
+    comm.alltoall(
+        kmp::send_buf(send_counts),
+        kmp::recv_buf<kamping::BufferResizePolicy::resize_to_fit>(recv_counts)
+    );
     assert_equal(std::accumulate(recv_counts.begin(), recv_counts.end(), size_t{0}), local_size);
     return recv_counts;
 }

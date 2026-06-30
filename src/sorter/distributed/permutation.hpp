@@ -109,7 +109,11 @@ public:
             send_buf[offsets[ranks_[i]]++] = {strings_[i], index_offset + i};
         }
 
-        comm.alltoallv(kmp::send_buf(send_buf), kmp::send_counts(counts), kmp::recv_buf(recv_buf));
+        comm.alltoallv(
+            kmp::send_buf(send_buf),
+            kmp::send_counts(counts),
+            kmp::recv_buf<kamping::BufferResizePolicy::resize_to_fit>(recv_buf)
+        );
 
         for (auto const& [local_index, global_index]: recv_buf) {
             global_permutation[local_index] = global_index;
@@ -252,7 +256,7 @@ protected:
                 kamping::send_buf(send_buf),
                 kamping::send_counts(counts),
                 kamping::send_displs(offsets),
-                kamping::recv_buf(recv_buf)
+                kamping::recv_buf<kamping::BufferResizePolicy::resize_to_fit>(recv_buf)
             );
         }
 

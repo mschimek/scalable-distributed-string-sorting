@@ -63,7 +63,11 @@ inline std::pair<SimplePermutation, std::vector<size_t>> make_input_permutation(
         ++i;
     }
 
-    comm.alltoallv(send_buf(triples), send_counts(counts), recv_buf(recv_triples));
+    comm.alltoallv(
+        send_buf(triples),
+        send_counts(counts),
+        recv_buf<BufferResizePolicy::resize_to_fit>(recv_triples)
+    );
 
     std::sort(recv_triples.begin(), recv_triples.end(), [&](auto const& lhs, auto const& rhs) {
         return get_global_index(lhs) < get_global_index(rhs);
@@ -199,7 +203,11 @@ inline bool check_permutation_complete(
 
     using namespace kamping;
     std::vector<size_t> global_indicies;
-    comm.alltoallv(send_buf(sorted_indices), send_counts(counts), recv_buf(global_indicies));
+    comm.alltoallv(
+        send_buf(sorted_indices),
+        send_counts(counts),
+        recv_buf<BufferResizePolicy::resize_to_fit>(global_indicies)
+    );
     std::sort(global_indicies.begin(), global_indicies.end());
 
     bool is_complete = true;
