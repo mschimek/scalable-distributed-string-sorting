@@ -203,8 +203,8 @@ inline RecvData send_hash_values(
         kamping::send_counts(interval_sizes),
         kamping::send_displs(offsets),
         kamping::recv_buf<kamping::BufferResizePolicy::resize_to_fit>(recv_data.hashes),
-        kamping::recv_counts_out(recv_data.interval_sizes),
-        kamping::recv_displs_out(recv_data.local_offsets)
+        kamping::recv_counts_out<kamping::BufferResizePolicy::resize_to_fit>(recv_data.interval_sizes),
+        kamping::recv_displs_out<kamping::BufferResizePolicy::resize_to_fit>(recv_data.local_offsets)
     );
     return recv_data;
 }
