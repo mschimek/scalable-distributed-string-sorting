@@ -108,7 +108,20 @@ get_predecessor(T const& last_elem, bool const is_empty, Communicator const& com
             comm.issend(send_buf(last_elem), destination(successor), request(req_succ));
         }
         if (predecessor != bottom) {
-            comm.recv(recv_buf(pred_elem), source(predecessor));
+            // kamping v0.2.1 defaults recv_buf to no_resize. For a resizable
+            // container (the string case) the message size is only known after
+            // probing, so we must ask kamping to resize the buffer to fit;
+            // otherwise it would recv into an empty buffer (MPI_ERR_BUFFER).
+            // The scalar instantiation (size_t rank) is a single element and
+            // must keep the default no_resize policy.
+            if constexpr (requires(T& t) { t.resize(std::size_t{}); }) {
+                comm.recv(
+                    recv_buf<BufferResizePolicy::resize_to_fit>(pred_elem),
+                    source(predecessor)
+                );
+            } else {
+                comm.recv(recv_buf(pred_elem), source(predecessor));
+            }
         }
         req_succ.wait();
 
@@ -232,14 +245,14 @@ public:
             is_sorted = false;
         }
 
-        std::vector<Char> first_string{0}, last_string{0};
+        std::vector<Char> first_string(0), last_string(0);
         if (!ss.empty()) {
             auto const &fst = *ss.begin(), lst = *(ss.end() - 1);
             auto const fst_length = ss.get_length(fst), lst_length = ss.get_length(lst);
             first_string.insert(first_string.end(), fst.string, fst.string + fst_length);
             last_string.insert(last_string.end(), lst.string, lst.string + lst_length);
-            first_string.push_back(0), last_string.push_back(0);
         }
+            first_string.push_back(0), last_string.push_back(0);
         if (!check_global_order(first_string, last_string, ss.empty(), comm)) {
             std::cout << "strings are not sorted globally\n";
             is_sorted = false;
@@ -282,11 +295,11 @@ public:
         input_container_.make_contiguous();
 
         std::vector<unsigned char> global_input_chars, global_sorted_chars;
-        comm.gatherv(send_buf(sorted_container.raw_strings()), recv_buf(global_sorted_chars));
-        comm.gatherv(send_buf(input_container_.raw_strings()), recv_buf(global_input_chars));
+        comm.gatherv(send_buf(sorted_container.raw_strings()), recv_buf<BufferResizePolicy::resize_to_fit>(global_sorted_chars));
+        comm.gatherv(send_buf(input_container_.raw_strings()), recv_buf<BufferResizePolicy::resize_to_fit>(global_input_chars));
 
         std::vector<size_t> sorted_lcps;
-        comm.gatherv(send_buf(sorted_container.lcps()), recv_buf(sorted_lcps));
+        comm.gatherv(send_buf(sorted_container.lcps()), recv_buf<BufferResizePolicy::resize_to_fit>(sorted_lcps));
 
         bool overall_correct = true;
         if (comm.is_root()) {
