@@ -22,19 +22,21 @@
 
 namespace dss_mehnert {
 
-// Open an output stream for the given path. "stdout"/"stderr"/"" map to the
-// respective standard streams, everything else to a file at exactly that path.
-inline std::unique_ptr<std::ostream> make_output_stream(std::string const& output_file) {
-    if (output_file.empty() || output_file == "stdout") {
+inline auto make_output_stream(std::string const& output_file) -> std::unique_ptr<std::ostream> {
+    std::ostream out(std::cout.rdbuf());
+    if (output_file == "stdout") {
         return std::make_unique<std::ostream>(std::cout.rdbuf());
     }
     if (output_file == "stderr") {
         return std::make_unique<std::ostream>(std::cerr.rdbuf());
     }
-
-    auto file_stream = std::make_unique<std::ofstream>(output_file);
+    auto path = std::filesystem::path(output_file);
+    if (path.extension() != ".json") {
+        path.replace_extension(".json");
+    }
+    auto file_stream = std::make_unique<std::ofstream>(path);
     if (!file_stream->is_open()) {
-        throw std::runtime_error("Failed to open output file: " + output_file);
+        throw std::runtime_error("Failed to open output file: " + path.string());
     }
     return file_stream;
 }
@@ -54,8 +56,8 @@ public:
         }
         kamping::measurements::timer().clear();
 
-        using counter_type = typename std::remove_reference_t<
-            decltype(kamping::measurements::counter())>::DataType;
+        using counter_type =
+            typename std::remove_reference_t<decltype(kamping::measurements::counter())>::DataType;
         kamping::measurements::NLohmannJsonPrinter<counter_type> counter_printer;
         kamping::measurements::counter().aggregate_and_print(counter_printer);
         if (kamping::comm_world().is_root()) {
