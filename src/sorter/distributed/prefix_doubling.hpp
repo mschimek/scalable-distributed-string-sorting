@@ -12,6 +12,7 @@
 
 #include <kamping/collectives/allreduce.hpp>
 #include <kamping/collectives/alltoall.hpp>
+#include <kamping/measurements/timer.hpp>
 #include <kamping/named_parameters.hpp>
 #include <tlx/die.hpp>
 #include <tlx/sort/strings/radix_sort.hpp>
@@ -77,8 +78,10 @@ protected:
         StringPtr const& strptr, Subcommunicators const& comms, size_t const start_depth
     ) {
         this->measuring_tool_.start("bloomfilter", "bloomfilter_overall");
+        kamping::measurements::timer().synchronize_and_start("bloomfilter_overall");
         BloomFilter filter{comms, strptr.size()};
         auto const prefixes = filter.compute_distinguishing_prefixes(strptr, comms, start_depth);
+        kamping::measurements::timer().stop_and_append();
         this->measuring_tool_.stop("bloomfilter", "bloomfilter_overall", comms.comm_root());
 
         auto const total_prefix = std::accumulate(prefixes.begin(), prefixes.end(), size_t{0});
@@ -99,11 +102,13 @@ protected:
         if (comms.begin() == comms.end()) {
             // special case for single-level sort; consider distinguishing prefixes
             this->measuring_tool_.start("sort_globally", "final_sorting");
+            kamping::measurements::timer().synchronize_and_start("final_sorting");
             sample::DistPrefixes const arg{dist_prefixes};
             auto const& comm = comms.comm_final();
             auto const strptr = container.make_string_lcp_ptr();
             auto const send_counts = Base::compute_sorted_send_counts(strptr, arg, comm);
             Base::exchange_and_merge(container, send_counts, arg, builder, comm);
+            kamping::measurements::timer().stop_and_append();
             this->measuring_tool_.stop("sort_globally", "final_sorting", comm_root);
             this->measuring_tool_.setRound(0);
             return;
@@ -115,12 +120,14 @@ protected:
             {
                 // first level of multi-level sort; consider distinguishing prefixes
                 this->measuring_tool_.start("sort_globally", "partial_sorting");
+                kamping::measurements::timer().synchronize_and_start("partial_sorting");
                 sample::DistPrefixes const arg{dist_prefixes};
                 auto const level = *level_it++;
                 auto const& comm = level.comm_exchange;
                 auto const strptr = container.make_string_lcp_ptr();
                 auto const send_counts = Base::compute_sorted_send_counts(strptr, arg, level);
                 Base::exchange_and_merge(container, send_counts, arg, builder, comm);
+                kamping::measurements::timer().stop_and_append();
                 this->measuring_tool_.stop("sort_globally", "partial_sorting", comm_root);
                 this->measuring_tool_.setRound(++round);
             }
@@ -128,24 +135,28 @@ protected:
             for (; level_it != comms.end(); ++level_it) {
                 // intermediate level of multi-level sort; don't consider distinguishing prefixes
                 this->measuring_tool_.start("sort_globally", "partial_sorting");
+                kamping::measurements::timer().synchronize_and_start("partial_sorting");
                 sample::NoExtraArg const arg;
                 auto const level = *level_it;
                 auto const& comm = level.comm_exchange;
                 auto const strptr = container.make_string_lcp_ptr();
                 auto const send_counts = Base::compute_sorted_send_counts(strptr, arg, level);
                 Base::exchange_and_merge(container, send_counts, arg, builder, comm);
+                kamping::measurements::timer().stop_and_append();
                 this->measuring_tool_.stop("sort_globally", "partial_sorting", comm_root);
                 this->measuring_tool_.setRound(++round);
             }
 
             {
                 this->measuring_tool_.start("sort_globally", "final_sorting");
+                kamping::measurements::timer().synchronize_and_start("final_sorting");
                 // final level of multi-level sort; don't consider distinguishing prefixes
                 sample::NoExtraArg const arg;
                 auto const& comm = comms.comm_final();
                 auto const strptr = container.make_string_lcp_ptr();
                 auto const send_counts = Base::compute_sorted_send_counts(strptr, arg, comm);
                 Base::exchange_and_merge(container, send_counts, arg, builder, comm);
+                kamping::measurements::timer().stop_and_append();
                 this->measuring_tool_.stop("sort_globally", "final_sorting", comm_root);
                 this->measuring_tool_.setRound(0);
             }
@@ -249,7 +260,9 @@ public:
         this->measuring_tool_.add(container.char_size(), "chars_in_set");
 
         this->measuring_tool_.start("local_sorting", "sort_locally");
+        kamping::measurements::timer().synchronize_and_start("sort_locally");
         tlx::sort_strings_detail::radixsort_CI3(strptr, 0, 0);
+        kamping::measurements::timer().stop_and_append();
         this->measuring_tool_.stop("local_sorting", "sort_locally", comms.comm_root());
 
         PermutationBuilder<Permutation> builder{strptr.active()};

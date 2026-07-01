@@ -16,11 +16,13 @@
 #include <kamping/collectives/barrier.hpp>
 #include <kamping/communicator.hpp>
 #include <kamping/environment.hpp>
+#include <kamping/measurements/timer.hpp>
 #include <tlx/cmdline_parser.hpp>
 #include <tlx/die.hpp>
 #include <tlx/die/core.hpp>
 #include <tlx/sort/strings/string_ptr.hpp>
 
+#include "bench/reporting.hpp"
 #include "executables/common_cli.hpp"
 #include "mpi/communicator.hpp"
 #include "mpi/is_sorted.hpp"
@@ -160,11 +162,14 @@ void run_merge_sort(
         comm.barrier();
 
         measuring_tool.start("none", "create_communicators");
+        kamping::measurements::timer().synchronize_and_start("create_communicators");
         auto const first_level = get_first_level(args.levels, comm);
         Subcommunicators comms{first_level, args.levels.end(), comm};
+        kamping::measurements::timer().stop_and_append();
         measuring_tool.stop("none", "create_communicators", comm);
 
         measuring_tool.start("none", "sorting_overall");
+        kamping::measurements::timer().synchronize_and_start("sorting_overall");
         MergeSort merge_sort{
             dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
                 args.sampler,
@@ -173,6 +178,7 @@ void run_merge_sort(
             std::move(redistribution)
         };
         merge_sort.sort(input_container, comms, args.sampler.splitter_length_factor);
+        kamping::measurements::timer().stop_and_append();
         measuring_tool.stop("none", "sorting_overall", comm);
 
         measuring_tool.disableCommVolume();
@@ -251,11 +257,14 @@ void run_prefix_doubling(
         comm.barrier();
 
         measuring_tool.start("none", "create_communicators");
+        kamping::measurements::timer().synchronize_and_start("create_communicators");
         auto const first_level = get_first_level(args.levels, comm);
         Subcommunicators comms{first_level, args.levels.end(), comm};
+        kamping::measurements::timer().stop_and_append();
         measuring_tool.stop("none", "create_communicators", comm);
 
         measuring_tool.start("none", "sorting_overall");
+        kamping::measurements::timer().synchronize_and_start("sorting_overall");
         MergeSort merge_sort{
             dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
                 args.sampler,
@@ -264,6 +273,7 @@ void run_prefix_doubling(
             std::move(redistribution)
         };
         auto permutation = merge_sort.sort(std::move(input_container), comms);
+        kamping::measurements::timer().stop_and_append();
         measuring_tool.stop("none", "sorting_overall", comm);
 
         measuring_tool.disableCommVolume();
@@ -398,6 +408,12 @@ int main(int argc, char* argv[]) {
     cp.add_string('y', "path", args.path, "path to input file");
     std::string output_path;
     cp.add_string("json_output_path", output_path, "path to output file");
+    std::string timer_json_path;
+    cp.add_string(
+        "timer-json-path",
+        timer_json_path,
+        "path for the kamping timer JSON report (empty = disabled)"
+    );
     cp.add_double('r', "DN-ratio", args.dn_ratio, "D/N ratio of generated strings");
     cp.add_size_t('n', "num-strings", args.num_strings, "number of strings to be generated");
     cp.add_size_t('m', "len-strings", args.len_strings, "length of generated strings");
@@ -436,6 +452,7 @@ int main(int argc, char* argv[]) {
     parse_level_arg(cpus_per_node, num_levels, levels_param, args.levels);
     set_experiment(args, num_levels);
 
+    dss_mehnert::Report report;
     auto run_algo = [&]() {
         if constexpr (CliOptions::use_shared_memory_sort) {
             using CharType = unsigned char;
@@ -446,6 +463,8 @@ int main(int argc, char* argv[]) {
             for (size_t i = 0; i < args.num_iterations; ++i) {
                 args.iteration = i;
                 dispatch_common_args([&]<typename... T> { dispatch_sorter<T...>(args); }, args);
+                // aggregate this iteration's kamping timer tree and reset it
+                report.step_iteration();
             }
         }
     };
@@ -458,6 +477,54 @@ int main(int argc, char* argv[]) {
         std::cout.rdbuf(coutbuf);
     } else {
         run_algo();
+    }
+
+    if (!timer_json_path.empty() && kamping::comm_world().is_root()) {
+        nlohmann::ordered_json config;
+        config["p"] = kamping::comm_world().size();
+        config["experiment"] = args.experiment;
+
+        config["input"]["string-generator"] = args.string_generator;
+        config["input"]["path"] = args.path;
+        config["input"]["num-strings"] = args.num_strings;
+        config["input"]["length-strings"] = args.len_strings;
+        config["input"]["min-len-strings"] = args.len_strings_min;
+        config["input"]["max-len-strings"] = args.len_strings_max;
+        config["input"]["DN-ratio"] = args.dn_ratio;
+
+        config["num-iterations"] = args.num_iterations;
+        config["permutation"] = args.permutation;
+        config["num-levels"] = num_levels;
+        config["cpus-per-node"] = cpus_per_node;
+        config["group-size"] = args.levels;
+
+        config["sample-chars"] = args.sampler.sample_chars;
+        config["sample-indexed"] = args.sampler.sample_indexed;
+        config["sample-random"] = args.sampler.sample_random;
+        config["sampling-factor"] = args.sampler.sampling_factor;
+        config["splitter-length-factor"] = args.sampler.splitter_length_factor;
+        config["splitter-sequential"] = args.splitter_sequential;
+
+        config["rquick-v1"] = args.rquick_v1;
+        config["rquick-lcp"] = args.rquick_lcp;
+        config["prefix-doubling"] = args.prefix_doubling;
+        config["grid-bloomfilter"] = args.grid_bloomfilter;
+        config["lcp-compression"] = args.lcp_compression;
+        config["prefix-compression"] = args.prefix_compression;
+        config["alltoall"] = args.alltoall_routine;
+        config["redistribution"] = args.redistribution;
+        config["strong-scaling"] = args.strong_scaling;
+
+        config["check-sorted"] = args.check_sorted;
+        config["check-complete"] = args.check_complete;
+        config["count-prefixes"] = args.count_prefixes;
+        config["print-sorted"] = args.print_sorted;
+        config["verbose"] = args.verbose;
+
+        report.push_config(config);
+
+        auto out = dss_mehnert::make_output_stream(timer_json_path);
+        report.print(*out);
     }
 
     return EXIT_SUCCESS;

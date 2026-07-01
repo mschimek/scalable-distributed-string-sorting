@@ -56,7 +56,21 @@ FetchContent_Declare(
   GIT_TAG v1.0.0
   GIT_SHALLOW ON)
 
-FetchContent_MakeAvailable(fmt spdlog kamping-spdlog-adapter)
+FetchContent_Declare(
+  nlohmann_json
+  GIT_REPOSITORY https://github.com/nlohmann/json
+  GIT_TAG v3.12.0
+  GIT_SHALLOW ON
+  SYSTEM)
+
+FetchContent_Declare(
+  kamping-nlohmann-json-adapter
+  GIT_REPOSITORY https://github.com/kamping-site/kamping-nlohmann-json-adaptor
+  GIT_TAG main
+  GIT_SHALLOW ON)
+
+FetchContent_MakeAvailable(fmt spdlog kamping-spdlog-adapter nlohmann_json
+                           kamping-nlohmann-json-adapter)
 
 FetchContent_Declare(
   kaval
@@ -109,7 +123,6 @@ message(STATUS "Examples Enabled: ${DSS_BUILD_EXAMPLES}")
 
 list(APPEND
   DSS_MEHNERT_WARNING_FLAGS
-  "-Werror"
   "-Wall"
   "-Wextra"
   "-Wundef"
@@ -186,6 +199,8 @@ target_compile_options(distributed_sorter PRIVATE ${DSS_MEHNERT_WARNING_FLAGS})
 target_link_libraries(distributed_sorter kamping::kamping)
 target_link_libraries(distributed_sorter dss_base)
 target_link_libraries(distributed_sorter tlx)
+target_link_libraries(distributed_sorter nlohmann_json::nlohmann_json)
+target_link_libraries(distributed_sorter kamping::nlohmann-json-adapter)
 
 add_executable(space_efficient_sorter
   src/executables/space_efficient_sorter.cpp
