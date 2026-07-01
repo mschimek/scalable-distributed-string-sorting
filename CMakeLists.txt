@@ -58,6 +58,14 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(fmt spdlog kamping-spdlog-adapter)
 
+FetchContent_Declare(
+  kaval
+  GIT_REPOSITORY https://github.com/niklas-uhl/kaval.git
+  GIT_TAG 20260505.0
+  SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}/kaval)
+
+FetchContent_MakeAvailable(kaval)
+
 
 
 find_package(TBB REQUIRED)
