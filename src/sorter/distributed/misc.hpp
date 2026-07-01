@@ -15,6 +15,8 @@
 #include <kamping/collectives/allreduce.hpp>
 #include <kamping/collectives/bcast.hpp>
 #include <kamping/collectives/exscan.hpp>
+#include <kamping/measurements/counter.hpp>
+#include <kamping/measurements/timer.hpp>
 #include <kamping/mpi_ops.hpp>
 #include <kamping/named_parameters.hpp>
 #include <tlx/math/div_ceil.hpp>
@@ -87,11 +89,14 @@ StringContainer<StringSet> choose_splitters_distributed(
 ) {
     constexpr size_t length_guess = 256;
 
+    kamping::measurements::timer().start("compute-splitter-interval");
     auto const splitter_interval =
         _internal::compute_splitter_interval(ss.size(), num_partitions, comm);
     std::vector<typename StringSet::Char> splitter_chars;
     splitter_chars.reserve(splitter_interval.size() * length_guess);
+    kamping::measurements::timer().stop_and_append();
 
+    kamping::measurements::timer().start("compute-actual-splitters");
     std::vector<uint64_t> splitter_idxs;
     if constexpr (StringSet::is_indexed) {
         splitter_idxs.reserve(splitter_interval.size());
@@ -112,9 +117,21 @@ StringContainer<StringSet> choose_splitters_distributed(
             splitter_idxs.emplace_back(str.index);
         }
     }
+    kamping::measurements::timer().stop_and_append();
 
+
+    kamping::measurements::counter().append(
+        "num_splitter_characters",
+        static_cast<std::int64_t>(splitter_chars.size()), {kamping::measurements::GlobalAggregationMode::min,
+               kamping::measurements::GlobalAggregationMode::max,
+               kamping::measurements::GlobalAggregationMode::sum,
+            }
+    );
+    kamping::measurements::timer().start("allgatherv");
     auto char_result = comm.allgatherv(kamping::send_buf(splitter_chars));
+    kamping::measurements::timer().stop_and_append();
 
+    kamping::measurements::timer().start("allgatherv-indices");
     if constexpr (StringSet::is_indexed) {
         auto idx_result = comm.allgatherv(kamping::send_buf(splitter_idxs));
         return StringContainer<StringSet>{
@@ -124,6 +141,7 @@ StringContainer<StringSet> choose_splitters_distributed(
     } else {
         return StringContainer<StringSet>{std::move(char_result)};
     }
+    kamping::measurements::timer().stop_and_append();
 }
 
 inline size_t compute_global_lcp_average(std::span<size_t const> lcps, Communicator const& comm) {
