@@ -13,6 +13,7 @@
 #include <vector>
 
 #include <kamping/collectives/allgather.hpp>
+#include <kamping/measurements/counter.hpp>
 #include <kamping/measurements/timer.hpp>
 
 #include "mpi/communicator.hpp"
@@ -96,8 +97,26 @@ public:
     ) {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
+        {
+            // count sample size before the sample is consumed by the sort
+            using kamping::measurements::GlobalAggregationMode;
+            std::vector<GlobalAggregationMode> const agg{
+                GlobalAggregationMode::min,
+                GlobalAggregationMode::max,
+                GlobalAggregationMode::sum,
+            };
+            auto const num_sample_strings =
+                static_cast<std::int64_t>(std::count(sample.sample.begin(), sample.sample.end(), Char{0}));
+            auto const num_sample_chars =
+                static_cast<std::int64_t>(sample.sample.size()) - num_sample_strings;
+            kamping::measurements::counter().add("sample_num_strings", num_sample_strings, agg);
+            kamping::measurements::counter().add("sample_num_chars", num_sample_chars, agg);
+        }
+
         measuring_tool.start("sort_samples");
+        kamping::measurements::timer().synchronize_and_start("sort_samples");
         auto sorted_sample = Derived::sort_samples(std::move(sample), comm);
+        kamping::measurements::timer().stop_and_append();
         measuring_tool.stop("sort_samples");
 
         measuring_tool.start("choose_splitters");
