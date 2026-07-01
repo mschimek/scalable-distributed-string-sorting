@@ -131,9 +131,10 @@ StringContainer<StringSet> choose_splitters_distributed(
     auto char_result = comm.allgatherv(kamping::send_buf(splitter_chars));
     kamping::measurements::timer().stop_and_append();
 
-    kamping::measurements::timer().start("allgatherv-indices");
     if constexpr (StringSet::is_indexed) {
+        kamping::measurements::timer().start("allgatherv-indices");
         auto idx_result = comm.allgatherv(kamping::send_buf(splitter_idxs));
+        kamping::measurements::timer().stop_and_append();
         return StringContainer<StringSet>{
             std::move(char_result),
             make_initializer<Index>(std::move(idx_result))
@@ -141,7 +142,6 @@ StringContainer<StringSet> choose_splitters_distributed(
     } else {
         return StringContainer<StringSet>{std::move(char_result)};
     }
-    kamping::measurements::timer().stop_and_append();
 }
 
 inline size_t compute_global_lcp_average(std::span<size_t const> lcps, Communicator const& comm) {
