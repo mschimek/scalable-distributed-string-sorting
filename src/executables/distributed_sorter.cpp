@@ -24,6 +24,7 @@
 #include "executables/common_cli.hpp"
 #include "mpi/communicator.hpp"
 #include "mpi/is_sorted.hpp"
+#include "mpi/print_strings.hpp"
 #include "options.hpp"
 #include "sorter/distributed/merge_sort.hpp"
 #include "sorter/distributed/permutation.hpp"
@@ -192,6 +193,9 @@ void run_merge_sort(
             auto const is_exact = checker.check_exhaustive(input_container, comm);
             die_verbose_unless(is_exact, "output is not a permutation of the input");
         }
+        if (args.print_sorted) {
+            dss_mehnert::gather_and_print_strings(input_container, comm);
+        }
 
         measuring_tool.write_on_root(std::cout, comm);
         measuring_tool.reset();
@@ -235,6 +239,13 @@ void run_prefix_doubling(
         if (args.check_sorted || args.check_complete) {
             checker.store_container(input_container);
         }
+
+        // prefix doubling only returns a permutation; keep a copy of the local
+        // input so we can materialize the globally sorted strings for printing
+        dss_mehnert::StringLcpContainer<StringSet> input_copy;
+        if (args.print_sorted) {
+            dss_mehnert::copy_container(input_container, input_copy);
+        }
         measuring_tool.enableCommVolume();
 
         comm.barrier();
@@ -266,6 +277,18 @@ void run_prefix_doubling(
         if (args.check_complete) {
             auto const is_complete = checker.is_complete(permutation, comms);
             die_verbose_unless(is_complete, "output permutation is not complete");
+        }
+        if (args.print_sorted) {
+            if constexpr (std::is_same_v<Permutation, dss_mehnert::SimplePermutation>) {
+                auto sorted_container = dss_mehnert::sorter::prefix_doubling::apply_permutation(
+                    input_copy.make_string_set(),
+                    permutation,
+                    comm
+                );
+                dss_mehnert::gather_and_print_strings(sorted_container, comm);
+            } else if (comm.is_root()) {
+                std::cout << "--print-sorted is only supported for the simple permutation\n";
+            }
         }
 
         measuring_tool.write_on_root(std::cout, comm);

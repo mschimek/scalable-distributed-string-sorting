@@ -19,6 +19,7 @@
 #include "mpi/alltoall_combined.hpp"
 #include "mpi/communicator.hpp"
 #include "mpi/is_sorted.hpp"
+#include "mpi/print_strings.hpp"
 #include "options.hpp"
 #include "sorter/distributed/bloomfilter.hpp"
 #include "sorter/distributed/partition.hpp"
@@ -61,6 +62,7 @@ struct CommonArgs {
     bool check_complete = false;
     bool verbose = false;
     bool count_prefixes = false;
+    bool print_sorted = false;
 
     std::string get_prefix(dss_mehnert::Communicator const& comm) const {
         // clang-format off
@@ -311,6 +313,11 @@ inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
     cp.add_flag('V', "check-complete", args.check_complete, "check that the result is complete");
     cp.add_flag("verbose", args.verbose, "print some debug output");
     cp.add_flag("count-prefixes", args.count_prefixes, "count LCPs and dist prefixes");
+    cp.add_flag(
+        "print-sorted",
+        args.print_sorted,
+        "gather the sorted strings on the root PE and print them (debug only)"
+    );
 }
 
 template <typename Container>
@@ -431,12 +438,19 @@ void run_rquick(
             auto const is_exact = checker.check_exhaustive(sorted_container, comm);
             die_verbose_unless(is_exact, "output is not a permutation of the input");
         }
+        if (args.print_sorted) {
+            dss_mehnert::gather_and_print_strings(sorted_container, comm);
+        }
     } else {
         using StringPtr = tlx::sort_strings_detail::StringPtr<StringSet>;
         measuring_tool.start("none", "sorting_overall");
         RQuick2::Data<StringPtr> data{input_container.release_raw_strings()};
         auto sorted_container = RQuick2::sort(std::move(data), tag, gen, mpi_comm);
         measuring_tool.stop("none", "sorting_overall", comm);
+
+        if (args.print_sorted) {
+            dss_mehnert::gather_and_print_strings(sorted_container, comm);
+        }
     }
 
     measuring_tool.write_on_root(std::cout, comm);
