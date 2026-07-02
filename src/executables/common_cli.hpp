@@ -51,6 +51,7 @@ struct CommonArgs {
     dss_mehnert::SamplerArgs sampler;
     bool rquick_v1 = false;
     bool rquick_lcp = false;
+    bool long_filter = false;
     bool splitter_sequential = false;
     size_t redistribution = static_cast<size_t>(Redistribution::grid);
     bool prefix_compression = false;
@@ -76,6 +77,7 @@ struct CommonArgs {
                + " splitter_length_factor=" + std::to_string(sampler.splitter_length_factor)
                + " rquick_v1="          + std::to_string(rquick_v1)
                + " rquick_lcp="         + std::to_string(rquick_lcp)
+               + " long_filter="        + std::to_string(long_filter)
                + " lcp_compression="    + std::to_string(lcp_compression)
                + " prefix_compression=" + std::to_string(prefix_compression)
                + " prefix_doubling="    + std::to_string(prefix_doubling)
@@ -90,6 +92,14 @@ struct CommonArgs {
             splitter_sequential && (rquick_v1 || rquick_lcp),
             "can't use both RQuick and sequential sorting"
         );
+        tlx_die_verbose_if(
+            long_filter && (rquick_v1 || rquick_lcp || splitter_sequential),
+            "the long filter can't be combined with another splitter sorter"
+        );
+        tlx_die_verbose_if(
+            long_filter && !sampler.sample_indexed,
+            "the long filter requires indexed sampling ('-I')"
+        );
 
         if (splitter_sequential) {
             return SplitterSorter::Sequential;
@@ -97,6 +107,8 @@ struct CommonArgs {
             return SplitterSorter::RQuickV1;
         } else if (rquick_lcp) {
             return SplitterSorter::RQuickLcp;
+        } else if (long_filter) {
+            return SplitterSorter::RQuickLongFilter;
         } else {
             return SplitterSorter::RQuickV2;
         }
@@ -274,6 +286,11 @@ inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
     );
     cp.add_flag('Q', "rquick-v1", args.rquick_v1, "use version 1 of RQuick (defaults to v2)");
     cp.add_flag('L', "rquick-lcp", args.rquick_lcp, "use LCP values in RQuick (only with v2)");
+    cp.add_flag(
+        "long-filter",
+        args.long_filter,
+        "sort the splitter sample with the long-string filter (RQuick v2, indexed only)"
+    );
     cp.add_flag("splitter-sequential", args.splitter_sequential, "use sequential splitter sorting");
     cp.add_flag(
         'l',

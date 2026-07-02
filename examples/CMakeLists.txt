@@ -35,3 +35,12 @@ target_link_libraries(sort_strings_rquick_indexed_example
     MPI::MPI_CXX
     kamping::spdlog-adapter
 )
+
+add_executable(test_long_filter_equivalence test_long_filter_equivalence.cpp)
+
+target_compile_options(test_long_filter_equivalence PRIVATE ${DSS_MEHNERT_WARNING_FLAGS})
+target_link_libraries(test_long_filter_equivalence
+  PRIVATE
+    dss::dss
+    kamping::kamping
+    MPI::MPI_CXX)

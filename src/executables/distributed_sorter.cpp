@@ -516,6 +516,7 @@ int main(int argc, char* argv[]) {
 
         config["rquick-v1"] = args.rquick_v1;
         config["rquick-lcp"] = args.rquick_lcp;
+        config["long-filter"] = args.long_filter;
         config["prefix-doubling"] = args.prefix_doubling;
         config["grid-bloomfilter"] = args.grid_bloomfilter;
         config["lcp-compression"] = args.lcp_compression;

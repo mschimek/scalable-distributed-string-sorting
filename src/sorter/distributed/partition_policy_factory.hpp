@@ -14,6 +14,7 @@
 #include "mpi/communicator.hpp"
 #include "options.hpp"
 #include "sorter/distributed/partition.hpp"
+#include "sorter/distributed/partition_long_filter.hpp"
 #include "sorter/distributed/prefix_doubling.hpp"
 #include "sorter/distributed/redistribution.hpp"
 #include "sorter/distributed/sample.hpp"
@@ -21,7 +22,7 @@
 
 namespace dss_mehnert {
 
-enum class SplitterSorter { RQuickV1, RQuickV2, RQuickLcp, Sequential };
+enum class SplitterSorter { RQuickV1, RQuickV2, RQuickLcp, RQuickLongFilter, Sequential };
 
 struct SamplerArgs {
     bool sample_chars = false;
@@ -213,6 +214,21 @@ init_partition_policy(SamplerArgs const& sampler, SplitterSorter splitter_sorter
                     return dispatch_policy.template operator()<PartitionPolicy>();
                 } else {
                     die_with_feature("CLI_ENABLE_RQUICK_LCP");
+                }
+            }
+            case SplitterSorter::RQuickLongFilter: {
+                if constexpr (CliOptions::enable_rquick_long_filter) {
+                    // the long filter overloads the Index slot with per-long
+                    // ranks, so it requires indexed sampling (Increment 1/2)
+                    if constexpr (indexed) {
+                        using SplitterPolicy = RQuickV2LongFilter<Char, indexed, false>;
+                        using PartitionPolicy = PartitionPolicy<SamplePolicy, SplitterPolicy>;
+                        return dispatch_policy.template operator()<PartitionPolicy>();
+                    } else {
+                        tlx_die("the RQuick long filter requires indexed sampling ('-I')");
+                    }
+                } else {
+                    die_with_feature("CLI_ENABLE_RQUICK_LONG_FILTER");
                 }
             }
             case SplitterSorter::Sequential: {

@@ -96,6 +96,7 @@ option(CLI_ENABLE_REDISTRIBUTION "enable support for redistribution strategies" 
 option(CLI_ENABLE_ALLTOALL "enable support for different AllToAll routines" Off)
 option(CLI_ENABLE_RQUICK_V1 "enable version of RQuick" Off)
 option(CLI_ENABLE_RQUICK_LCP "enable RQuick using LCP values" On)
+option(CLI_ENABLE_RQUICK_LONG_FILTER "enable RQuick splitter sort with the long-string filter" On)
 option(CLI_ENABLE_ALL "enable all optional command line features" Off)
 
 if(CLI_ENABLE_ALL)
@@ -104,6 +105,7 @@ if(CLI_ENABLE_ALL)
   set(CLI_ENABLE_ALLTOALL On)
   set(CLI_ENABLE_RQUICK_V1 On)
   set(CLI_ENABLE_RQUICK_LCP On)
+  set(CLI_ENABLE_RQUICK_LONG_FILTER On)
 endif()
 
 message(STATUS "Prefix Doubling Enabled: ${CLI_ENABLE_PREFIX_DOUBLING}")
@@ -111,6 +113,7 @@ message(STATUS "Redistribution Strategies Enabled: ${CLI_ENABLE_REDISTRIBUTION}"
 message(STATUS "All-To-All Routines Enabled: ${CLI_ENABLE_ALLTOALL}")
 message(STATUS "RQuick Version 1 Enabled: ${CLI_ENABLE_RQUICK_V1}")
 message(STATUS "RQuick With LCP Enabled: ${CLI_ENABLE_RQUICK_LCP}")
+message(STATUS "RQuick Long Filter Enabled: ${CLI_ENABLE_RQUICK_LONG_FILTER}")
 
 option(USE_SHARED_MEMORY_SORT "sort using a shared memory string sorting algorithm" Off)
 message(STATUS "Shared Memory Enabled: ${USE_SHARED_MEMORY_SORT}")
