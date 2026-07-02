@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <numeric>
 #include <random>
 #include <type_traits>
 #include <unordered_map>
@@ -14,9 +13,7 @@
 
 #include <kamping/collectives/allgather.hpp>
 #include <kamping/collectives/allreduce.hpp>
-#include <kamping/collectives/alltoall.hpp>
 #include <kamping/collectives/exscan.hpp>
-#include <kamping/data_buffer.hpp>
 #include <kamping/measurements/counter.hpp>
 #include <kamping/measurements/timer.hpp>
 #include <kamping/mpi_ops.hpp>
@@ -28,100 +25,12 @@
 #include "sorter/distributed/misc.hpp"
 #include "sorter/distributed/partition.hpp"
 #include "sorter/distributed/sample.hpp"
+#include "sorter/distributed/sample_redistribution.hpp"
 #include "strings/stringcontainer.hpp"
 #include "util/measuringTool.hpp"
 
 namespace dss_mehnert {
 namespace partition {
-namespace _internal {
-
-// Pseudorandomly redistributes an indexed sample across the PEs with a single
-// pair of alltoallv exchanges (chars + indices). Each sampled string is sent to
-// a uniformly random destination PE; the (chars, input id) pairing is preserved,
-// so the global multiset of sample strings -- and hence every downstream result
-// -- is unchanged, only its distribution over PEs is balanced. This keeps
-// RQuick's per-string-count balancing from being skewed by PEs that happen to
-// sample unusually long (or unusually many) strings.
-template <typename Char>
-sample::SampleResult<Char, true> redistribute_sample_random(
-    sample::SampleResult<Char, true>&& sample, uint64_t const seed, Communicator const& comm
-) {
-    using Sample = sample::SampleResult<Char, true>;
-
-    int const p = static_cast<int>(comm.size());
-    if (p <= 1) {
-        return std::move(sample);
-    }
-
-    size_t const num_strings = sample.indices.size();
-    std::mt19937_64 gen{seed + comm.rank()};
-    std::uniform_int_distribution<int> pe_dist{0, p - 1};
-
-    // pass 1: pick a uniformly random destination for each string and count the
-    // chars (incl. terminator) and strings destined for each PE.
-    std::vector<int> targets(num_strings);
-    std::vector<int> char_counts(p, 0), str_counts(p, 0);
-    {
-        size_t pos = 0;
-        for (size_t i = 0; i != num_strings; ++i) {
-            size_t const begin = pos;
-            while (sample.sample[pos] != Char{0}) {
-                ++pos;
-            }
-            ++pos; // include terminator
-            int const t = pe_dist(gen);
-            targets[i] = t;
-            char_counts[t] += static_cast<int>(pos - begin);
-            ++str_counts[t];
-        }
-    }
-
-    std::vector<int> char_displs(p), str_displs(p);
-    std::exclusive_scan(char_counts.begin(), char_counts.end(), char_displs.begin(), 0);
-    std::exclusive_scan(str_counts.begin(), str_counts.end(), str_displs.begin(), 0);
-
-    // pass 2: group chars and indices by destination, keeping a string's chars
-    // and its index in the same relative order so the two exchanges stay aligned.
-    std::vector<Char> send_chars(sample.sample.size());
-    std::vector<uint64_t> send_indices(num_strings);
-    std::vector<int> char_pos = char_displs, str_pos = str_displs;
-    {
-        size_t pos = 0;
-        for (size_t i = 0; i != num_strings; ++i) {
-            size_t const begin = pos;
-            while (sample.sample[pos] != Char{0}) {
-                ++pos;
-            }
-            ++pos; // include terminator
-            int const t = targets[i];
-            std::copy(
-                sample.sample.begin() + begin,
-                sample.sample.begin() + pos,
-                send_chars.begin() + char_pos[t]
-            );
-            char_pos[t] += static_cast<int>(pos - begin);
-            send_indices[str_pos[t]++] = sample.indices[i];
-        }
-    }
-
-    // two alltoallv exchanges: chars keyed by per-PE char counts, indices by
-    // per-PE string counts. The receive counts are derived by kamping.
-    Sample result;
-    result.local_offset = sample.local_offset;
-    comm.alltoallv(
-        kamping::send_buf(send_chars),
-        kamping::send_counts(char_counts),
-        kamping::recv_buf<kamping::BufferResizePolicy::resize_to_fit>(result.sample)
-    );
-    comm.alltoallv(
-        kamping::send_buf(send_indices),
-        kamping::send_counts(str_counts),
-        kamping::recv_buf<kamping::BufferResizePolicy::resize_to_fit>(result.indices)
-    );
-    return result;
-}
-
-} // namespace _internal
 
 // Splitter policy that filters "long" strings out of the splitter sample before
 // sorting it (see PLAN_long_splitter_filter.md). Char-based sampling can place a
@@ -207,18 +116,9 @@ public:
 
         // prior to any sorting, pseudorandomly permute the sample across the PEs
         // so RQuick's per-string-count balancing starts from a balanced sample
-        // (a PE that sampled a few very long strings would otherwise stay skewed)
-        kamping::measurements::timer().start("redistribute_sample");
-        sample = _internal::redistribute_sample_random(std::move(sample), redistribute_seed, comm);
-        kamping::measurements::timer().stop_and_append();
-
-        // report the sample distribution after redistribution (min/max show how
-        // much more balanced it is than the sample_num_* counters above)
-        auto const redist_num_strings = static_cast<std::int64_t>(sample.indices.size());
-        auto const redist_num_chars =
-            static_cast<std::int64_t>(sample.sample.size()) - redist_num_strings;
-        kamping::measurements::counter().add("redist_sample_num_strings", redist_num_strings, agg);
-        kamping::measurements::counter().add("redist_sample_num_chars", redist_num_chars, agg);
+        // (a PE that sampled a few very long strings would otherwise stay skewed).
+        // qualified because the 'sample' parameter shadows the sample namespace.
+        sample = dss_mehnert::sample::redistribute_random_timed(std::move(sample), comm);
 
         // pass 1: count local long strings to decide on the fast path
         size_t local_long_count = 0;
@@ -346,7 +246,6 @@ private:
     static constexpr int tag_round1 = 29017;
     static constexpr int tag_round2 = 29117;
     static constexpr uint64_t seed = 3469931;
-    static constexpr uint64_t redistribute_seed = 0x9E3779B97F4A7C15ull;
 
     double long_threshold_factor_ = 5.0;
 

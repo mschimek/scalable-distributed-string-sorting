@@ -22,6 +22,7 @@
 #include "sorter/RQuick2/Util.hpp"
 #include "sorter/distributed/misc.hpp"
 #include "sorter/distributed/sample.hpp"
+#include "sorter/distributed/sample_redistribution.hpp"
 #include "strings/stringcontainer.hpp"
 #include "util/measuringTool.hpp"
 
@@ -144,6 +145,10 @@ private:
     using Sample = sample::SampleResult<Char, is_indexed>;
 
     static StringContainer<StringSet> sort_samples(Sample&& sample, Communicator const& comm) {
+        // balance the sample across PEs before RQuick (which balances by string
+        // count, not characters) sorts it
+        sample = dss_mehnert::sample::redistribute_random_timed(std::move(sample), comm);
+
         RQuick2::Comparator<StringPtr> const comp;
         std::mt19937_64 gen{seed + comm.rank()};
         auto const comm_mpi = comm.mpi_communicator();
@@ -179,6 +184,10 @@ private:
     using Sample = sample::SampleResult<Char, is_indexed>;
 
     static RQuick2::Container<StringPtr> sort_samples(Sample&& sample, Communicator const& comm) {
+        // balance the sample across PEs before RQuick (which balances by string
+        // count, not characters) sorts it
+        sample = dss_mehnert::sample::redistribute_random_timed(std::move(sample), comm);
+
         std::mt19937_64 gen{seed + comm.rank()};
         auto const comm_mpi = comm.mpi_communicator();
 
