@@ -16,6 +16,7 @@
 #include <kamping/collectives/barrier.hpp>
 #include <kamping/communicator.hpp>
 #include <kamping/environment.hpp>
+#include <kamping/measurements/counter.hpp>
 #include <kamping/measurements/timer.hpp>
 #include <tlx/cmdline_parser.hpp>
 #include <tlx/die.hpp>
@@ -130,6 +131,19 @@ auto generate_strings(SorterArgs const& args, dss_mehnert::Communicator const& c
     auto const num_gen_strs = input_container.size();
     measuring_tool.add(num_gen_chars - num_gen_strs, "input_chars");
     measuring_tool.add(num_gen_strs, "input_strings");
+
+    using kamping::measurements::GlobalAggregationMode;
+    std::vector<GlobalAggregationMode> const agg{
+        GlobalAggregationMode::min,
+        GlobalAggregationMode::max,
+        GlobalAggregationMode::sum,
+    };
+    kamping::measurements::counter().add(
+        "input_chars", static_cast<std::int64_t>(num_gen_chars - num_gen_strs), agg
+    );
+    kamping::measurements::counter().add(
+        "input_strings", static_cast<std::int64_t>(num_gen_strs), agg
+    );
 
     return input_container;
 }
