@@ -18,6 +18,7 @@
 #include <vector>
 
 #include <ips4o.hpp>
+#include <kamping/collectives/allreduce.hpp>
 #include <kamping/collectives/exscan.hpp>
 #include <kamping/named_parameters.hpp>
 #include <tlx/die.hpp>
@@ -31,6 +32,22 @@ inline size_t get_sample_size(
     size_t const local_size, size_t const num_partitions, size_t const sampling_factor
 ) {
     return std::min(sampling_factor * (num_partitions - 1), local_size);
+}
+
+// Oversampling for the randomized samplers: draw sampling_factor * log2(n)
+// splitters per PE (with replacement), where n is the *global* number of strings
+// for string-based sampling and the *global* number of characters for
+// character-based sampling. Unlike the deterministic sampler, the count does not
+// depend on num_partitions -- it is the classic log(n) oversampling that keeps
+// buckets balanced with high probability.
+inline size_t get_random_sample_size(
+    size_t const global_size, size_t const sampling_factor, size_t const local_size
+) {
+    if (local_size == 0) {
+        return 0; // nothing to sample from on this PE
+    }
+    double const log_n = std::log2(std::max<double>(2.0, static_cast<double>(global_size)));
+    return std::max<size_t>(1, static_cast<size_t>(sampling_factor * log_n));
 }
 
 inline size_t get_local_offset(size_t const local_size, Communicator const& comm) {
@@ -206,7 +223,15 @@ public:
         ExtraArg const arg,
         Communicator const& comm
     ) const {
-        size_t const sample_size = get_sample_size(ss.size(), num_partitions, sampling_factor_);
+        size_t sample_size;
+        if constexpr (is_random) {
+            // n = global number of strings
+            size_t const global_strings =
+                comm.allreduce_single(kamping::send_buf(ss.size()), kamping::op(std::plus<>{}));
+            sample_size = get_random_sample_size(global_strings, sampling_factor_, ss.size());
+        } else {
+            sample_size = get_sample_size(ss.size(), num_partitions, sampling_factor_);
+        }
 
         _internal::StringIndexSampler<is_random> sampler{ss.size(), sample_size};
 
@@ -259,7 +284,15 @@ public:
         Communicator const& comm
     ) const {
         size_t const num_chars = accumulate_chars(ss, arg);
-        size_t const sample_size = get_sample_size(ss.size(), num_partitions, sampling_factor_);
+        size_t sample_size;
+        if constexpr (is_random) {
+            // n = global number of characters
+            size_t const global_chars =
+                comm.allreduce_single(kamping::send_buf(num_chars), kamping::op(std::plus<>{}));
+            sample_size = get_random_sample_size(global_chars, sampling_factor_, ss.size());
+        } else {
+            sample_size = get_sample_size(ss.size(), num_partitions, sampling_factor_);
+        }
 
         _internal::CharIndexSampler<is_random> sampler{num_chars, sample_size};
 
