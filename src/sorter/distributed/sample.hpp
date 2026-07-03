@@ -130,7 +130,7 @@ class StringIndexSampler<false> {
 public:
     StringIndexSampler() = delete;
 
-    StringIndexSampler(size_t const strings, size_t const samples)
+    StringIndexSampler(size_t const strings, size_t const samples, size_t /*seed*/ = 0)
         : sample_dist_{static_cast<double>(strings) / static_cast<double>(samples + 1)} {}
 
     size_t get_sample(size_t const index) {
@@ -146,8 +146,10 @@ class StringIndexSampler<true> {
 public:
     StringIndexSampler() = delete;
 
-    StringIndexSampler(size_t const strings, size_t)
-        : gen_{}, // todo what to do about seed here?
+    // the generator is seeded with the PE's rank so each PE draws an independent
+    // sample rather than the same sequence everywhere
+    StringIndexSampler(size_t const strings, size_t, size_t const seed)
+        : gen_{seed},
           dist_{0, std::max<size_t>(1, strings) - 1} {}
 
     size_t get_sample(size_t) { return dist_(gen_); }
@@ -165,7 +167,7 @@ class CharIndexSampler<false> {
 public:
     CharIndexSampler() = delete;
 
-    CharIndexSampler(size_t const num_chars, size_t const num_samples)
+    CharIndexSampler(size_t const num_chars, size_t const num_samples, size_t /*seed*/ = 0)
         : sample_dist_{num_chars / (num_samples + 1)},
           current_boundary_{0} {}
 
@@ -183,12 +185,16 @@ class CharIndexSampler<true> {
 public:
     CharIndexSampler() = delete;
 
-    CharIndexSampler(size_t const num_chars, size_t const num_samples)
+    // the generator is seeded with the PE's rank so each PE draws an independent
+    // sample rather than the same sequence everywhere
+    CharIndexSampler(size_t const num_chars, size_t const num_samples, size_t const seed)
         : sample_(num_samples),
           current_{0} {
-        // todo again, what about seed here
-        std::mt19937_64 gen;
-        std::uniform_int_distribution<size_t> dist{0, std::max<size_t>(1, num_chars) - 1};
+        // boundaries are drawn in [1, num_chars] (a 1-based character position):
+        // a boundary of 0 would leave `string` at ss.begin() in the consumer loop
+        // and make it read ss[string - 1] (out of bounds), so 0 must be excluded.
+        std::mt19937_64 gen{seed};
+        std::uniform_int_distribution<size_t> dist{1, std::max<size_t>(1, num_chars)};
         std::generate(sample_.begin(), sample_.end(), [&] { return dist(gen); });
         ips4o::sort(sample_.begin(), sample_.end());
     }
@@ -233,7 +239,7 @@ public:
             sample_size = get_sample_size(ss.size(), num_partitions, sampling_factor_);
         }
 
-        _internal::StringIndexSampler<is_random> sampler{ss.size(), sample_size};
+        _internal::StringIndexSampler<is_random> sampler{ss.size(), sample_size, comm.rank()};
 
         Result<StringSet> result;
         result.sample.reserve(sample_size * (100 + 1u)); // todo
@@ -294,7 +300,7 @@ public:
             sample_size = get_sample_size(ss.size(), num_partitions, sampling_factor_);
         }
 
-        _internal::CharIndexSampler<is_random> sampler{num_chars, sample_size};
+        _internal::CharIndexSampler<is_random> sampler{num_chars, sample_size, comm.rank()};
 
         Result<StringSet> result;
         result.sample.reserve((num_chars / std::max<size_t>(1, ss.size()) + 1) * sample_size);
