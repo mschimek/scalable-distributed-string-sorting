@@ -19,6 +19,8 @@
 #include <kamping/collectives/bcast.hpp>
 #include <kamping/collectives/gather.hpp>
 #include <kamping/communicator.hpp>
+#include <kamping/measurements/counter.hpp>
+#include <kamping/measurements/timer.hpp>
 #include <kamping/named_parameters.hpp>
 #include <tlx/algorithm/multiway_merge.hpp>
 #include <tlx/die.hpp>
@@ -35,6 +37,13 @@ namespace dss_mehnert {
 namespace bloomfilter {
 
 using hash_t = xxh::hash_t<64>;
+
+//! aggregation modes used when mirroring MeasuringTool counters onto the kamping counter
+inline std::vector<kamping::measurements::GlobalAggregationMode> const kamping_agg{
+    kamping::measurements::GlobalAggregationMode::min,
+    kamping::measurements::GlobalAggregationMode::max,
+    kamping::measurements::GlobalAggregationMode::sum,
+};
 
 template <typename T>
 struct hash_less {
@@ -194,6 +203,7 @@ inline RecvData send_hash_values(
     assert_equal(offsets.back() + interval_sizes.back(), std::ssize(hashes));
 
     RecvData recv_data;
+    kamping::measurements::timer().start("bloomfilter_alltoall_hashes");
     comm.alltoall(
         kamping::send_buf(offsets),
         kamping::recv_buf<kamping::BufferResizePolicy::resize_to_fit>(recv_data.global_offsets)
@@ -206,6 +216,7 @@ inline RecvData send_hash_values(
         kamping::recv_counts_out<kamping::BufferResizePolicy::resize_to_fit>(recv_data.interval_sizes),
         kamping::recv_displs_out<kamping::BufferResizePolicy::resize_to_fit>(recv_data.local_offsets)
     );
+    kamping::measurements::timer().stop_and_append();
     return recv_data;
 }
 
@@ -316,12 +327,19 @@ public:
 
         for (size_t i = start_depth * 2; i < std::numeric_limits<size_t>::max(); i *= 2) {
             measuring_tool_.add(candidates.size(), "bloomfilter_num_candidates");
+            kamping::measurements::counter().append(
+                "bloomfilter_num_candidates",
+                static_cast<std::int64_t>(candidates.size()),
+                kamping_agg
+            );
             measuring_tool_.start("bloomfilter_allreduce");
+            kamping::measurements::timer().start("bloomfilter_allreduce");
             auto const all_empty = comms.comm_root().allreduce_single(
                 kamping::send_buf(candidates.empty()),
                 kamping::op(std::logical_and<>{})
             );
             measuring_tool_.stop("bloomfilter_allreduce");
+            kamping::measurements::timer().stop_and_append();
 
             if (all_empty) {
                 break;
@@ -345,35 +363,47 @@ public:
         auto const& ss = strptr.active();
 
         measuring_tool_.start("bloomfilter_generate_hash_pairs");
+        kamping::measurements::timer().start("bloomfilter_generate_hash_pairs");
         auto hash_pairs = generate_hash_pairs(ss, candidates..., depth, strptr.lcp());
         auto& hash_idx_pairs = hash_pairs.hash_idx_pairs;
         measuring_tool_.stop("bloomfilter_generate_hash_pairs");
+        kamping::measurements::timer().stop_and_append();
 
         measuring_tool_.start("bloomfilter_sort_local_hashes");
+        kamping::measurements::timer().start("bloomfilter_sort_local_hashes");
         ips4o::sort(hash_idx_pairs.begin(), hash_idx_pairs.end(), hash_less<HashStringIndex>{});
         measuring_tool_.stop("bloomfilter_sort_local_hashes");
+        kamping::measurements::timer().stop_and_append();
 
         measuring_tool_.start("bloomfilter_find_local_duplicates");
+        kamping::measurements::timer().start("bloomfilter_find_local_duplicates");
         auto local_hash_dups = get_local_duplicates(hash_idx_pairs);
         std::erase_if(hash_idx_pairs, std::not_fn(should_send));
         measuring_tool_.stop("bloomfilter_find_local_duplicates");
+        kamping::measurements::timer().stop_and_append();
 
         measuring_tool_.start("bloomfilter_find_remote_duplicates");
+        kamping::measurements::timer().start("bloomfilter_find_remote_duplicates");
         HashRange const hash_range{0, std::numeric_limits<hash_t>::max()};
         auto const remote_dups = static_cast<Derived&>(*this)
                                      .find_remote_duplicates(hash_idx_pairs, hash_range)
                                      .value_or(std::vector<int>{});
         measuring_tool_.stop("bloomfilter_find_remote_duplicates");
+        kamping::measurements::timer().stop_and_append();
 
         measuring_tool_.start("bloomfilter_merge_duplicates");
+        kamping::measurements::timer().start("bloomfilter_merge_duplicates");
         auto& lcp_dups = hash_pairs.lcp_duplicates;
         auto pruned_dups = prune_remote_duplicates(remote_dups, hash_idx_pairs);
         auto const final_duplicates = merge_duplicates(local_hash_dups, lcp_dups, pruned_dups);
         measuring_tool_.stop("bloomfilter_merge_duplicates");
+        kamping::measurements::timer().stop_and_append();
 
         measuring_tool_.start("bloomfilter_write_depth");
+        kamping::measurements::timer().start("bloomfilter_write_depth");
         set_depth(ss, depth, candidates..., hash_pairs.eos_candidates, results);
         measuring_tool_.stop("bloomfilter_write_depth");
+        kamping::measurements::timer().stop_and_append();
 
         return final_duplicates;
     }
@@ -603,6 +633,7 @@ private:
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
         measuring_tool.start("bloomfilter_send_hashes");
+        kamping::measurements::timer().start("bloomfilter_send_hashes");
         auto hash_values = _internal::extract_hash_values(hash_str_pairs);
         auto recv_data = _internal::send_hash_values(hash_values, hash_range, comm_);
         auto hash_rank_pairs = _internal::merge_intervals(
@@ -611,18 +642,32 @@ private:
             recv_data.interval_sizes
         );
         measuring_tool.add(hash_rank_pairs.size(), "bloomfilter_recv_hash_values");
+        kamping::measurements::counter().append(
+            "bloomfilter_recv_hash_values",
+            static_cast<std::int64_t>(hash_rank_pairs.size()),
+            kamping_agg
+        );
         measuring_tool.stop("bloomfilter_send_hashes");
+        kamping::measurements::timer().stop_and_append();
 
         measuring_tool.start("bloomfilter_compute_remote_duplicates");
+        kamping::measurements::timer().start("bloomfilter_compute_remote_duplicates");
         auto result = _internal::compute_duplicates(
             hash_rank_pairs,
             recv_data.interval_sizes,
             recv_data.global_offsets
         );
         measuring_tool.add(result.duplicates.size(), "bloomfilter_remote_duplicates");
+        kamping::measurements::counter().append(
+            "bloomfilter_remote_duplicates",
+            static_cast<std::int64_t>(result.duplicates.size()),
+            kamping_agg
+        );
         measuring_tool.stop("bloomfilter_compute_remote_duplicates");
+        kamping::measurements::timer().stop_and_append();
 
         measuring_tool.start("bloomfilter_send_indices");
+        kamping::measurements::timer().start("bloomfilter_send_indices");
         auto remote_dups = _internal::send_duplicates(
             result.duplicates,
             result.send_counts,
@@ -631,6 +676,7 @@ private:
             comm_
         );
         measuring_tool.stop("bloomfilter_send_indices");
+        kamping::measurements::timer().stop_and_append();
 
         return remote_dups;
     }
@@ -659,6 +705,7 @@ private:
     ) {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
         measuring_tool.start("bloomfilter_send_hashes");
+        kamping::measurements::timer().start("bloomfilter_send_hashes");
         auto duplicates = find_remote_duplicates_(
             comm_grid_.comms.begin(),
             comm_grid_.comms.end(),
@@ -666,6 +713,7 @@ private:
             hash_range
         );
         measuring_tool.stop("bloomfilter_send_indices");
+        kamping::measurements::timer().stop_and_append();
 
         return duplicates;
     }
@@ -692,18 +740,32 @@ private:
 
         if (comm_first + 1 == comm_last) {
             measuring_tool.add(hash_rank_pairs.size(), "bloomfilter_recv_hash_values");
+            kamping::measurements::counter().append(
+                "bloomfilter_recv_hash_values",
+                static_cast<std::int64_t>(hash_rank_pairs.size()),
+                kamping_agg
+            );
             measuring_tool.stop("bloomfilter_send_hashes");
+            kamping::measurements::timer().stop_and_append();
 
             measuring_tool.start("bloomfilter_compute_remote_duplicates");
+            kamping::measurements::timer().start("bloomfilter_compute_remote_duplicates");
             auto result = _internal::compute_duplicates(
                 hash_rank_pairs,
                 recv_data.interval_sizes,
                 recv_data.global_offsets
             );
             measuring_tool.add(result.duplicates.size(), "bloomfilter_remote_duplicates");
+            kamping::measurements::counter().append(
+                "bloomfilter_remote_duplicates",
+                static_cast<std::int64_t>(result.duplicates.size()),
+                kamping_agg
+            );
             measuring_tool.stop("bloomfilter_compute_remote_duplicates");
+            kamping::measurements::timer().stop_and_append();
 
             measuring_tool.start("bloomfilter_send_indices");
+            kamping::measurements::timer().start("bloomfilter_send_indices");
             return _internal::send_duplicates(
                 result.duplicates,
                 result.send_counts,
@@ -750,11 +812,13 @@ private:
             remote_idxs[offsets[rank]++] = counters[rank];
         }
 
+        kamping::measurements::timer().start("bloomfilter_alltoall_indices");
         auto result = comm.alltoallv(
             kamping::send_buf(remote_idxs),
             kamping::send_counts(send_counts),
             kamping::send_displs(send_displs)
         );
+        kamping::measurements::timer().stop_and_append();
         return result;
     }
 };
