@@ -118,11 +118,12 @@ public:
         size_t const global_strings,
         size_t const length,
         double const dn_ratio,
-        Communicator const& comm
+        Communicator const& comm,
+        bool const encode_padding = false
     ) {
         std::mt19937_64 gen{comm.rank()};
 
-        this->update(get_raw_strings(global_strings, length, dn_ratio, gen, comm));
+        this->update(get_raw_strings(global_strings, length, dn_ratio, encode_padding, gen, comm));
         std::shuffle(this->get_strings().begin(), this->get_strings().end(), gen);
         this->make_contiguous();
     }
@@ -133,19 +134,37 @@ private:
     static constexpr CharType char_min = 'A', char_max = 'Z';
     static constexpr size_t char_range = char_max - char_min + 1;
 
+    // Number of consecutive string ids that share the same leading blocks
+    // when `encode_padding` is enabled: strings x with the same value of x /
+    // padding_group get an identical distinguishing prefix except for the
+    // final id block, so they collide during the bloom filter's duplicate
+    // detection while their distinguishing prefix length stays the same.
+    static constexpr size_t padding_group = 3;
+
+    // Encode `value` in base-`char_range`, right-aligned, ending just before
+    // `end` (least significant digit at `end - 1`). Positions that are not
+    // written must already contain the padding character (`char_min`).
+    template <typename It>
+    static void encode_number(It end, size_t value) {
+        for (; value != 0; value /= char_range) {
+            *(--end) = char_min + (value % char_range);
+        }
+    }
+
     static std::vector<CharType> get_raw_strings(
         size_t const global_strings,
         size_t const req_length,
         double const dn_ratio,
+        bool const encode_padding,
         std::mt19937_64& gen,
         Communicator const& comm
     ) {
         auto const local_strings = distribute_strings(global_strings, gen, comm);
 
-        size_t const k = std::max(
-            req_length * std::clamp(dn_ratio, 0.0, 1.0),
-            std::ceil(std::log(global_strings) / std::log(char_range))
-        );
+        // number of characters needed to encode any string id in base char_range
+        size_t const w =
+            std::max<size_t>(1, std::ceil(std::log(global_strings) / std::log(char_range)));
+        size_t const k = std::max<size_t>(req_length * std::clamp(dn_ratio, 0.0, 1.0), w);
         size_t const length = std::max(req_length, k);
 
         std::uniform_int_distribution<CharType> char_dist{char_min, char_max};
@@ -155,12 +174,37 @@ private:
         size_t const raw_size = local_strings.size() * (length + 1);
         std::vector<CharType> raw_strings(raw_size);
 
-        for (auto str_offset = raw_strings.begin(); size_t x: local_strings) {
-            std::fill_n(str_offset, k, char_dist.min());
-            std::fill_n(str_offset + k, length - k, rand_char);
+        // reusable buffer for the w-char id / (x / padding_group) block
+        std::vector<CharType> block(encode_padding ? w : 0);
 
-            for (auto it = str_offset + k; x != 0; x /= char_range) {
-                *(--it) = char_dist.min() + (x % char_range);
+        for (auto str_offset = raw_strings.begin(); size_t const x: local_strings) {
+            std::fill_n(str_offset, k, char_min);
+
+            if (encode_padding) {
+                // Tile the leading [0, k - w) region with repeated w-char blocks
+                // encoding x / padding_group, then place the unique id in the
+                // final block [k - w, k). `padding_group` consecutive ids share
+                // the leading blocks and only differ in the id block, so the
+                // distinguishing prefix length stays k, while different groups
+                // differ early and produce many distinct bloom filter hashes.
+                std::fill(block.begin(), block.end(), char_min);
+                encode_number(block.end(), x / padding_group);
+
+                // fill [0, k) with the block tiled right-aligned to k
+                for (auto e = str_offset + k; e != str_offset;) {
+                    auto const n = std::min<size_t>(w, e - str_offset);
+                    e -= n;
+                    std::copy(block.end() - n, block.end(), e);
+                }
+                // overwrite the final block with the unique string id
+                std::fill_n(str_offset + (k - w), w, char_min);
+                encode_number(str_offset + k, x);
+
+                std::fill_n(str_offset + k, length - k, rand_char);
+            } else {
+                // distinguishing prefix: encode the unique string id in [0, k)
+                encode_number(str_offset + k, x);
+                std::fill_n(str_offset + k, length - k, rand_char);
             }
             str_offset += length + 1;
         }

@@ -55,6 +55,7 @@ struct SorterArgs : public CommonArgs {
     size_t len_strings_max = len_strings + 10;
     std::string path;
     double dn_ratio = 0.5;
+    bool dn_encode_padding = false;
     size_t iteration = 0;
     bool strong_scaling = false;
     std::vector<size_t> levels;
@@ -95,7 +96,8 @@ auto generate_strings(SorterArgs const& args, dss_mehnert::Communicator const& c
                     args.scaled_strings(comm),
                     args.len_strings,
                     args.dn_ratio,
-                    comm
+                    comm,
+                    args.dn_encode_padding
                 };
             }
             case StringGenerator::file: {
@@ -415,6 +417,12 @@ int main(int argc, char* argv[]) {
         "path for the kamping timer JSON report (empty = disabled)"
     );
     cp.add_double('r', "DN-ratio", args.dn_ratio, "D/N ratio of generated strings");
+    cp.add_flag(
+        "dn-encode-padding",
+        args.dn_encode_padding,
+        "for DNGen, fill the padding with repeated blocks encoding (string-id / 3) instead of a "
+        "constant character; keeps the distinguishing prefix but varies the bloom filter hashes"
+    );
     cp.add_size_t('n', "num-strings", args.num_strings, "number of strings to be generated");
     cp.add_size_t('m', "len-strings", args.len_strings, "length of generated strings");
     cp.add_size_t(
@@ -491,6 +499,7 @@ int main(int argc, char* argv[]) {
         config["input"]["min-len-strings"] = args.len_strings_min;
         config["input"]["max-len-strings"] = args.len_strings_max;
         config["input"]["DN-ratio"] = args.dn_ratio;
+        config["input"]["dn-encode-padding"] = args.dn_encode_padding;
 
         config["num-iterations"] = args.num_iterations;
         config["permutation"] = args.permutation;
