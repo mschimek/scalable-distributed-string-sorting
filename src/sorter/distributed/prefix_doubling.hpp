@@ -72,14 +72,26 @@ public:
 
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
 
+    BasePrefixDoublingMergeSort(
+        PartitionPolicy partition,
+        RedistributionPolicy redistribution,
+        bool const bloomfilter_base_case
+    )
+        : Base{std::move(partition), std::move(redistribution)},
+          bloomfilter_base_case_{bloomfilter_base_case} {}
+
 protected:
+    // whether the bloom filter may use its allgather-based base case (see
+    // BloomFilter::filter); threaded down to the BloomFilter on construction
+    bool bloomfilter_base_case_ = false;
+
     template <typename StringPtr>
     std::vector<size_t> run_bloom_filter(
         StringPtr const& strptr, Subcommunicators const& comms, size_t const start_depth
     ) {
         this->measuring_tool_.start("bloomfilter", "bloomfilter_overall");
         kamping::measurements::timer().synchronize_and_start("bloomfilter_overall");
-        BloomFilter filter{comms, strptr.size()};
+        BloomFilter filter{comms, strptr.size(), bloomfilter_base_case_};
         auto const prefixes = filter.compute_distinguishing_prefixes(strptr, comms, start_depth);
         kamping::measurements::timer().stop_and_append();
         this->measuring_tool_.stop("bloomfilter", "bloomfilter_overall", comms.comm_root());

@@ -58,6 +58,7 @@ struct CommonArgs {
     bool lcp_compression = false;
     bool prefix_doubling = false;
     bool grid_bloomfilter = true;
+    bool bloomfilter_base_case = false;
     size_t num_iterations = 5;
     bool check_sorted = false;
     bool check_complete = false;
@@ -82,7 +83,8 @@ struct CommonArgs {
                + " lcp_compression="    + std::to_string(lcp_compression)
                + " prefix_compression=" + std::to_string(prefix_compression)
                + " prefix_doubling="    + std::to_string(prefix_doubling)
-               + " grid_bloomfilter="   + std::to_string(grid_bloomfilter);
+               + " grid_bloomfilter="   + std::to_string(grid_bloomfilter)
+               + " bloomfilter_base_case=" + std::to_string(bloomfilter_base_case);
         // clang-format on
     }
 
@@ -316,6 +318,12 @@ inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
         "grid-bloomfilter",
         args.grid_bloomfilter,
         "use gridwise bloom filter (requires prefix doubling) [default]"
+    );
+    cp.add_flag(
+        "bloomfilter-base-case",
+        args.bloomfilter_base_case,
+        "enable the allgather-based bloom filter base case when every PE holds "
+        "at most one hash value"
     );
     cp.add_size_t(
         'a',

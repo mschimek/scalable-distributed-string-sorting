@@ -316,7 +316,8 @@ void run_space_efficient_sort(
                     args.sampler,
                     args.get_splitter_sorter()
                 ),
-                std::move(redistribution)
+                std::move(redistribution),
+                args.bloomfilter_base_case
             });
         } else {
             // todo maybe add cmake flag for this

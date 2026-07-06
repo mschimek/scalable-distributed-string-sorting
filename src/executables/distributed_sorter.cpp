@@ -286,7 +286,8 @@ void run_prefix_doubling(
                 args.sampler,
                 args.get_splitter_sorter()
             ),
-            std::move(redistribution)
+            std::move(redistribution),
+            args.bloomfilter_base_case
         };
         auto permutation = merge_sort.sort(std::move(input_container), comms);
         kamping::measurements::timer().stop_and_append();
@@ -526,6 +527,7 @@ int main(int argc, char* argv[]) {
         config["sample-random"] = args.sampler.sample_random;
         config["sampling-factor"] = args.sampler.sampling_factor;
         config["splitter-length-factor"] = args.sampler.splitter_length_factor;
+        config["redistribute-sample"] = args.sampler.redistribute_sample;
         config["splitter-sequential"] = args.splitter_sequential;
 
         config["rquick-v1"] = args.rquick_v1;
@@ -533,6 +535,7 @@ int main(int argc, char* argv[]) {
         config["long-filter"] = args.long_filter;
         config["prefix-doubling"] = args.prefix_doubling;
         config["grid-bloomfilter"] = args.grid_bloomfilter;
+        config["bloomfilter-base-case"] = args.bloomfilter_base_case;
         config["lcp-compression"] = args.lcp_compression;
         config["prefix-compression"] = args.prefix_compression;
         config["alltoall"] = args.alltoall_routine;

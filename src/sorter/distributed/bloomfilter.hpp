@@ -10,10 +10,12 @@
 #include <iostream>
 #include <iterator>
 #include <numeric>
+#include <optional>
 #include <random>
 #include <type_traits>
 
 #include <ips4o.hpp>
+#include <kamping/collectives/allgather.hpp>
 #include <kamping/collectives/allreduce.hpp>
 #include <kamping/collectives/alltoall.hpp>
 #include <kamping/collectives/bcast.hpp>
@@ -302,6 +304,46 @@ inline std::optional<std::vector<int>> send_duplicates(
     }
 }
 
+// Base case for remote duplicate detection. When every PE holds at most one hash
+// value, the whole alltoall-based machinery collapses to a single allgather: the
+// (at most one) hash value of every PE is gathered onto all PEs, and each PE can
+// then decide locally whether its value also occurs on some other PE.
+//
+// Returns std::nullopt if the base case does not apply (some PE holds more than
+// one hash value), signalling the caller to fall back to the regular path.
+// Otherwise returns the indices into `hash_str_pairs` of the remote duplicates
+// (either empty or {0}, since there is at most one local hash value).
+inline std::optional<std::vector<int>> find_remote_duplicates_base_case(
+    std::vector<HashStringIndex> const& hash_str_pairs, Communicator const& comm
+) {
+    bool const at_most_one_local = hash_str_pairs.size() <= 1;
+    auto const base_case_applies = comm.allreduce_single(
+        kamping::send_buf(at_most_one_local),
+        kamping::op(std::logical_and<>{})
+    );
+    if (!base_case_applies) {
+        return std::nullopt;
+    }
+
+    // gather every PE's (at most one) hash value onto all PEs
+    std::vector<hash_t> local_hash;
+    if (!hash_str_pairs.empty()) {
+        local_hash.push_back(hash_str_pairs.front().hash_value);
+    }
+    auto const all_hashes = comm.allgatherv(kamping::send_buf(local_hash));
+
+    // a local hash value is a remote duplicate iff it occurs on another PE, i.e.
+    // more than once across all PEs (each PE contributes at most one value)
+    std::vector<int> duplicates;
+    if (!hash_str_pairs.empty()) {
+        auto const my_hash = hash_str_pairs.front().hash_value;
+        if (std::count(all_hashes.begin(), all_hashes.end(), my_hash) > 1) {
+            duplicates.push_back(0);
+        }
+    }
+    return duplicates;
+}
+
 } // namespace _internal
 
 
@@ -312,7 +354,9 @@ class BloomFilter {
     using GridCommunicator = multi_level::GridCommunicators<Communicator>;
 
 public:
-    explicit BloomFilter(size_t size) : hash_values_(reuse_hash_values ? size : 0) {}
+    BloomFilter(size_t size, bool const enable_base_case)
+        : hash_values_(reuse_hash_values ? size : 0),
+          enable_base_case_{enable_base_case} {}
 
     template <typename StringPtr, typename Subcommunicators>
     std::vector<size_t> compute_distinguishing_prefixes(
@@ -385,9 +429,23 @@ public:
         measuring_tool_.start("bloomfilter_find_remote_duplicates");
         kamping::measurements::timer().start("bloomfilter_find_remote_duplicates");
         HashRange const hash_range{0, std::numeric_limits<hash_t>::max()};
-        auto const remote_dups = static_cast<Derived&>(*this)
-                                     .find_remote_duplicates(hash_idx_pairs, hash_range)
-                                     .value_or(std::vector<int>{});
+        auto& derived = static_cast<Derived&>(*this);
+        // base case (opt-in): if globally every PE holds at most one hash value,
+        // replace the alltoall-based detection with a single allgather + local
+        // duplicate check
+        std::optional<std::vector<int>> remote_dups_opt;
+        if (enable_base_case_) {
+            measuring_tool_.start("bloomfilter_base_case");
+            kamping::measurements::timer().start("bloomfilter_base_case");
+            remote_dups_opt =
+                _internal::find_remote_duplicates_base_case(hash_idx_pairs, derived.comm_root());
+            measuring_tool_.stop("bloomfilter_base_case");
+            kamping::measurements::timer().stop_and_append();
+        }
+        if (!remote_dups_opt) {
+            remote_dups_opt = derived.find_remote_duplicates(hash_idx_pairs, hash_range);
+        }
+        auto const remote_dups = remote_dups_opt.value_or(std::vector<int>{});
         measuring_tool_.stop("bloomfilter_find_remote_duplicates");
         kamping::measurements::timer().stop_and_append();
 
@@ -412,6 +470,10 @@ protected:
     std::vector<hash_t> hash_values_;
 
 private:
+    // whether to short-circuit remote duplicate detection with the allgather-based
+    // base case when every PE holds at most one hash value (see filter())
+    bool enable_base_case_;
+
     using MeasuringTool = measurement::MeasuringTool;
     MeasuringTool& measuring_tool_ = MeasuringTool::measuringTool();
 
@@ -620,9 +682,11 @@ class SingleLevel
 
 public:
     template <typename Subcommunicators>
-    SingleLevel(Subcommunicators const& comms, size_t const size)
-        : BloomFilterBase{size},
+    SingleLevel(Subcommunicators const& comms, size_t const size, bool const enable_base_case)
+        : BloomFilterBase{size, enable_base_case},
           comm_(comms.comm_root()) {}
+
+    Communicator const& comm_root() const { return comm_; }
 
 private:
     Communicator const& comm_;
@@ -691,10 +755,12 @@ class MultiLevel
 
 public:
     template <typename Subcommunicators>
-    MultiLevel(Subcommunicators const& comms, size_t const size)
-        : BloomFilterBase{size},
+    MultiLevel(Subcommunicators const& comms, size_t const size, bool const enable_base_case)
+        : BloomFilterBase{size, enable_base_case},
           comm_root_{comms.comm_root()},
           comm_grid_{comms} {}
+
+    Communicator const& comm_root() const { return comm_root_; }
 
 private:
     Communicator const& comm_root_;
