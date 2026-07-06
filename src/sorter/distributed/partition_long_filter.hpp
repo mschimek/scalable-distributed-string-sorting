@@ -80,7 +80,8 @@ public:
         StringPtr const&,
         Sample&& sample,
         size_t const num_partitions,
-        Communicator const& comm
+        Communicator const& comm,
+        bool const redistribute_sample
     ) const {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
@@ -118,7 +119,9 @@ public:
         // so RQuick's per-string-count balancing starts from a balanced sample
         // (a PE that sampled a few very long strings would otherwise stay skewed).
         // qualified because the 'sample' parameter shadows the sample namespace.
-        sample = dss_mehnert::sample::redistribute_random_timed(std::move(sample), comm);
+        if (redistribute_sample) {
+            sample = dss_mehnert::sample::redistribute_random_timed(std::move(sample), comm);
+        }
 
         // pass 1: count local long strings to decide on the fast path
         size_t local_long_count = 0;

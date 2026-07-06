@@ -40,6 +40,10 @@ public:
 
     explicit PartitionPolicy(size_t const sampling_factor) : SamplePolicy{sampling_factor} {}
 
+    PartitionPolicy(size_t const sampling_factor, bool const redistribute_sample)
+        : SamplePolicy{sampling_factor},
+          redistribute_sample_{redistribute_sample} {}
+
     template <typename StringPtr, typename SamplerArg>
     std::vector<size_t> compute_partition(
         StringPtr const& strptr,
@@ -60,8 +64,9 @@ public:
         kamping::measurements::timer().stop_and_append();
         measuring_tool.stop("sample_strings");
 
-        auto chosen_splitters =
-            SplitterPolicy::select_splitters(strptr, std::move(sample), num_partitions, comm);
+        auto chosen_splitters = SplitterPolicy::select_splitters(
+            strptr, std::move(sample), num_partitions, comm, redistribute_sample_
+        );
 
         measuring_tool.start("compute_intervals");
         kamping::measurements::timer().start("compute_intervals");
@@ -82,6 +87,11 @@ public:
 
         return interval_sizes;
     }
+
+private:
+    // whether the splitter sample is pseudorandomly redistributed across the PEs
+    // before being sorted (see the sort_samples implementations)
+    bool redistribute_sample_ = false;
 };
 
 template <typename Char, bool is_indexed, typename Derived>
@@ -94,7 +104,8 @@ public:
         StringPtr const& strptr,
         Sample&& sample,
         size_t const num_partitions,
-        Communicator const& comm
+        Communicator const& comm,
+        bool const redistribute_sample
     ) {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
@@ -116,7 +127,7 @@ public:
 
         measuring_tool.start("sort_samples");
         kamping::measurements::timer().synchronize_and_start("sort_samples");
-        auto sorted_sample = Derived::sort_samples(std::move(sample), comm);
+        auto sorted_sample = Derived::sort_samples(std::move(sample), comm, redistribute_sample);
         kamping::measurements::timer().stop_and_append();
         measuring_tool.stop("sort_samples");
 
@@ -144,10 +155,13 @@ private:
     using StringPtr = tlx::sort_strings_detail::StringPtr<StringSet>;
     using Sample = sample::SampleResult<Char, is_indexed>;
 
-    static StringContainer<StringSet> sort_samples(Sample&& sample, Communicator const& comm) {
+    static StringContainer<StringSet>
+    sort_samples(Sample&& sample, Communicator const& comm, bool const redistribute_sample) {
         // balance the sample across PEs before RQuick (which balances by string
         // count, not characters) sorts it
-        sample = dss_mehnert::sample::redistribute_random_timed(std::move(sample), comm);
+        if (redistribute_sample) {
+            sample = dss_mehnert::sample::redistribute_random_timed(std::move(sample), comm);
+        }
 
         RQuick2::Comparator<StringPtr> const comp;
         std::mt19937_64 gen{seed + comm.rank()};
@@ -159,7 +173,10 @@ private:
         } else {
             data = {std::move(sample.sample), {}};
         }
-        return RQuick::sort(gen, std::move(data), MPI_BYTE, tag, comm_mpi, comp, is_robust);
+        kamping::measurements::timer().start("rquick_sort");
+        auto sorted = RQuick::sort(gen, std::move(data), MPI_BYTE, tag, comm_mpi, comp, is_robust);
+        kamping::measurements::timer().stop_and_append();
+        return sorted;
     }
 
     static StringContainer<StringSet>
@@ -183,10 +200,13 @@ private:
         tlx::sort_strings_detail::StringPtr<StringSet>>;
     using Sample = sample::SampleResult<Char, is_indexed>;
 
-    static RQuick2::Container<StringPtr> sort_samples(Sample&& sample, Communicator const& comm) {
+    static RQuick2::Container<StringPtr>
+    sort_samples(Sample&& sample, Communicator const& comm, bool const redistribute_sample) {
         // balance the sample across PEs before RQuick (which balances by string
         // count, not characters) sorts it
-        sample = dss_mehnert::sample::redistribute_random_timed(std::move(sample), comm);
+        if (redistribute_sample) {
+            sample = dss_mehnert::sample::redistribute_random_timed(std::move(sample), comm);
+        }
 
         std::mt19937_64 gen{seed + comm.rank()};
         auto const comm_mpi = comm.mpi_communicator();
@@ -196,7 +216,10 @@ private:
             data.indices = std::move(sample.indices);
         }
         // LCP array initialization is done by RQuick
-        return RQuick2::sort(std::move(data), tag, gen, comm_mpi);
+        kamping::measurements::timer().start("rquick_sort");
+        auto sorted = RQuick2::sort(std::move(data), tag, gen, comm_mpi);
+        kamping::measurements::timer().stop_and_append();
+        return sorted;
     }
 
     static StringContainer<StringSet>
@@ -213,7 +236,10 @@ private:
     using StringSet = SorterStringSet<Char, is_indexed>;
     using Sample = sample::SampleResult<Char, is_indexed>;
 
-    static StringLcpContainer<StringSet> sort_samples(Sample&& sample, Communicator const& comm) {
+    static StringLcpContainer<StringSet>
+    sort_samples(Sample&& sample, Communicator const& comm, bool const /*redistribute_sample*/) {
+        // the sequential sorter allgathers the whole sample, so there is nothing
+        // to rebalance beforehand -- the redistribute_sample flag does not apply
         auto recv_sample = comm.allgatherv(kamping::send_buf(sample.sample));
 
         StringLcpContainer<StringSet> global_samples;

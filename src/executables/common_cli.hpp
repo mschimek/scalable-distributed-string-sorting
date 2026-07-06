@@ -75,6 +75,7 @@ struct CommonArgs {
                + " sample_random="      + std::to_string(sampler.sample_random)
                + " sampling_factor="    + std::to_string(sampler.sampling_factor)
                + " splitter_length_factor=" + std::to_string(sampler.splitter_length_factor)
+               + " redistribute_sample=" + std::to_string(sampler.redistribute_sample)
                + " rquick_v1="          + std::to_string(rquick_v1)
                + " rquick_lcp="         + std::to_string(rquick_lcp)
                + " long_filter="        + std::to_string(long_filter)
@@ -283,6 +284,11 @@ inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
         "splitter-length-factor",
         args.sampler.splitter_length_factor,
         "maximum splitter length as a multiple of (avg_lcp + 5)"
+    );
+    cp.add_flag(
+        "redistribute-sample",
+        args.sampler.redistribute_sample,
+        "pseudorandomly redistribute the splitter sample across PEs before sorting it"
     );
     cp.add_flag('Q', "rquick-v1", args.rquick_v1, "use version 1 of RQuick (defaults to v2)");
     cp.add_flag('L', "rquick-lcp", args.rquick_lcp, "use LCP values in RQuick (only with v2)");

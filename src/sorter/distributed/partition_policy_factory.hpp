@@ -33,6 +33,9 @@ struct SamplerArgs {
     // a larger factor allows longer (more discriminating) splitters at the cost of
     // larger samples.
     size_t splitter_length_factor = 100;
+    // Pseudorandomly redistribute the splitter sample across the PEs before it is
+    // sorted, so RQuick's per-string-count balancing starts from a balanced sample.
+    bool redistribute_sample = false;
 };
 
 [[noreturn]] inline void die_with_feature(std::string_view feature) {
@@ -184,7 +187,8 @@ template <typename Char, typename PolymorphicPolicy>
 PolymorphicPolicy
 init_partition_policy(SamplerArgs const& sampler, SplitterSorter splitter_sorter) {
     auto dispatch_policy = [&]<typename PartitionPolicy> {
-        return PolymorphicPolicy{PartitionPolicy{sampler.sampling_factor}};
+        return PolymorphicPolicy{
+            PartitionPolicy{sampler.sampling_factor, sampler.redistribute_sample}};
     };
 
     auto dispatch_sorter = [&]<typename SamplePolicy> {
