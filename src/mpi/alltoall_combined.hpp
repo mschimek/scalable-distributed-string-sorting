@@ -19,13 +19,14 @@
 #include <kamping/plugin/plugin_helpers.hpp>
 #include <tlx/die/core.hpp>
 
+#include "mpi/alltoall_onefactor.hpp"
 #include "mpi/big_type.hpp"
 #include "util/measuringTool.hpp"
 
 namespace dss_mehnert {
 namespace mpi {
 
-enum class AlltoallvCombinedKind { combined, native, direct };
+enum class AlltoallvCombinedKind { combined, native, direct, one_factor };
 
 template <auto>
 inline constexpr bool always_false_v = false;
@@ -69,6 +70,8 @@ public:
             return alltoallv_native(send_buf, send_counts, recv_counts);
         } else if constexpr (kind == AlltoallvCombinedKind::direct) {
             return alltoallv_direct(send_buf, send_counts, recv_counts);
+        } else if constexpr (kind == AlltoallvCombinedKind::one_factor) {
+            return alltoallv_onefactor(this->to_communicator(), send_buf, send_counts, recv_counts);
         } else {
             []<AlltoallvCombinedKind type_ = kind> {
                 static_assert(always_false_v<type_>, "invalid alltoallv combined kind used");
