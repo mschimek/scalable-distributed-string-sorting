@@ -59,7 +59,7 @@ public:
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
         measuring_tool.start("sample_strings");
-        kamping::measurements::timer().start("sample_strings");
+        kamping::measurements::timer().synchronize_and_start("sample_strings");
         auto sample = SamplePolicy::sample_splitters(strptr.active(), num_partitions, arg, comm);
         kamping::measurements::timer().stop_and_append();
         measuring_tool.stop("sample_strings");
@@ -69,7 +69,7 @@ public:
         );
 
         measuring_tool.start("compute_intervals");
-        kamping::measurements::timer().start("compute_intervals");
+        kamping::measurements::timer().synchronize_and_start("compute_intervals");
         auto splitter_set = chosen_splitters.make_string_set();
         std::vector<size_t> interval_sizes;
         if constexpr (SamplePolicy::is_indexed) {
@@ -132,7 +132,7 @@ public:
         measuring_tool.stop("sort_samples");
 
         measuring_tool.start("choose_splitters");
-        kamping::measurements::timer().start("choose_splitters");
+        kamping::measurements::timer().synchronize_and_start("choose_splitters");
         auto sample_set = sorted_sample.make_string_set();
         auto chosen_splitters = Derived::choose_splitters(sample_set, num_partitions, comm);
         kamping::measurements::timer().stop_and_append();
@@ -173,7 +173,7 @@ private:
         } else {
             data = {std::move(sample.sample), {}};
         }
-        kamping::measurements::timer().start("rquick_sort");
+        kamping::measurements::timer().synchronize_and_start("rquick_sort");
         auto sorted = RQuick::sort(gen, std::move(data), MPI_BYTE, tag, comm_mpi, comp, is_robust);
         kamping::measurements::timer().stop_and_append();
         return sorted;
@@ -216,7 +216,7 @@ private:
             data.indices = std::move(sample.indices);
         }
         // LCP array initialization is done by RQuick
-        kamping::measurements::timer().start("rquick_sort");
+        kamping::measurements::timer().synchronize_and_start("rquick_sort");
         auto sorted = RQuick2::sort(std::move(data), tag, gen, comm_mpi);
         kamping::measurements::timer().stop_and_append();
         return sorted;

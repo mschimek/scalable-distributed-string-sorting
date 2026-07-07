@@ -89,14 +89,14 @@ StringContainer<StringSet> choose_splitters_distributed(
 ) {
     constexpr size_t length_guess = 256;
 
-    kamping::measurements::timer().start("compute-splitter-interval");
+    kamping::measurements::timer().synchronize_and_start("compute-splitter-interval");
     auto const splitter_interval =
         _internal::compute_splitter_interval(ss.size(), num_partitions, comm);
     std::vector<typename StringSet::Char> splitter_chars;
     splitter_chars.reserve(splitter_interval.size() * length_guess);
     kamping::measurements::timer().stop_and_append();
 
-    kamping::measurements::timer().start("compute-actual-splitters");
+    kamping::measurements::timer().synchronize_and_start("compute-actual-splitters");
     std::vector<uint64_t> splitter_idxs;
     if constexpr (StringSet::is_indexed) {
         splitter_idxs.reserve(splitter_interval.size());
@@ -120,19 +120,32 @@ StringContainer<StringSet> choose_splitters_distributed(
     kamping::measurements::timer().stop_and_append();
 
 
+    // record the per-PE splitter and splitter-character counts (min/max/sum over
+    // PEs) that go into the allgatherv below, so the collective's cost can be
+    // related to how much (and how skewed) the gathered data is
+    using kamping::measurements::GlobalAggregationMode;
+    std::vector<GlobalAggregationMode> const splitter_agg{
+        GlobalAggregationMode::min,
+        GlobalAggregationMode::max,
+        GlobalAggregationMode::sum,
+    };
+    kamping::measurements::counter().append(
+        "num_splitters", static_cast<std::int64_t>(splitter_interval.size()), splitter_agg
+    );
     kamping::measurements::counter().append(
         "num_splitter_characters",
-        static_cast<std::int64_t>(splitter_chars.size()), {kamping::measurements::GlobalAggregationMode::min,
-               kamping::measurements::GlobalAggregationMode::max,
-               kamping::measurements::GlobalAggregationMode::sum,
-            }
+        static_cast<std::int64_t>(splitter_chars.size()),
+        splitter_agg
     );
-    kamping::measurements::timer().start("allgatherv");
+    // synchronize before timing so the measured allgatherv cost reflects the
+    // collective itself rather than straggler/arrival skew from RQuick (used to
+    // disentangle MPI algorithm cost from desynchronization)
+    kamping::measurements::timer().synchronize_and_start("allgatherv");
     auto char_result = comm.allgatherv(kamping::send_buf(splitter_chars));
     kamping::measurements::timer().stop_and_append();
 
     if constexpr (StringSet::is_indexed) {
-        kamping::measurements::timer().start("allgatherv-indices");
+        kamping::measurements::timer().synchronize_and_start("allgatherv-indices");
         auto idx_result = comm.allgatherv(kamping::send_buf(splitter_idxs));
         kamping::measurements::timer().stop_and_append();
         return StringContainer<StringSet>{
