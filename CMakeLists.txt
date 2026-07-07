@@ -64,13 +64,20 @@ FetchContent_Declare(
   SYSTEM)
 
 FetchContent_Declare(
+  cli11
+  GIT_REPOSITORY https://github.com/CLIUtils/CLI11
+  GIT_TAG v2.5.0
+  GIT_SHALLOW ON
+  SYSTEM)
+
+FetchContent_Declare(
   kamping-nlohmann-json-adapter
   GIT_REPOSITORY https://github.com/kamping-site/kamping-nlohmann-json-adaptor
   GIT_TAG main
   GIT_SHALLOW ON)
 
 FetchContent_MakeAvailable(fmt spdlog kamping-spdlog-adapter nlohmann_json
-                           kamping-nlohmann-json-adapter)
+                           kamping-nlohmann-json-adapter cli11)
 
 FetchContent_Declare(
   kaval
@@ -204,6 +211,7 @@ target_link_libraries(distributed_sorter dss_base)
 target_link_libraries(distributed_sorter tlx)
 target_link_libraries(distributed_sorter nlohmann_json::nlohmann_json)
 target_link_libraries(distributed_sorter kamping::nlohmann-json-adapter)
+target_link_libraries(distributed_sorter CLI11::CLI11)
 
 add_executable(space_efficient_sorter
   src/executables/space_efficient_sorter.cpp
@@ -216,6 +224,7 @@ target_compile_options(space_efficient_sorter PRIVATE ${DSS_MEHNERT_WARNING_FLAG
 target_link_libraries(space_efficient_sorter kamping::kamping)
 target_link_libraries(space_efficient_sorter dss_base)
 target_link_libraries(space_efficient_sorter tlx)
+target_link_libraries(space_efficient_sorter CLI11::CLI11)
 
 if(DSS_BUILD_EXAMPLES)
   add_subdirectory(examples)

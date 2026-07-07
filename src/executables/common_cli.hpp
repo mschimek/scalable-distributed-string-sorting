@@ -10,6 +10,7 @@
 #include <type_traits>
 #include <utility>
 
+#include <CLI/CLI.hpp>
 #include <kamping/collectives/alltoall.hpp>
 #include <tlx/cmdline_parser.hpp>
 #include <tlx/die/core.hpp>
@@ -349,6 +350,108 @@ inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
         args.print_sorted,
         "gather the sorted strings on the root PE and print them (debug only)"
     );
+}
+
+// CLI11 equivalent of add_common_args. Kept in parallel with the tlx-based
+// add_common_args above so the two can be compared before switching over; the
+// options are identical (same names, short flags, defaults) but organised into
+// named groups so `--help` is easier to read. Once verified this should replace
+// the tlx variant and the tlx variant can be removed.
+inline void add_common_args(CommonArgs& args, CLI::App& app) {
+    // -- General --------------------------------------------------------------
+    app.add_option("--experiment", args.experiment, "name to identify the experiment being run")
+        ->group("General");
+    app.add_option("--num-iterations", args.num_iterations, "number of sorting iterations to run")
+        ->group("General");
+
+    // -- Sampling -------------------------------------------------------------
+    app.add_flag("--sample-chars", args.sampler.sample_chars, "use character based sampling")
+        ->group("Sampling");
+    app.add_flag("--sample-indexed", args.sampler.sample_indexed, "use indexed sampling")
+        ->group("Sampling");
+    app.add_flag("--sample-random", args.sampler.sample_random, "use random sampling")
+        ->group("Sampling");
+    app.add_option("--sampling-factor", args.sampler.sampling_factor, "use the given oversampling factor")
+        ->group("Sampling");
+    app.add_option(
+           "--splitter-length-factor",
+           args.sampler.splitter_length_factor,
+           "maximum splitter length as a multiple of (avg_lcp + 5)"
+    )
+        ->group("Sampling");
+    app.add_flag(
+           "--redistribute-sample",
+           args.sampler.redistribute_sample,
+           "pseudorandomly redistribute the splitter sample across PEs before sorting it"
+    )
+        ->group("Sampling");
+
+    // -- Splitter sorting -----------------------------------------------------
+    app.add_flag("--rquick-v1", args.rquick_v1, "use version 1 of RQuick (defaults to v2)")
+        ->group("Splitter Sorting");
+    app.add_flag("--rquick-lcp", args.rquick_lcp, "use LCP values in RQuick (only with v2)")
+        ->group("Splitter Sorting");
+    app.add_flag(
+           "--long-filter",
+           args.long_filter,
+           "sort the splitter sample with the long-string filter (RQuick v2, indexed only)"
+    )
+        ->group("Splitter Sorting");
+    app.add_flag("--splitter-sequential", args.splitter_sequential, "use sequential splitter sorting")
+        ->group("Splitter Sorting");
+
+    // -- Bloom filter ---------------------------------------------------------
+    app.add_flag("--prefix-doubling", args.prefix_doubling, "use prefix doubling merge sort")
+        ->group("Bloom Filter");
+    app.add_flag(
+           "--grid-bloomfilter",
+           args.grid_bloomfilter,
+           "use gridwise bloom filter (requires prefix doubling) [default]"
+    )
+        ->group("Bloom Filter");
+    app.add_flag(
+           "--bloomfilter-base-case",
+           args.bloomfilter_base_case,
+           "enable the allgather-based bloom filter base case when every PE holds "
+           "at most one hash value"
+    )
+        ->group("Bloom Filter");
+
+    // -- Communication --------------------------------------------------------
+    app.add_flag("--lcp-compression", args.lcp_compression, "compress LCP values during string exchange")
+        ->group("Communication");
+    app.add_flag("--prefix-compression", args.prefix_compression, "use LCP compression during string exchange")
+        ->group("Communication");
+    app.add_option(
+           "--alltoall",
+           args.alltoall_routine,
+           "All-To-All routine to use during string exchange "
+           "([0]=native, 1=direct, 2=combined)"
+    )
+        ->group("Communication");
+    app.add_option(
+           "--redistribution",
+           args.redistribution,
+           "redistribution scheme to use for multi-level sort "
+           "(0=none, 1=naive, 2=simple-strings, 3=simple-chars, "
+           " 4=det-strings, 5=det-chars, [6]=grid)"
+    )
+        ->group("Communication");
+
+    // -- Checking / debugging -------------------------------------------------
+    app.add_flag("--check-sorted", args.check_sorted, "check that the result is sorted")
+        ->group("Checking");
+    app.add_flag("--check-complete", args.check_complete, "check that the result is complete")
+        ->group("Checking");
+    app.add_flag("--verbose", args.verbose, "print some debug output")->group("Checking");
+    app.add_flag("--count-prefixes", args.count_prefixes, "count LCPs and dist prefixes")
+        ->group("Checking");
+    app.add_flag(
+           "--print-sorted",
+           args.print_sorted,
+           "gather the sorted strings on the root PE and print them (debug only)"
+    )
+        ->group("Checking");
 }
 
 template <typename Container>

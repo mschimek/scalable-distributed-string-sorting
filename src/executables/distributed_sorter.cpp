@@ -399,73 +399,90 @@ void set_experiment(SorterArgs& args, size_t num_levels) {
 }
 
 
+// CLI11 counterpart to the tlx parsing in main(), kept in parallel so it can be
+// verified before switching over. Registers the shared options via the CLI11
+// add_common_args overload and adds the distributed_sorter-specific options in
+// named groups. To switch main() over: build a CLI::App, call this, then
+// CLI11_PARSE(app, argc, argv) instead of cp.process().
+void add_sorter_args(
+    SorterArgs& args,
+    CLI::App& app,
+    std::string& output_path,
+    std::string& timer_json_path,
+    std::vector<std::string>& levels_param,
+    size_t& cpus_per_node,
+    size_t& num_levels
+) {
+    add_common_args(args, app);
+
+    // -- Input ----------------------------------------------------------------
+    app.add_option(
+           "--string-generator",
+           args.string_generator,
+           "type of string generation to use "
+           "(0=skewed, [1]=DNGen, 2=file, 3=skewedDNGen, 4=suffixGen)"
+    )
+        ->group("Input");
+    app.add_option(
+           "--permutation",
+           args.permutation,
+           "type of permutation to use for PDMS ([0]=simple, 1=multi-level)"
+    )
+        ->group("Input");
+    app.add_option("--path", args.path, "path to input file")->group("Input");
+    app.add_option("--DN-ratio", args.dn_ratio, "D/N ratio of generated strings")->group("Input");
+    app.add_flag(
+           "--dn-encode-padding",
+           args.dn_encode_padding,
+           "for DNGen, fill the padding with repeated blocks encoding (string-id / 3) instead of a "
+           "constant character; keeps the distinguishing prefix but varies the bloom filter hashes"
+    )
+        ->group("Input");
+    app.add_option("--num-strings", args.num_strings, "number of strings to be generated")
+        ->group("Input");
+    app.add_option("--len-strings", args.len_strings, "length of generated strings")
+        ->group("Input");
+    app.add_option("--min-len-strings", args.len_strings_min, "minimum length of generated strings")
+        ->group("Input");
+    app.add_option("--max-len-strings", args.len_strings_max, "maximum length of generated strings")
+        ->group("Input");
+    app.add_flag("--strong-scaling", args.strong_scaling, "perform a strong scaling experiment")
+        ->group("Input");
+
+    // -- Multi-level ----------------------------------------------------------
+    app.add_option("--group-size", levels_param, "size of groups for multi-level merge sort")
+        ->group("Multi-level");
+    app.add_option("--cpus-per-node", cpus_per_node, "number of cpus per node (default 48)")
+        ->group("Multi-level");
+    app.add_option("--num-levels", num_levels, "number of levels (default 1)")->group("Multi-level");
+
+    // -- Output ---------------------------------------------------------------
+    app.add_option("--json_output_path", output_path, "path to output file")->group("Output");
+    app.add_option(
+           "--timer-json-path",
+           timer_json_path,
+           "path for the kamping timer JSON report (empty = disabled)"
+    )
+        ->group("Output");
+}
+
 int main(int argc, char* argv[]) {
     SorterArgs args;
 
-    tlx::CmdlineParser cp;
-    cp.set_description("a distributed string sorter");
-    cp.set_author("Matthias Schimek, Pascal Mehnert");
+    CLI::App app{"a distributed string sorter"};
+    app.option_defaults()->always_capture_default();
 
-    add_common_args(args, cp);
-
-    cp.add_size_t(
-        'k',
-        "string-generator",
-        args.string_generator,
-        "type of string generation to use "
-        "(0=skewed, [1]=DNGen, 2=file, 3=skewedDNGen, 4=suffixGen)"
-    );
-    cp.add_size_t(
-        'o',
-        "permutation",
-        args.permutation,
-        "type of permutation to use for PDMS "
-        "([0]=simple, 1=multi-level)"
-    );
-    cp.add_string('y', "path", args.path, "path to input file");
     std::string output_path;
-    cp.add_string("json_output_path", output_path, "path to output file");
     std::string timer_json_path;
-    cp.add_string(
-        "timer-json-path",
-        timer_json_path,
-        "path for the kamping timer JSON report (empty = disabled)"
-    );
-    cp.add_double('r', "DN-ratio", args.dn_ratio, "D/N ratio of generated strings");
-    cp.add_flag(
-        "dn-encode-padding",
-        args.dn_encode_padding,
-        "for DNGen, fill the padding with repeated blocks encoding (string-id / 3) instead of a "
-        "constant character; keeps the distinguishing prefix but varies the bloom filter hashes"
-    );
-    cp.add_size_t('n', "num-strings", args.num_strings, "number of strings to be generated");
-    cp.add_size_t('m', "len-strings", args.len_strings, "length of generated strings");
-    cp.add_size_t(
-        'b',
-        "min-len-strings",
-        args.len_strings_min,
-        "minimum length of generated strings"
-    );
-    cp.add_size_t(
-        'B',
-        "max-len-strings",
-        args.len_strings_max,
-        "maximum length of generated strings"
-    );
-    cp.add_flag('x', "strong-scaling", args.strong_scaling, "perform a strong scaling experiment");
-
     std::vector<std::string> levels_param;
-    cp.add_stringlist('Y', "group-size", levels_param, "size of groups for multi-level merge sort");
-
     size_t cpus_per_node = 48;
-    cp.add_size_t("cpus-per-node", cpus_per_node, "number of cpus per node (default 48)");
     size_t num_levels = 1;
-    cp.add_size_t("num-levels", num_levels, "number of levels (default 1)");
 
+    add_sorter_args(
+        args, app, output_path, timer_json_path, levels_param, cpus_per_node, num_levels
+    );
 
-    if (!cp.process(argc, argv)) {
-        return EXIT_FAILURE;
-    }
+    CLI11_PARSE(app, argc, argv);
 
     kamping::Environment env{argc, argv};
 
