@@ -10,9 +10,11 @@
 #include <type_traits>
 #include <vector>
 
+#include <kamping/measurements/timer.hpp>
 #include <kamping/named_parameters.hpp>
 #include <kamping/p2p/irecv.hpp>
 #include <kamping/p2p/isend.hpp>
+#include <kamping/p2p/sendrecv.hpp>
 #include <kamping/parameter_objects.hpp>
 #include <kamping/request.hpp>
 #include <mpi.h>
@@ -22,36 +24,47 @@
 namespace dss_mehnert {
 namespace mpi {
 
-// Runtime tuning knobs for the 1-factor sparse all-to-all. These are coarse,
-// per-exchange settings (not per-element), so they are passed as runtime values
-// rather than baked into the compile-time AlltoallStringsConfig.
+// Selects how the 1-factor exchanges:
+//   * windowed:     pipeline the exchanges over a fixed window of outstanding
+//                   isend/irecv pairs.
+//   * synchronized: perform the standard full 1-factor schedule as p (p-1 for even p)
+//                   pairwise MPI_Sendrecv exchanges
+enum class OneFactorMode { windowed, synchronized };
+
 struct OneFactorParams {
-    // number of outstanding isend/irecv pairs kept in flight
+    OneFactorMode mode = OneFactorMode::windowed;
     size_t num_slots = 16;
-    // use synchronous (rendezvous) sends instead of the default standard sends
     bool use_issend = false;
 };
 
-// Sparse all-to-all using the 1-factor algorithm to schedule the pairwise
-// exchanges, pipelined over a fixed window of `num_slots` outstanding
-// isend/irecv pairs.
-//
-// 1-factor schedule (i is the local rank, p the number of PEs):
+// partner of `rank` in round k of the 1-factor schedule
 //   * p odd:  for k in [0, p)      partner j := (k - i) mod p
 //   * p even: for k in [0, p-1)    partner j := (k - i) mod (p-1),
 //             remapping j == i to the center p-1; the center p-1 pairs
 //             with j := (k * (p/2)) mod (p-1) (p/2 is the inverse of 2
 //             modulo the odd p-1).
-// In every round each PE is matched with exactly one partner, so the exchanges
-// are congestion-free in the telephone model. The self-message is handled by a
-// local copy instead of a round.
-// By default the data sends use the standard (buffered) mode. Since the receive
-// sizes are known up front and completion is driven by MPI_Waitany, synchronous
-// sends are not needed for correctness here and standard sends avoid the extra
-// rendezvous handshake latency. Set `params.use_issend` to force synchronous
-// (rendezvous) sends instead.
+inline size_t onefactor_partner(size_t const p, size_t const rank, size_t const k) {
+    if (p % 2 == 0) {
+        size_t const q = p - 1;
+        if (rank == q) {
+            return (k * (p / 2)) % q; // center: solves 2*j == k (mod q)
+        }
+        size_t const j = (k + q - rank) % q;
+        return j == rank ? q : j;
+    } else {
+        return (k + p - rank) % p;
+    }
+}
+
+// number of rounds in the 1-factor schedule
+inline size_t onefactor_num_rounds(size_t const p) { return (p % 2 == 0) ? p - 1 : p; }
+
+// Sparse all-to-all using the 1-factor algorithm to schedule the pairwise
+// exchanges, pipelined over a fixed window of `num_slots` outstanding
+// isend/irecv pairs. The self-message is handled by a local copy instead of a
+// round.
 template <typename Communicator, typename SendBuf>
-auto alltoallv_onefactor(
+auto alltoallv_onefactor_windowed(
     Communicator const& comm,
     SendBuf&& send_buf,
     std::span<size_t const> send_counts,
@@ -79,27 +92,13 @@ auto alltoallv_onefactor(
     auto const recv_total = recv_displs.back() + recv_counts.back();
     std::vector<DataType> receive_data(recv_total);
 
-    // partner of `rank` in round k of the 1-factor schedule
-    auto partner = [p, rank](size_t const k) -> size_t {
-        if (p % 2 == 0) {
-            size_t const q = p - 1;
-            if (rank == q) {
-                return (k * (p / 2)) % q; // center: solves 2*j == k (mod q)
-            }
-            size_t const j = (k + q - rank) % q;
-            return j == rank ? q : j;
-        } else {
-            return (k + p - rank) % p;
-        }
-    };
-
     // build schedule
-    size_t const num_rounds = (p % 2 == 0) ? p - 1 : p;
+    size_t const num_rounds = onefactor_num_rounds(p);
     std::vector<size_t> send_sched, recv_sched;
     send_sched.reserve(num_rounds);
     recv_sched.reserve(num_rounds);
     for (size_t k = 0; k < num_rounds; ++k) {
-        size_t const j = partner(k);
+        size_t const j = onefactor_partner(p, rank, k);
         if (j == rank) {
             continue; // self-message handled by the local copy below
         }
@@ -120,7 +119,7 @@ auto alltoallv_onefactor(
         );
     }
 
-    static constexpr int msg_tag = 44228;
+    static constexpr int msg_tag = 16228;
     size_t const slots = std::max<size_t>(1, num_slots);
     size_t const num_recv_slots = std::min(slots, recv_sched.size());
     size_t const num_send_slots = std::min(slots, send_sched.size());
@@ -173,6 +172,9 @@ auto alltoallv_onefactor(
         }
     };
 
+    comm.barrier();
+    kamping::measurements::timer().start("alltoallv_onefactor_windowed");
+
     // initially fill every slot
     for (size_t slot = 0; slot < num_recv_slots; ++slot) {
         post_recv(slot);
@@ -194,7 +196,105 @@ auto alltoallv_onefactor(
         }
     }
 
+    kamping::measurements::timer().stop_and_append();
+
     return receive_data;
+}
+
+// All-to-all using the 1-factor algorithm, executed as the full, schedule: p rounds (p-1 for even
+// p), each performing a single synchronous MPI_Sendrecv with the round's partner. Unlike the
+// windowed variant this issues an exchange every round (even empty ones), so there are exactly
+// `onefactor_num_rounds(p)` pairwise exchanges. The self-message is handled by a
+// local copy instead of a round.
+template <typename Communicator, typename SendBuf>
+auto alltoallv_onefactor_synchronized(
+    Communicator const& comm,
+    SendBuf&& send_buf,
+    std::span<size_t const> send_counts,
+    std::span<size_t const> recv_counts
+) {
+    using namespace kamping;
+    using DataType = std::remove_reference_t<SendBuf>::value_type;
+
+    auto& measuring_tool = measurement::MeasuringTool::measuringTool();
+
+    auto const p = static_cast<size_t>(comm.size());
+    auto const rank = static_cast<size_t>(comm.rank());
+
+    std::vector<size_t> send_displs(p), recv_displs(p);
+    std::exclusive_scan(send_counts.begin(), send_counts.end(), send_displs.begin(), size_t{0});
+    std::exclusive_scan(recv_counts.begin(), recv_counts.end(), recv_displs.begin(), size_t{0});
+
+    auto const send_total = send_displs.back() + send_counts.back();
+    measuring_tool.addRawCommunication(send_total * sizeof(DataType), "alltoallv_one_factor");
+
+    auto const recv_total = recv_displs.back() + recv_counts.back();
+    std::vector<DataType> receive_data(recv_total);
+
+    // local copy of the self-message
+    if (send_counts[rank] > 0) {
+        std::copy_n(
+            send_buf.data() + send_displs[rank],
+            send_counts[rank],
+            receive_data.data() + recv_displs[rank]
+        );
+    }
+
+    static constexpr int msg_tag = 16228;
+    size_t const num_rounds = onefactor_num_rounds(p);
+
+    comm.barrier();
+    kamping::measurements::timer().start("alltoallv_onefactor_synchronized");
+
+    for (size_t k = 0; k < num_rounds; ++k) {
+        size_t const j = onefactor_partner(p, rank, k);
+        if (j == rank) {
+            continue; // self-message handled by the local copy above
+        }
+
+        std::span<DataType const> sbuf{send_buf.data() + send_displs[j], send_counts[j]};
+        std::span<DataType> rbuf{receive_data.data() + recv_displs[j], recv_counts[j]};
+        comm.sendrecv(
+            kamping::send_buf(sbuf),
+            destination(static_cast<int>(j)),
+            send_tag(msg_tag),
+            kamping::recv_buf(rbuf),
+            recv_count(static_cast<int>(recv_counts[j])),
+            source(static_cast<int>(j)),
+            recv_tag(msg_tag)
+        );
+    }
+
+    kamping::measurements::timer().stop_and_append();
+
+    return receive_data;
+}
+
+// Dispatches to the windowed or synchronized 1-factor implementation.
+template <typename Communicator, typename SendBuf>
+auto alltoallv_onefactor(
+    Communicator const& comm,
+    SendBuf&& send_buf,
+    std::span<size_t const> send_counts,
+    std::span<size_t const> recv_counts,
+    OneFactorParams const& params = {}
+) {
+    if (params.mode == OneFactorMode::synchronized) {
+        return alltoallv_onefactor_synchronized(
+            comm,
+            std::forward<SendBuf>(send_buf),
+            send_counts,
+            recv_counts
+        );
+    } else {
+        return alltoallv_onefactor_windowed(
+            comm,
+            std::forward<SendBuf>(send_buf),
+            send_counts,
+            recv_counts,
+            params
+        );
+    }
 }
 
 } // namespace mpi

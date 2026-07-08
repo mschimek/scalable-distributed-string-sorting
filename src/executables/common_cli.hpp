@@ -51,6 +51,7 @@ struct CommonArgs {
     size_t alltoall_routine = static_cast<size_t>(MPIRoutineAllToAll::native);
     size_t onefactor_num_slots = 16;
     bool onefactor_use_issend = false;
+    bool onefactor_synchronized = false;
     dss_mehnert::SamplerArgs sampler;
     bool rquick_v1 = false;
     bool rquick_lcp = false;
@@ -89,12 +90,18 @@ struct CommonArgs {
                + " grid_bloomfilter="   + std::to_string(grid_bloomfilter)
                + " bloomfilter_base_case=" + std::to_string(bloomfilter_base_case)
                + " onefactor_num_slots=" + std::to_string(onefactor_num_slots)
-               + " onefactor_use_issend=" + std::to_string(onefactor_use_issend);
+               + " onefactor_use_issend=" + std::to_string(onefactor_use_issend)
+               + " onefactor_synchronized=" + std::to_string(onefactor_synchronized);
         // clang-format on
     }
 
     dss_mehnert::mpi::OneFactorParams onefactor_params() const {
-        return {.num_slots = onefactor_num_slots, .use_issend = onefactor_use_issend};
+        using dss_mehnert::mpi::OneFactorMode;
+        return {
+            .mode = onefactor_synchronized ? OneFactorMode::synchronized : OneFactorMode::windowed,
+            .num_slots = onefactor_num_slots,
+            .use_issend = onefactor_use_issend,
+        };
     }
 
     dss_mehnert::SplitterSorter get_splitter_sorter() const {
@@ -360,6 +367,12 @@ inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
         "use synchronous (rendezvous) sends instead of standard sends in the "
         "one_factor routine"
     );
+    cp.add_flag(
+        "alltoall-onefactor-synchronized",
+        args.onefactor_synchronized,
+        "run the one_factor routine as p lock-step Sendrecv rounds instead of "
+        "the pipelined window"
+    );
     cp.add_size_t(
         't',
         "redistribution",
@@ -477,6 +490,13 @@ inline void add_common_args(CommonArgs& args, CLI::App& app) {
            args.onefactor_use_issend,
            "use synchronous (rendezvous) sends instead of standard sends in the "
            "one_factor routine"
+    )
+        ->group("All-to-All");
+    app.add_flag(
+           "--alltoall-onefactor-synchronized",
+           args.onefactor_synchronized,
+           "run the one_factor routine as p lock-step Sendrecv rounds instead of "
+           "the pipelined window"
     )
         ->group("All-to-All");
 
