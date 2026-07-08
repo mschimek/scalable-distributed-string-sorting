@@ -82,7 +82,7 @@ FetchContent_MakeAvailable(fmt spdlog kamping-spdlog-adapter nlohmann_json
 FetchContent_Declare(
   kaval
   GIT_REPOSITORY https://github.com/niklas-uhl/kaval.git
-  GIT_TAG 5374952
+  GIT_TAG cfc6219
   SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}/kaval)
 
 FetchContent_MakeAvailable(kaval)
