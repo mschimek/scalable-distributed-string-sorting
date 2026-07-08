@@ -138,12 +138,10 @@ auto generate_strings(SorterArgs const& args, dss_mehnert::Communicator const& c
         GlobalAggregationMode::max,
         GlobalAggregationMode::sum,
     };
-    kamping::measurements::counter().add(
-        "input_chars", static_cast<std::int64_t>(num_gen_chars - num_gen_strs), agg
-    );
-    kamping::measurements::counter().add(
-        "input_strings", static_cast<std::int64_t>(num_gen_strs), agg
-    );
+    kamping::measurements::counter()
+        .add("input_chars", static_cast<std::int64_t>(num_gen_chars - num_gen_strs), agg);
+    kamping::measurements::counter()
+        .add("input_strings", static_cast<std::int64_t>(num_gen_strs), agg);
 
     return input_container;
 }
@@ -456,7 +454,8 @@ void add_sorter_args(
         ->group("Multi-level");
     app.add_option("--cpus-per-node", cpus_per_node, "number of cpus per node (default 48)")
         ->group("Multi-level");
-    app.add_option("--num-levels", num_levels, "number of levels (default 1)")->group("Multi-level");
+    app.add_option("--num-levels", num_levels, "number of levels (default 1)")
+        ->group("Multi-level");
 
     // -- Output ---------------------------------------------------------------
     app.add_option("--json_output_path", output_path, "path to output file")->group("Output");
@@ -481,7 +480,13 @@ int main(int argc, char* argv[]) {
     size_t num_levels = 1;
 
     add_sorter_args(
-        args, app, output_path, timer_json_path, levels_param, cpus_per_node, num_levels
+        args,
+        app,
+        output_path,
+        timer_json_path,
+        levels_param,
+        cpus_per_node,
+        num_levels
     );
 
     CLI11_PARSE(app, argc, argv);
@@ -525,6 +530,20 @@ int main(int argc, char* argv[]) {
         nlohmann::ordered_json config;
         config["p"] = kamping::comm_world().size();
         config["experiment"] = args.experiment;
+        config["i_mpi_adjust_alltoallv"] = [] {
+            char* val = std::getenv("I_MPI_ADJUST_ALLTOALLV");
+            if (val == nullptr) {
+                return std::string{};
+            }
+            return std::string{val};
+        }();
+        config["i_mpi_adjust_allgatherv"] = [] {
+            char* val = std::getenv("I_MPI_ADJUST_ALLGATHERV");
+            if (val == nullptr) {
+                return std::string{};
+            }
+            return std::string{val};
+        }();
 
         config["input"]["string-generator"] = args.string_generator;
         config["input"]["path"] = args.path;
@@ -558,6 +577,9 @@ int main(int argc, char* argv[]) {
         config["lcp-compression"] = args.lcp_compression;
         config["prefix-compression"] = args.prefix_compression;
         config["alltoall"] = args.alltoall_routine;
+        config["alltoall_onefactor_num_slots"] = args.onefactor_num_slots;
+        config["alltoall_onefactor_synchronized"] = args.onefactor_synchronized;
+        config["alltoall_onefactor_use_issend"] = args.onefactor_use_issend;
         config["redistribution"] = args.redistribution;
         config["strong-scaling"] = args.strong_scaling;
 

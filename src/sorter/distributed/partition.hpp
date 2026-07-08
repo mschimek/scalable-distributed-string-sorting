@@ -59,17 +59,23 @@ public:
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
         measuring_tool.start("sample_strings");
-        kamping::measurements::timer().synchronize_and_start("sample_strings");
+        comm.barrier();
+        kamping::measurements::timer().start("sample_strings");
         auto sample = SamplePolicy::sample_splitters(strptr.active(), num_partitions, arg, comm);
         kamping::measurements::timer().stop_and_append();
         measuring_tool.stop("sample_strings");
 
         auto chosen_splitters = SplitterPolicy::select_splitters(
-            strptr, std::move(sample), num_partitions, comm, redistribute_sample_
+            strptr,
+            std::move(sample),
+            num_partitions,
+            comm,
+            redistribute_sample_
         );
 
         measuring_tool.start("compute_intervals");
-        kamping::measurements::timer().synchronize_and_start("compute_intervals");
+        comm.barrier();
+        kamping::measurements::timer().start("compute_intervals");
         auto splitter_set = chosen_splitters.make_string_set();
         std::vector<size_t> interval_sizes;
         if constexpr (SamplePolicy::is_indexed) {
@@ -117,8 +123,9 @@ public:
                 GlobalAggregationMode::max,
                 GlobalAggregationMode::sum,
             };
-            auto const num_sample_strings =
-                static_cast<std::int64_t>(std::count(sample.sample.begin(), sample.sample.end(), Char{0}));
+            auto const num_sample_strings = static_cast<std::int64_t>(
+                std::count(sample.sample.begin(), sample.sample.end(), Char{0})
+            );
             auto const num_sample_chars =
                 static_cast<std::int64_t>(sample.sample.size()) - num_sample_strings;
             kamping::measurements::counter().add("sample_num_strings", num_sample_strings, agg);
@@ -126,13 +133,15 @@ public:
         }
 
         measuring_tool.start("sort_samples");
-        kamping::measurements::timer().synchronize_and_start("sort_samples");
+        comm.barrier();
+        kamping::measurements::timer().start("sort_samples");
         auto sorted_sample = Derived::sort_samples(std::move(sample), comm, redistribute_sample);
         kamping::measurements::timer().stop_and_append();
         measuring_tool.stop("sort_samples");
 
         measuring_tool.start("choose_splitters");
-        kamping::measurements::timer().synchronize_and_start("choose_splitters");
+        comm.barrier();
+        kamping::measurements::timer().start("choose_splitters");
         auto sample_set = sorted_sample.make_string_set();
         auto chosen_splitters = Derived::choose_splitters(sample_set, num_partitions, comm);
         kamping::measurements::timer().stop_and_append();
@@ -173,7 +182,8 @@ private:
         } else {
             data = {std::move(sample.sample), {}};
         }
-        kamping::measurements::timer().synchronize_and_start("rquick_sort");
+        comm.barrier();
+        kamping::measurements::timer().start("rquick_sort");
         auto sorted = RQuick::sort(gen, std::move(data), MPI_BYTE, tag, comm_mpi, comp, is_robust);
         kamping::measurements::timer().stop_and_append();
         return sorted;
@@ -216,7 +226,8 @@ private:
             data.indices = std::move(sample.indices);
         }
         // LCP array initialization is done by RQuick
-        kamping::measurements::timer().synchronize_and_start("rquick_sort");
+        comm.barrier();
+        kamping::measurements::timer().start("rquick_sort");
         auto sorted = RQuick2::sort(std::move(data), tag, gen, comm_mpi);
         kamping::measurements::timer().stop_and_append();
         return sorted;
@@ -247,7 +258,8 @@ private:
             auto recv_indices = comm.allgatherv(kamping::send_buf(sample.indices));
             global_samples = StringLcpContainer<StringSet>{
                 std::move(recv_sample),
-                make_initializer<Index>(std::move(recv_indices))};
+                make_initializer<Index>(std::move(recv_indices))
+            };
         } else {
             global_samples = StringLcpContainer<StringSet>{std::move(recv_sample)};
         }

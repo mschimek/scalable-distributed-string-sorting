@@ -113,7 +113,8 @@ public:
             std::max<size_t>(1, static_cast<size_t>(long_threshold_factor_ * avg_len));
 
         measuring_tool.start("sort_samples");
-        kamping::measurements::timer().synchronize_and_start("sort_samples");
+        comm.barrier();
+        kamping::measurements::timer().start("sort_samples");
 
         // prior to any sorting, pseudorandomly permute the sample across the PEs
         // so RQuick's per-string-count balancing starts from a balanced sample

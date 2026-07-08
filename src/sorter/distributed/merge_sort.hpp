@@ -170,13 +170,18 @@ protected:
 
         measuring_tool_.setPhase("string_exchange");
         measuring_tool_.start("all_to_all_strings");
+        comm.barrier();
         kamping::measurements::timer().start("all_to_all_strings");
+        kamping::measurements::timer().start("all_to_all_strings_recv_counts");
 
         std::vector<size_t> recv_counts;
         comm.alltoall(
             kamping::send_buf(send_counts),
             kamping::recv_buf<kamping::BufferResizePolicy::resize_to_fit>(recv_counts)
         );
+        kamping::measurements::timer().stop_and_append();
+        comm.barrier();
+        kamping::measurements::timer().start("all_to_all_strings_data");
 
         if constexpr (std::is_same_v<sample::DistPrefixes, ExtraArg>) {
             auto const& prefixes = extra_arg.prefixes;
@@ -195,6 +200,7 @@ protected:
                 onefactor_params_
             );
         };
+        kamping::measurements::timer().stop_and_append();
         kamping::measurements::timer().stop_and_append();
         measuring_tool_.stop("all_to_all_strings");
 
