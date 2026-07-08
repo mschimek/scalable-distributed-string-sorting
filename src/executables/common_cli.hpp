@@ -49,6 +49,8 @@ T clamp_enum_value(size_t const i) {
 struct CommonArgs {
     std::string experiment;
     size_t alltoall_routine = static_cast<size_t>(MPIRoutineAllToAll::native);
+    size_t onefactor_num_slots = 16;
+    bool onefactor_use_issend = false;
     dss_mehnert::SamplerArgs sampler;
     bool rquick_v1 = false;
     bool rquick_lcp = false;
@@ -85,8 +87,14 @@ struct CommonArgs {
                + " prefix_compression=" + std::to_string(prefix_compression)
                + " prefix_doubling="    + std::to_string(prefix_doubling)
                + " grid_bloomfilter="   + std::to_string(grid_bloomfilter)
-               + " bloomfilter_base_case=" + std::to_string(bloomfilter_base_case);
+               + " bloomfilter_base_case=" + std::to_string(bloomfilter_base_case)
+               + " onefactor_num_slots=" + std::to_string(onefactor_num_slots)
+               + " onefactor_use_issend=" + std::to_string(onefactor_use_issend);
         // clang-format on
+    }
+
+    dss_mehnert::mpi::OneFactorParams onefactor_params() const {
+        return {.num_slots = onefactor_num_slots, .use_issend = onefactor_use_issend};
     }
 
     dss_mehnert::SplitterSorter get_splitter_sorter() const {
@@ -342,6 +350,17 @@ inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
         "([0]=native, 1=direct, 2=combined, 3=one_factor)"
     );
     cp.add_size_t(
+        "alltoall-onefactor-num-slots",
+        args.onefactor_num_slots,
+        "number of outstanding isend/irecv pairs for the one_factor routine"
+    );
+    cp.add_flag(
+        "alltoall-onefactor-issend",
+        args.onefactor_use_issend,
+        "use synchronous (rendezvous) sends instead of standard sends in the "
+        "one_factor routine"
+    );
+    cp.add_size_t(
         't',
         "redistribution",
         args.redistribution,
@@ -431,13 +450,6 @@ inline void add_common_args(CommonArgs& args, CLI::App& app) {
     app.add_flag("--prefix-compression", args.prefix_compression, "use LCP compression during string exchange")
         ->group("Communication");
     app.add_option(
-           "--alltoall",
-           args.alltoall_routine,
-           "All-To-All routine to use during string exchange "
-           "([0]=native, 1=direct, 2=combined)"
-    )
-        ->group("Communication");
-    app.add_option(
            "--redistribution",
            args.redistribution,
            "redistribution scheme to use for multi-level sort "
@@ -445,6 +457,28 @@ inline void add_common_args(CommonArgs& args, CLI::App& app) {
            " 4=det-strings, 5=det-chars, [6]=grid)"
     )
         ->group("Communication");
+
+    // -- All-to-All -----------------------------------------------------------
+    app.add_option(
+           "--alltoall",
+           args.alltoall_routine,
+           "All-To-All routine to use during string exchange "
+           "([0]=native, 1=direct, 2=combined, 3=one_factor)"
+    )
+        ->group("All-to-All");
+    app.add_option(
+           "--alltoall-onefactor-num-slots",
+           args.onefactor_num_slots,
+           "number of outstanding isend/irecv pairs for the one_factor routine"
+    )
+        ->group("All-to-All");
+    app.add_flag(
+           "--alltoall-onefactor-issend",
+           args.onefactor_use_issend,
+           "use synchronous (rendezvous) sends instead of standard sends in the "
+           "one_factor routine"
+    )
+        ->group("All-to-All");
 
     // -- Checking / debugging -------------------------------------------------
     app.add_flag("--check-sorted", args.check_sorted, "check that the result is sorted")

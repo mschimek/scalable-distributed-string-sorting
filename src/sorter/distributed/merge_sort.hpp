@@ -43,10 +43,13 @@ template <AlltoallStringsConfig config, typename RedistributionPolicy, typename 
 class BaseDistributedMergeSort : protected PartitionPolicy, protected RedistributionPolicy {
 public:
     explicit BaseDistributedMergeSort(
-        PartitionPolicy partition, RedistributionPolicy redistribution
+        PartitionPolicy partition,
+        RedistributionPolicy redistribution,
+        mpi::OneFactorParams onefactor_params = {}
     )
         : PartitionPolicy{std::move(partition)},
-          RedistributionPolicy{std::move(redistribution)} {}
+          RedistributionPolicy{std::move(redistribution)},
+          onefactor_params_{onefactor_params} {}
 
 protected:
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
@@ -54,6 +57,9 @@ protected:
 
     using MeasuringTool = measurement::MeasuringTool;
     MeasuringTool& measuring_tool_ = MeasuringTool::measuringTool();
+
+    // runtime tuning for the 1-factor string exchange (ignored by other kinds)
+    mpi::OneFactorParams onefactor_params_;
 
     template <typename StringSet, typename PermutationBuilder>
         requires(StringSet::has_length)
@@ -178,13 +184,15 @@ protected:
                 container,
                 send_counts,
                 recv_counts,
-                prefixes
+                prefixes,
+                onefactor_params_
             );
         } else {
             comm.template alltoall_strings<config, Permutation>(
                 container,
                 send_counts,
-                recv_counts
+                recv_counts,
+                onefactor_params_
             );
         };
         kamping::measurements::timer().stop_and_append();

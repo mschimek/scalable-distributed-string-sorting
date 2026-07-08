@@ -22,6 +22,16 @@
 namespace dss_mehnert {
 namespace mpi {
 
+// Runtime tuning knobs for the 1-factor sparse all-to-all. These are coarse,
+// per-exchange settings (not per-element), so they are passed as runtime values
+// rather than baked into the compile-time AlltoallStringsConfig.
+struct OneFactorParams {
+    // number of outstanding isend/irecv pairs kept in flight
+    size_t num_slots = 16;
+    // use synchronous (rendezvous) sends instead of the default standard sends
+    bool use_issend = false;
+};
+
 // Sparse all-to-all using the 1-factor algorithm to schedule the pairwise
 // exchanges, pipelined over a fixed window of `num_slots` outstanding
 // isend/irecv pairs.
@@ -35,16 +45,24 @@ namespace mpi {
 // In every round each PE is matched with exactly one partner, so the exchanges
 // are congestion-free in the telephone model. The self-message is handled by a
 // local copy instead of a round.
+// By default the data sends use the standard (buffered) mode. Since the receive
+// sizes are known up front and completion is driven by MPI_Waitany, synchronous
+// sends are not needed for correctness here and standard sends avoid the extra
+// rendezvous handshake latency. Set `params.use_issend` to force synchronous
+// (rendezvous) sends instead.
 template <typename Communicator, typename SendBuf>
 auto alltoallv_onefactor(
     Communicator const& comm,
     SendBuf&& send_buf,
     std::span<size_t const> send_counts,
     std::span<size_t const> recv_counts,
-    size_t const num_slots = 16
+    OneFactorParams const& params = {}
 ) {
     using namespace kamping;
     using DataType = std::remove_reference_t<SendBuf>::value_type;
+
+    auto const num_slots = params.num_slots;
+    auto const use_issend = params.use_issend;
 
     auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
@@ -133,13 +151,22 @@ auto alltoallv_onefactor(
             size_t const j = send_sched[next_send++];
             std::span<DataType const> buf{send_buf.data() + send_displs[j], send_counts[j]};
             Request req;
-            comm.isend(
-                kamping::send_buf(buf),
-                destination(static_cast<int>(j)),
-                tag(msg_tag),
-                send_mode(send_modes::synchronous),
-                kamping::request(req)
-            );
+            if (use_issend) {
+                comm.isend(
+                    kamping::send_buf(buf),
+                    destination(static_cast<int>(j)),
+                    tag(msg_tag),
+                    send_mode(send_modes::synchronous),
+                    kamping::request(req)
+                );
+            } else {
+                comm.isend(
+                    kamping::send_buf(buf),
+                    destination(static_cast<int>(j)),
+                    tag(msg_tag),
+                    kamping::request(req)
+                );
+            }
             requests[slot] = req.mpi_request();
         } else {
             requests[slot] = MPI_REQUEST_NULL;

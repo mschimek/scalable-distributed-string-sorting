@@ -36,19 +36,28 @@ class AlltoallvCombinedPlugin
     : public kamping::plugin::PluginBase<Comm, DefaultContainerType, AlltoallvCombinedPlugin> {
 public:
     template <AlltoallvCombinedKind combined_type, typename SendBuf>
-    auto alltoallv_combined(SendBuf&& send_buf, std::span<size_t const> send_counts) const {
+    auto alltoallv_combined(
+        SendBuf&& send_buf,
+        std::span<size_t const> send_counts,
+        OneFactorParams const& onefactor_params = {}
+    ) const {
         auto const recv_counts =
             this->to_communicator().alltoall(kamping::send_buf(send_counts));
         return alltoallv_combined<combined_type, SendBuf>(
             std::forward<SendBuf>(send_buf),
             send_counts,
-            recv_counts
+            recv_counts,
+            onefactor_params
         );
     }
 
+    // `onefactor_params` only affects the one_factor kind; other kinds ignore it.
     template <AlltoallvCombinedKind kind, typename SendBuf>
     auto alltoallv_combined(
-        SendBuf&& send_buf, std::span<size_t const> send_counts, std::span<size_t const> recv_counts
+        SendBuf&& send_buf,
+        std::span<size_t const> send_counts,
+        std::span<size_t const> recv_counts,
+        [[maybe_unused]] OneFactorParams const& onefactor_params = {}
     ) const {
         if constexpr (kind == AlltoallvCombinedKind::combined) {
             auto const send_total =
@@ -71,7 +80,13 @@ public:
         } else if constexpr (kind == AlltoallvCombinedKind::direct) {
             return alltoallv_direct(send_buf, send_counts, recv_counts);
         } else if constexpr (kind == AlltoallvCombinedKind::one_factor) {
-            return alltoallv_onefactor(this->to_communicator(), send_buf, send_counts, recv_counts);
+            return alltoallv_onefactor(
+                this->to_communicator(),
+                send_buf,
+                send_counts,
+                recv_counts,
+                onefactor_params
+            );
         } else {
             []<AlltoallvCombinedKind type_ = kind> {
                 static_assert(always_false_v<type_>, "invalid alltoallv combined kind used");

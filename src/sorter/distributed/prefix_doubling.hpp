@@ -75,9 +75,10 @@ public:
     BasePrefixDoublingMergeSort(
         PartitionPolicy partition,
         RedistributionPolicy redistribution,
-        bool const bloomfilter_base_case
+        bool const bloomfilter_base_case,
+        mpi::OneFactorParams onefactor_params = {}
     )
-        : Base{std::move(partition), std::move(redistribution)},
+        : Base{std::move(partition), std::move(redistribution), onefactor_params},
           bloomfilter_base_case_{bloomfilter_base_case} {}
 
 protected:

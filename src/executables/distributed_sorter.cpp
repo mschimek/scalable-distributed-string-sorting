@@ -191,7 +191,8 @@ void run_merge_sort(
                 args.sampler,
                 args.get_splitter_sorter()
             ),
-            std::move(redistribution)
+            std::move(redistribution),
+            args.onefactor_params()
         };
         merge_sort.sort(input_container, comms, args.sampler.splitter_length_factor);
         kamping::measurements::timer().stop_and_append();
@@ -287,7 +288,8 @@ void run_prefix_doubling(
                 args.get_splitter_sorter()
             ),
             std::move(redistribution),
-            args.bloomfilter_base_case
+            args.bloomfilter_base_case,
+            args.onefactor_params()
         };
         auto permutation = merge_sort.sort(std::move(input_container), comms);
         kamping::measurements::timer().stop_and_append();
