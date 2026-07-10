@@ -160,9 +160,13 @@ endif()
 
 # kassert #warns and falls back to `normal` unless KASSERT_ASSERTION_LEVEL is defined, so
 # it has to be set explicitly per config. 0 = off, 30 = normal; this tracks -DNDEBUG.
-set(CMAKE_CXX_FLAGS_DEBUG "-ggdb -DKASSERT_ASSERTION_LEVEL=30")
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG -march=native -DKASSERT_ASSERTION_LEVEL=0")
-set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -DDEBUG -march=native -ggdb -DKASSERT_ASSERTION_LEVEL=30")
+# SPDLOG_ACTIVE_LEVEL compiles out SPDLOG_TRACE/SPDLOG_DEBUG below the given level.
+set(CMAKE_CXX_FLAGS_DEBUG
+    "-ggdb -DKASSERT_ASSERTION_LEVEL=30 -DSPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE")
+set(CMAKE_CXX_FLAGS_RELEASE
+    "-O3 -DNDEBUG -march=native -DKASSERT_ASSERTION_LEVEL=0 -DSPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_INFO")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO
+    "-O2 -DDEBUG -march=native -ggdb -DKASSERT_ASSERTION_LEVEL=30 -DSPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE")
 
 # Default to Release builds
 if(NOT CMAKE_BUILD_TYPE)
@@ -193,8 +197,9 @@ target_link_libraries(dss_base PUBLIC tlx)
 target_link_libraries(dss_base PRIVATE MPI::MPI_CXX)
 target_link_libraries(dss_base PUBLIC ips4o)
 target_link_libraries(dss_base PUBLIC rbc)
-# PUBLIC: headers under src/ use KASSERT, so every consumer needs the include dir
+# PUBLIC: headers under src/ use KASSERT and SPDLOG_*, so every consumer needs them
 target_link_libraries(dss_base PUBLIC kassert::kassert)
+target_link_libraries(dss_base PUBLIC spdlog::spdlog kamping::spdlog-adapter)
 
 add_subdirectory(src)
 
@@ -226,6 +231,7 @@ target_link_libraries(distributed_sorter nlohmann_json::nlohmann_json)
 target_link_libraries(distributed_sorter kamping::nlohmann-json-adapter)
 target_link_libraries(distributed_sorter CLI11::CLI11)
 target_link_libraries(distributed_sorter kassert::kassert)
+target_link_libraries(distributed_sorter spdlog::spdlog kamping::spdlog-adapter)
 
 if(DSS_BUILD_SPACE_EFFICIENT_SORTER)
   add_executable(space_efficient_sorter
