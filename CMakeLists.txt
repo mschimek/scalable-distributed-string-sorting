@@ -57,6 +57,12 @@ FetchContent_Declare(
   GIT_SHALLOW ON)
 
 FetchContent_Declare(
+  kassert
+  GIT_REPOSITORY https://github.com/kamping-site/kassert
+  GIT_TAG v1.0.0
+  SYSTEM EXCLUDE_FROM_ALL)
+
+FetchContent_Declare(
   nlohmann_json
   GIT_REPOSITORY https://github.com/nlohmann/json
   GIT_TAG v3.12.0
@@ -77,7 +83,7 @@ FetchContent_Declare(
   GIT_SHALLOW ON)
 
 FetchContent_MakeAvailable(fmt spdlog kamping-spdlog-adapter nlohmann_json
-                           kamping-nlohmann-json-adapter cli11)
+                           kamping-nlohmann-json-adapter cli11 kassert)
 
 FetchContent_Declare(
   kaval
@@ -131,6 +137,9 @@ message(STATUS "RQuick Sort Enabled: ${USE_RQUICK_SORT}")
 option(DSS_BUILD_EXAMPLES "build example programs in examples/" Off)
 message(STATUS "Examples Enabled: ${DSS_BUILD_EXAMPLES}")
 
+option(DSS_BUILD_SPACE_EFFICIENT_SORTER "build the space_efficient_sorter executable" Off)
+message(STATUS "Space Efficient Sorter Enabled: ${DSS_BUILD_SPACE_EFFICIENT_SORTER}")
+
 list(APPEND
   DSS_MEHNERT_WARNING_FLAGS
   "-Wall"
@@ -149,9 +158,11 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   list(APPEND DSS_MEHNERT_WARNING_FLAGS "-Wno-gnu-zero-variadic-macro-arguments")
 endif()
 
-set(CMAKE_CXX_FLAGS_DEBUG "-ggdb")
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG -march=native")
-set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -DDEBUG -march=native -ggdb")
+# kassert #warns and falls back to `normal` unless KASSERT_ASSERTION_LEVEL is defined, so
+# it has to be set explicitly per config. 0 = off, 30 = normal; this tracks -DNDEBUG.
+set(CMAKE_CXX_FLAGS_DEBUG "-ggdb -DKASSERT_ASSERTION_LEVEL=30")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG -march=native -DKASSERT_ASSERTION_LEVEL=0")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -DDEBUG -march=native -ggdb -DKASSERT_ASSERTION_LEVEL=30")
 
 # Default to Release builds
 if(NOT CMAKE_BUILD_TYPE)
@@ -182,6 +193,8 @@ target_link_libraries(dss_base PUBLIC tlx)
 target_link_libraries(dss_base PRIVATE MPI::MPI_CXX)
 target_link_libraries(dss_base PUBLIC ips4o)
 target_link_libraries(dss_base PUBLIC rbc)
+# PUBLIC: headers under src/ use KASSERT, so every consumer needs the include dir
+target_link_libraries(dss_base PUBLIC kassert::kassert)
 
 add_subdirectory(src)
 
@@ -212,19 +225,23 @@ target_link_libraries(distributed_sorter tlx)
 target_link_libraries(distributed_sorter nlohmann_json::nlohmann_json)
 target_link_libraries(distributed_sorter kamping::nlohmann-json-adapter)
 target_link_libraries(distributed_sorter CLI11::CLI11)
+target_link_libraries(distributed_sorter kassert::kassert)
 
-add_executable(space_efficient_sorter
-  src/executables/space_efficient_sorter.cpp
-  src/executables/common_cli.hpp)
+if(DSS_BUILD_SPACE_EFFICIENT_SORTER)
+  add_executable(space_efficient_sorter
+    src/executables/space_efficient_sorter.cpp
+    src/executables/common_cli.hpp)
 
-target_include_directories(space_efficient_sorter PRIVATE
-  "${CMAKE_CURRENT_BINARY_DIR}/include")
+  target_include_directories(space_efficient_sorter PRIVATE
+    "${CMAKE_CURRENT_BINARY_DIR}/include")
 
-target_compile_options(space_efficient_sorter PRIVATE ${DSS_MEHNERT_WARNING_FLAGS})
-target_link_libraries(space_efficient_sorter kamping::kamping)
-target_link_libraries(space_efficient_sorter dss_base)
-target_link_libraries(space_efficient_sorter tlx)
-target_link_libraries(space_efficient_sorter CLI11::CLI11)
+  target_compile_options(space_efficient_sorter PRIVATE ${DSS_MEHNERT_WARNING_FLAGS})
+  target_link_libraries(space_efficient_sorter kamping::kamping)
+  target_link_libraries(space_efficient_sorter dss_base)
+  target_link_libraries(space_efficient_sorter tlx)
+  target_link_libraries(space_efficient_sorter CLI11::CLI11)
+  target_link_libraries(space_efficient_sorter kassert::kassert)
+endif()
 
 if(DSS_BUILD_EXAMPLES)
   add_subdirectory(examples)
