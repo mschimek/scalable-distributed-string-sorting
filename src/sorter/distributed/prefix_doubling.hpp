@@ -19,6 +19,7 @@
 #include <tlx/sort/strings/string_ptr.hpp>
 
 #include "mpi/communicator.hpp"
+#include "sorter/distributed/bloomfilter2.hpp"
 #include "sorter/distributed/merge_sort.hpp"
 #include "sorter/distributed/permutation.hpp"
 #include "sorter/distributed/sample.hpp"
@@ -82,18 +83,33 @@ public:
           bloomfilter_base_case_{bloomfilter_base_case} {}
 
 protected:
-    // whether the bloom filter may use its allgather-based base case (see
-    // BloomFilter::filter); threaded down to the BloomFilter on construction
+    // whether the bloom filter may try its allgather-based base case each round (see
+    // bloomfilter2::BaseCaseDetector); it only fires when every PE holds at most one hash
     bool bloomfilter_base_case_ = false;
 
     template <typename StringPtr>
     std::vector<size_t> run_bloom_filter(
         StringPtr const& strptr, Subcommunicators const& comms, size_t const start_depth
     ) {
+        // the `BloomFilter` template parameter no longer names the implementation; it only
+        // selects the hasher and the communicator topology, both of which v2 takes as
+        // ordinary arguments. It disappears once v1 is deleted.
+        using Traits = bloomfilter2::v1_traits<BloomFilter>;
+
         this->measuring_tool_.start("bloomfilter", "bloomfilter_overall");
         kamping::measurements::timer().synchronize_and_start("bloomfilter_overall");
-        BloomFilter filter{comms, strptr.size(), bloomfilter_base_case_};
-        auto const prefixes = filter.compute_distinguishing_prefixes(strptr, comms, start_depth);
+        auto detection = bloomfilter2::make_remote_duplicate_detector(
+            comms,
+            Traits::is_grid,
+            bloomfilter_base_case_
+        );
+        auto const prefixes =
+            bloomfilter2::compute_distinguishing_prefixes<typename Traits::hash_policy>(
+                strptr,
+                comms,
+                start_depth,
+                *detection
+            );
         kamping::measurements::timer().stop_and_append();
         this->measuring_tool_.stop("bloomfilter", "bloomfilter_overall", comms.comm_root());
 
@@ -313,7 +329,9 @@ StringLcpContainer<StringSet> receive_strings(
     }
 
     auto result = comm.alltoallv(
-        kamping::send_buf(requests), kamping::send_counts(req_sizes), kamping::recv_counts_out()
+        kamping::send_buf(requests),
+        kamping::send_counts(req_sizes),
+        kamping::recv_counts_out()
     );
     auto recv_requests = result.extract_recv_buffer();
     auto recv_req_sizes = result.extract_recv_counts();

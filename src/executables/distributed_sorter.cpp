@@ -18,6 +18,8 @@
 #include <kamping/environment.hpp>
 #include <kamping/measurements/counter.hpp>
 #include <kamping/measurements/timer.hpp>
+#include <kamping/spdlog_adapter/logging.hpp>
+#include <spdlog/cfg/env.h>
 #include <tlx/cmdline_parser.hpp>
 #include <tlx/die.hpp>
 #include <tlx/die/core.hpp>
@@ -492,6 +494,10 @@ int main(int argc, char* argv[]) {
     CLI11_PARSE(app, argc, argv);
 
     kamping::Environment env{argc, argv};
+
+    // log level comes from the SPDLOG_LEVEL env var, e.g. SPDLOG_LEVEL=debug
+    spdlog::cfg::load_env_levels();
+    kamping::logging::setup_logging();
 
     if (levels_param.size() == 1 && levels_param.front() == "") {
         levels_param.clear();

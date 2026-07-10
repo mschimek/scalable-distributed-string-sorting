@@ -5,6 +5,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <functional>
 #include <iostream>
@@ -71,15 +72,26 @@ struct HashRank {
     int rank;
 };
 
+
 struct SipHasher {
     static inline hash_t hash(unsigned char const* str, size_t length) noexcept {
         return tlx::siphash(str, length);
+    }
+
+    static inline hash_t combine(hash_t const prefix, hash_t const suffix) noexcept {
+        std::array<hash_t, 2> const parts{prefix, suffix};
+        return tlx::siphash(reinterpret_cast<unsigned char const*>(parts.data()), sizeof(parts));
     }
 };
 
 struct XXHasher {
     static inline hash_t hash(unsigned char const* str, size_t length) noexcept {
         return xxh::xxhash3<64>(str, length);
+    }
+
+    static inline hash_t combine(hash_t const prefix, hash_t const suffix) noexcept {
+        std::array<hash_t, 2> const parts{prefix, suffix};
+        return xxh::xxhash3<64>(parts.data(), sizeof(parts));
     }
 };
 
