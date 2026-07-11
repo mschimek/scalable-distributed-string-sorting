@@ -275,7 +275,6 @@ private:
             recv_data.interval_sizes
         );
 
-        std::cerr << "rounds " << std::endl;
         if (comm_first + 1 == comm_last) {
             measuring_tool.add(hash_rank_pairs.size(), "bloomfilter_recv_hash_values");
             kamping::measurements::counter().append(
@@ -313,7 +312,6 @@ private:
             );
 
         } else {
-            std::cerr << "multilevel case " << std::endl;
             auto const bucket = hash_range.bucket(comm.rank(), comm.size());
             auto& global_offsets = recv_data.global_offsets;
 
@@ -326,7 +324,6 @@ private:
                     return {};
                 }
             }
-            std::cerr << "dedup: " << dedup_per_level_ << std::endl;
 
             // forward only one entry per distinct hash value and re-add the runs below.
             auto const run_begins = find_runs(hash_rank_pairs);
