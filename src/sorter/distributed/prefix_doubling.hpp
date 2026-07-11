@@ -77,15 +77,20 @@ public:
         PartitionPolicy partition,
         RedistributionPolicy redistribution,
         bool const bloomfilter_base_case,
+        bool const bloomfilter_level_dedup = false,
         mpi::OneFactorParams onefactor_params = {}
     )
         : Base{std::move(partition), std::move(redistribution), onefactor_params},
-          bloomfilter_base_case_{bloomfilter_base_case} {}
+          bloomfilter_base_case_{bloomfilter_base_case},
+          bloomfilter_level_dedup_{bloomfilter_level_dedup} {}
 
 protected:
     // whether the bloom filter may try its allgather-based base case each round (see
     // bloomfilter2::BaseCaseDetector); it only fires when every PE holds at most one hash
     bool bloomfilter_base_case_ = false;
+
+    // forward one entry per distinct hash at each intermediate grid level
+    bool bloomfilter_level_dedup_ = false;
 
     template <typename StringPtr>
     std::vector<size_t> run_bloom_filter(
@@ -101,7 +106,8 @@ protected:
         auto detection = bloomfilter2::make_remote_duplicate_detector(
             comms,
             Traits::is_grid,
-            bloomfilter_base_case_
+            bloomfilter_base_case_,
+            bloomfilter_level_dedup_
         );
         auto const prefixes =
             bloomfilter2::compute_distinguishing_prefixes<typename Traits::hash_policy>(

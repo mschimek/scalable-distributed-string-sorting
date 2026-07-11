@@ -289,6 +289,7 @@ void run_prefix_doubling(
             ),
             std::move(redistribution),
             args.bloomfilter_base_case,
+            args.bloomfilter_level_dedup,
             args.onefactor_params()
         };
         auto permutation = merge_sort.sort(std::move(input_container), comms);
@@ -580,6 +581,7 @@ int main(int argc, char* argv[]) {
         config["prefix-doubling"] = args.prefix_doubling;
         config["grid-bloomfilter"] = args.grid_bloomfilter;
         config["bloomfilter-base-case"] = args.bloomfilter_base_case;
+        config["bloomfilter-level-dedup"] = args.bloomfilter_level_dedup;
         config["lcp-compression"] = args.lcp_compression;
         config["prefix-compression"] = args.prefix_compression;
         config["alltoall"] = args.alltoall_routine;

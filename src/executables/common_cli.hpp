@@ -63,6 +63,7 @@ struct CommonArgs {
     bool prefix_doubling = false;
     bool grid_bloomfilter = true;
     bool bloomfilter_base_case = false;
+    bool bloomfilter_level_dedup = false;
     size_t num_iterations = 5;
     bool check_sorted = false;
     bool check_complete = false;
@@ -89,6 +90,7 @@ struct CommonArgs {
                + " prefix_doubling="    + std::to_string(prefix_doubling)
                + " grid_bloomfilter="   + std::to_string(grid_bloomfilter)
                + " bloomfilter_base_case=" + std::to_string(bloomfilter_base_case)
+               + " bloomfilter_level_dedup=" + std::to_string(bloomfilter_level_dedup)
                + " onefactor_num_slots=" + std::to_string(onefactor_num_slots)
                + " onefactor_use_issend=" + std::to_string(onefactor_use_issend)
                + " onefactor_synchronized=" + std::to_string(onefactor_synchronized);
@@ -349,6 +351,11 @@ inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
         "enable the allgather-based bloom filter base case when every PE holds "
         "at most one hash value"
     );
+    cp.add_flag(
+        "bloomfilter-level-dedup",
+        args.bloomfilter_level_dedup,
+        "forward only one entry per distinct hash at each intermediate grid level"
+    );
     cp.add_size_t(
         'a',
         "alltoall",
@@ -454,6 +461,12 @@ inline void add_common_args(CommonArgs& args, CLI::App& app) {
            args.bloomfilter_base_case,
            "enable the allgather-based bloom filter base case when every PE holds "
            "at most one hash value"
+    )
+        ->group("Bloom Filter");
+    app.add_flag(
+           "--bloomfilter-level-dedup",
+           args.bloomfilter_level_dedup,
+           "forward only one entry per distinct hash at each intermediate grid level"
     )
         ->group("Bloom Filter");
 

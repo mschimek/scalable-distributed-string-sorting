@@ -223,9 +223,12 @@ public:
 
 class AlltoallDuplicateDetector final : public RemoteDuplicateDetector {
 public:
-    AlltoallDuplicateDetector(Communicator const& comm_root, std::vector<Communicator> comms)
+    AlltoallDuplicateDetector(
+        Communicator const& comm_root, std::vector<Communicator> comms, bool const dedup_per_level
+    )
         : comm_root_{comm_root},
-          comms_{std::move(comms)} {
+          comms_{std::move(comms)},
+          dedup_per_level_{dedup_per_level} {
         KASSERT(!comms_.empty());
     }
 
@@ -234,6 +237,8 @@ public:
     std::optional<std::vector<int>>
     find(std::vector<HashStringIndex> const& hash_str_pairs, HashRange const hash_range) override {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
+
+        SPDLOG_DEBUG("detector: {} level(s), dedup_per_level={}", comms_.size(), dedup_per_level_);
 
         measuring_tool.start("bloomfilter_send_hashes");
         kamping::measurements::timer().start("bloomfilter_send_hashes");
@@ -247,6 +252,8 @@ public:
 private:
     Communicator const& comm_root_;
     std::vector<Communicator> comms_;
+    //! forward one entry per distinct hash at each intermediate level (no effect if single level)
+    bool dedup_per_level_;
 
     template <typename CommIt, typename T>
     std::optional<std::vector<int>> find_recursive(
@@ -268,6 +275,7 @@ private:
             recv_data.interval_sizes
         );
 
+        std::cerr << "rounds " << std::endl;
         if (comm_first + 1 == comm_last) {
             measuring_tool.add(hash_rank_pairs.size(), "bloomfilter_recv_hash_values");
             kamping::measurements::counter().append(
@@ -305,15 +313,85 @@ private:
             );
 
         } else {
-            auto bucket = hash_range.bucket(comm.rank(), comm.size());
-            auto duplicates = find_recursive(comm_first + 1, comm_last, hash_rank_pairs, bucket);
-            if (duplicates) {
-                auto& global_offsets = recv_data.global_offsets;
-                return send_dups_recursive(hash_rank_pairs, *duplicates, global_offsets, comm);
-            } else {
-                return {};
+            std::cerr << "multilevel case " << std::endl;
+            auto const bucket = hash_range.bucket(comm.rank(), comm.size());
+            auto& global_offsets = recv_data.global_offsets;
+
+            if (!dedup_per_level_) {
+                auto duplicates =
+                    find_recursive(comm_first + 1, comm_last, hash_rank_pairs, bucket);
+                if (duplicates) {
+                    return send_dups_recursive(hash_rank_pairs, *duplicates, global_offsets, comm);
+                } else {
+                    return {};
+                }
+            }
+            std::cerr << "dedup: " << dedup_per_level_ << std::endl;
+
+            // forward only one entry per distinct hash value and re-add the runs below.
+            auto const run_begins = find_runs(hash_rank_pairs);
+            auto const inner = find_recursive(
+                comm_first + 1,
+                comm_last,
+                unique_per_run(hash_rank_pairs, run_begins),
+                bucket
+            );
+            auto const duplicates = expand_runs(run_begins, inner.value_or(std::vector<int>{}));
+
+            SPDLOG_DEBUG(
+                "  level dedup: {} pairs -> {} forwarded, {} duplicates",
+                hash_rank_pairs.size(),
+                run_begins.size() - 1,
+                duplicates.size()
+            );
+            return send_dups_recursive(hash_rank_pairs, duplicates, global_offsets, comm);
+        }
+    }
+
+    // Offsets of each run of equal hashes in the hash-sorted `pairs`, plus a trailing
+    // sentinel, so run `i` spans `[result[i], result[i + 1])`.
+    static std::vector<int> find_runs(std::vector<HashRank> const& pairs) {
+        std::vector<int> run_begins;
+        for (size_t i = 0; i != pairs.size(); ++i) {
+            if (i == 0 || pairs[i].hash_value != pairs[i - 1].hash_value) {
+                run_begins.push_back(static_cast<int>(i));
             }
         }
+        run_begins.push_back(static_cast<int>(pairs.size()));
+        return run_begins;
+    }
+
+    static std::vector<HashRank>
+    unique_per_run(std::vector<HashRank> const& pairs, std::vector<int> const& run_begins) {
+        std::vector<HashRank> unique;
+        unique.reserve(run_begins.size() - 1);
+        for (size_t i = 0; i + 1 != run_begins.size(); ++i) {
+            unique.push_back(pairs[run_begins[i]]);
+        }
+        return unique;
+    }
+
+    //! Maps duplicate positions in the forwarded array back to positions in the full array.
+    //! Runs of length >= 2 are duplicates whether or not they are remote duplicates too.
+    static std::vector<int>
+    expand_runs(std::vector<int> const& run_begins, std::vector<int> const& inner_dups) {
+        KASSERT(std::is_sorted(inner_dups.begin(), inner_dups.end()));
+
+        std::vector<int> duplicates;
+        for (size_t run = 0, next = 0; run + 1 != run_begins.size(); ++run) {
+            auto const begin = run_begins[run], end = run_begins[run + 1];
+
+            bool const reported =
+                next != inner_dups.size() && inner_dups[next] == static_cast<int>(run);
+            next += reported;
+
+            if (reported || end - begin >= 2) {
+                for (auto pos = begin; pos != end; ++pos) {
+                    duplicates.push_back(pos);
+                }
+            }
+        }
+        return duplicates;
     }
 
     static std::vector<int> send_dups_recursive(
@@ -386,7 +464,10 @@ private:
 
 template <typename Subcommunicators>
 inline std::unique_ptr<RemoteDuplicateDetector> make_remote_duplicate_detector(
-    Subcommunicators const& comms, bool const grid, bool const enable_base_case
+    Subcommunicators const& comms,
+    bool const grid,
+    bool const enable_base_case,
+    bool const dedup_per_level
 ) {
     // single-level == a grid whose only level is the root communicator
     std::vector<Communicator> levels;
@@ -397,7 +478,11 @@ inline std::unique_ptr<RemoteDuplicateDetector> make_remote_duplicate_detector(
     }
 
     std::unique_ptr<RemoteDuplicateDetector> remote_duplicate_detector =
-        std::make_unique<AlltoallDuplicateDetector>(comms.comm_root(), std::move(levels));
+        std::make_unique<AlltoallDuplicateDetector>(
+            comms.comm_root(),
+            std::move(levels),
+            dedup_per_level
+        );
 
     if (enable_base_case) {
         remote_duplicate_detector =
