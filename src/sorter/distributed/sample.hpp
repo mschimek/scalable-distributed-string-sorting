@@ -44,14 +44,13 @@ inline size_t get_total_num_samples(
     return num_processes * sampling_factor * (num_partitions - 1);
 }
 
-// Oversampling for the randomized samplers: sampling_factor * log2(n) samples per PE on a
-// balanced input, drawn with replacement, where n is the global number of strings for
-// string-based and the global number of characters for character-based sampling.
-inline size_t get_total_num_random_samples(
-    size_t const global_size, size_t const sampling_factor, size_t const num_processes
-) {
-    double const log_n = std::log2(std::max<double>(2.0, static_cast<double>(global_size)));
-    double const num_samples = static_cast<double>(num_processes * sampling_factor) * log_n;
+// Randomized sampling: sampling_factor * log2(P) samples per PE on a balanced input. P is the
+// world size, not the size of the communicator being partitioned, because the bucket size
+// guarantee holds with high probability in P and the groups get small on the lower levels.
+inline size_t
+get_total_num_random_samples(size_t const sampling_factor, size_t const num_processes) {
+    double const log_p = std::log2(std::max(2.0, static_cast<double>(kamping::world_size())));
+    double const num_samples = static_cast<double>(num_processes * sampling_factor) * log_p;
     return static_cast<size_t>(std::ceil(num_samples));
 }
 
@@ -275,7 +274,7 @@ public:
         size_t const global_strings =
             comm.allreduce_single(kamping::send_buf(ss.size()), kamping::op(std::plus<>{}));
         size_t const total_num_samples =
-            is_random ? get_total_num_random_samples(global_strings, sampling_factor_, comm.size())
+            is_random ? get_total_num_random_samples(sampling_factor_, comm.size())
                       : get_total_num_samples(num_partitions, sampling_factor_, comm.size());
 
         SampleParams const params{
@@ -340,7 +339,7 @@ public:
         size_t const global_chars =
             comm.allreduce_single(kamping::send_buf(num_chars), kamping::op(std::plus<>{}));
         size_t const total_num_samples =
-            is_random ? get_total_num_random_samples(global_chars, sampling_factor_, comm.size())
+            is_random ? get_total_num_random_samples(sampling_factor_, comm.size())
                       : get_total_num_samples(num_partitions, sampling_factor_, comm.size());
 
         SampleParams const params{
