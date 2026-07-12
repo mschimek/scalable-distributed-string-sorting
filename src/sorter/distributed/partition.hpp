@@ -91,6 +91,23 @@ public:
         assert(interval_sizes.size() <= num_partitions);
         interval_sizes.resize(num_partitions, 0);
 
+        {
+            // The number of strings assigned to each bucket, appended in bucket order. The
+            // aggregation sums the i-th value of every PE, so the i-th value of "bucket_size"
+            // is the total number of strings in bucket i, and its spread shows how well the
+            // splitters balance the buckets.
+            //
+            // Note that the counter aggregates over MPI_COMM_WORLD, not over comm. On the
+            // levels below the first, the groups partition disjoint key ranges of their own,
+            // so bucket i of every group ends up in the same sum.
+            using kamping::measurements::GlobalAggregationMode;
+            std::vector<GlobalAggregationMode> const agg{GlobalAggregationMode::sum};
+            for (auto const interval_size: interval_sizes) {
+                kamping::measurements::counter()
+                    .append("bucket_size", static_cast<std::int64_t>(interval_size), agg);
+            }
+        }
+
         return interval_sizes;
     }
 

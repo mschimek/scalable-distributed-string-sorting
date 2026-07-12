@@ -244,6 +244,7 @@ protected:
                 GlobalAggregationMode::min,
                 GlobalAggregationMode::max,
                 GlobalAggregationMode::sum,
+                GlobalAggregationMode::gather,
             };
             kamping::measurements::counter()
                 .append("local_num_strings", static_cast<std::int64_t>(container.size()), agg);

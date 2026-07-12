@@ -28,26 +28,48 @@
 namespace dss_mehnert {
 namespace sample {
 
-inline size_t get_sample_size(
-    size_t const local_size, size_t const num_partitions, size_t const sampling_factor
+// Sizes are measured in strings for string-based and in characters for character-based
+// sampling.
+struct SampleParams {
+    size_t local_size;
+    double sample_distance; // the elements controlled by a single sample
+    size_t seed;            // PE-dependent seed, used by the randomized samplers
+};
+
+// Deterministic sampling: on a balanced input this amounts to the sampling_factor *
+// (num_partitions - 1) samples per PE that regular sampling classically draws.
+inline size_t get_total_num_samples(
+    size_t const num_partitions, size_t const sampling_factor, size_t const num_processes
 ) {
-    return std::min(sampling_factor * (num_partitions - 1), local_size);
+    return num_processes * sampling_factor * (num_partitions - 1);
 }
 
-// Oversampling for the randomized samplers: draw sampling_factor * log2(n)
-// splitters per PE (with replacement), where n is the *global* number of strings
-// for string-based sampling and the *global* number of characters for
-// character-based sampling. Unlike the deterministic sampler, the count does not
-// depend on num_partitions -- it is the classic log(n) oversampling that keeps
-// buckets balanced with high probability.
-inline size_t get_random_sample_size(
-    size_t const global_size, size_t const sampling_factor, size_t const local_size
+// Oversampling for the randomized samplers: sampling_factor * log2(n) samples per PE on a
+// balanced input, drawn with replacement, where n is the global number of strings for
+// string-based and the global number of characters for character-based sampling.
+inline size_t get_total_num_random_samples(
+    size_t const global_size, size_t const sampling_factor, size_t const num_processes
 ) {
-    if (local_size == 0) {
+    double const log_n = std::log2(std::max<double>(2.0, static_cast<double>(global_size)));
+    double const num_samples = static_cast<double>(num_processes * sampling_factor) * log_n;
+    return static_cast<size_t>(std::ceil(num_samples));
+}
+
+// omega = |S| / (total number of samples)
+inline double get_sample_distance(size_t const global_size, size_t const total_num_samples) {
+    if (total_num_samples == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(global_size) / static_cast<double>(total_num_samples);
+}
+
+// The number of samples drawn by this PE: one per omega strings/characters that it holds.
+inline size_t get_num_samples(SampleParams const& params) {
+    if (params.local_size == 0 || !(params.sample_distance > 0.0)) {
         return 0; // nothing to sample from on this PE
     }
-    double const log_n = std::log2(std::max<double>(2.0, static_cast<double>(global_size)));
-    return std::max<size_t>(1, static_cast<size_t>(sampling_factor * log_n));
+    double const num_samples = static_cast<double>(params.local_size) / params.sample_distance;
+    return std::min(params.local_size, static_cast<size_t>(std::llround(num_samples)));
 }
 
 inline size_t get_local_offset(size_t const local_size, Communicator const& comm) {
@@ -122,6 +144,14 @@ struct SampleResult<Char, true> {
 
 namespace _internal {
 
+// Shift the samples left by half of the sample distance.
+// A technique proposed by Claude to reduce the overloading of the first and last bucket - however,
+// this does not change the worst case bounds.
+inline size_t get_sample_position(size_t const index, SampleParams const& params) {
+    double const position = (static_cast<double>(index) + 0.5) * params.sample_distance;
+    return std::min(params.local_size - 1, static_cast<size_t>(position));
+}
+
 template <bool is_random>
 class StringIndexSampler;
 
@@ -130,15 +160,18 @@ class StringIndexSampler<false> {
 public:
     StringIndexSampler() = delete;
 
-    StringIndexSampler(size_t const strings, size_t const samples, size_t /*seed*/ = 0)
-        : sample_dist_{static_cast<double>(strings) / static_cast<double>(samples + 1)} {}
+    explicit StringIndexSampler(SampleParams const& params)
+        : params_{params},
+          num_samples_{get_num_samples(params)} {}
 
-    size_t get_sample(size_t const index) {
-        return static_cast<size_t>(static_cast<double>(index) * sample_dist_);
-    }
+    size_t size() const { return num_samples_; }
+
+    // a local string index
+    size_t get_sample(size_t const index) { return get_sample_position(index, params_); }
 
 private:
-    double sample_dist_;
+    SampleParams params_;
+    size_t num_samples_;
 };
 
 template <>
@@ -148,13 +181,17 @@ public:
 
     // the generator is seeded with the PE's rank so each PE draws an independent
     // sample rather than the same sequence everywhere
-    StringIndexSampler(size_t const strings, size_t, size_t const seed)
-        : gen_{seed},
-          dist_{0, std::max<size_t>(1, strings) - 1} {}
+    explicit StringIndexSampler(SampleParams const& params)
+        : num_samples_{get_num_samples(params)},
+          gen_{params.seed},
+          dist_{0, std::max<size_t>(1, params.local_size) - 1} {}
+
+    size_t size() const { return num_samples_; }
 
     size_t get_sample(size_t) { return dist_(gen_); }
 
 private:
+    size_t num_samples_;
     std::mt19937_64 gen_;
     std::uniform_int_distribution<size_t> dist_;
 };
@@ -167,17 +204,20 @@ class CharIndexSampler<false> {
 public:
     CharIndexSampler() = delete;
 
-    CharIndexSampler(size_t const num_chars, size_t const num_samples, size_t /*seed*/ = 0)
-        : sample_dist_{num_chars / (num_samples + 1)},
-          current_boundary_{0} {}
+    explicit CharIndexSampler(SampleParams const& params)
+        : params_{params},
+          num_samples_{get_num_samples(params)},
+          current_{0} {}
 
-    // todo make stateless
-    size_t next() { return current_boundary_ += sample_dist_; }
+    size_t size() const { return num_samples_; }
+
+    // boundaries are 1-based local character positions, see CharIndexSampler<true>
+    size_t next() { return get_sample_position(current_++, params_) + 1; }
 
 private:
-    // todo this could also use double instead of size_t
-    size_t sample_dist_;
-    size_t current_boundary_;
+    SampleParams params_;
+    size_t num_samples_;
+    size_t current_;
 };
 
 template <>
@@ -187,17 +227,19 @@ public:
 
     // the generator is seeded with the PE's rank so each PE draws an independent
     // sample rather than the same sequence everywhere
-    CharIndexSampler(size_t const num_chars, size_t const num_samples, size_t const seed)
-        : sample_(num_samples),
+    explicit CharIndexSampler(SampleParams const& params)
+        : sample_(get_num_samples(params)),
           current_{0} {
         // boundaries are drawn in [1, num_chars] (a 1-based character position):
         // a boundary of 0 would leave `string` at ss.begin() in the consumer loop
         // and make it read ss[string - 1] (out of bounds), so 0 must be excluded.
-        std::mt19937_64 gen{seed};
-        std::uniform_int_distribution<size_t> dist{1, std::max<size_t>(1, num_chars)};
+        std::mt19937_64 gen{params.seed};
+        std::uniform_int_distribution<size_t> dist{1, std::max<size_t>(1, params.local_size)};
         std::generate(sample_.begin(), sample_.end(), [&] { return dist(gen); });
         ips4o::sort(sample_.begin(), sample_.end());
     }
+
+    size_t size() const { return sample_.size(); }
 
     size_t next() { return sample_[current_++]; }
 
@@ -229,17 +271,21 @@ public:
         ExtraArg const arg,
         Communicator const& comm
     ) const {
-        size_t sample_size;
-        if constexpr (is_random) {
-            // n = global number of strings
-            size_t const global_strings =
-                comm.allreduce_single(kamping::send_buf(ss.size()), kamping::op(std::plus<>{}));
-            sample_size = get_random_sample_size(global_strings, sampling_factor_, ss.size());
-        } else {
-            sample_size = get_sample_size(ss.size(), num_partitions, sampling_factor_);
-        }
+        // n = global number of strings
+        size_t const global_strings =
+            comm.allreduce_single(kamping::send_buf(ss.size()), kamping::op(std::plus<>{}));
+        size_t const total_num_samples =
+            is_random ? get_total_num_random_samples(global_strings, sampling_factor_, comm.size())
+                      : get_total_num_samples(num_partitions, sampling_factor_, comm.size());
 
-        _internal::StringIndexSampler<is_random> sampler{ss.size(), sample_size, comm.rank()};
+        SampleParams const params{
+            .local_size = ss.size(),
+            .sample_distance = get_sample_distance(global_strings, total_num_samples),
+            .seed = comm.rank(),
+        };
+
+        _internal::StringIndexSampler<is_random> sampler{params};
+        size_t const sample_size = sampler.size();
 
         Result<StringSet> result;
         result.sample.reserve(sample_size * (100 + 1u)); // todo
@@ -249,7 +295,7 @@ public:
         }
 
         for (size_t i = 0; i < sample_size; ++i) {
-            auto const sample_index = sampler.get_sample(i + 1);
+            auto const sample_index = sampler.get_sample(i);
             auto const& sample = ss.at(sample_index);
             auto const sample_len = get_string_len(ss, sample, sample_index, arg);
             auto const sample_chars = ss.get_chars(sample, 0);
@@ -289,18 +335,22 @@ public:
         ExtraArg const arg,
         Communicator const& comm
     ) const {
+        // n = global number of characters
         size_t const num_chars = accumulate_chars(ss, arg);
-        size_t sample_size;
-        if constexpr (is_random) {
-            // n = global number of characters
-            size_t const global_chars =
-                comm.allreduce_single(kamping::send_buf(num_chars), kamping::op(std::plus<>{}));
-            sample_size = get_random_sample_size(global_chars, sampling_factor_, ss.size());
-        } else {
-            sample_size = get_sample_size(ss.size(), num_partitions, sampling_factor_);
-        }
+        size_t const global_chars =
+            comm.allreduce_single(kamping::send_buf(num_chars), kamping::op(std::plus<>{}));
+        size_t const total_num_samples =
+            is_random ? get_total_num_random_samples(global_chars, sampling_factor_, comm.size())
+                      : get_total_num_samples(num_partitions, sampling_factor_, comm.size());
 
-        _internal::CharIndexSampler<is_random> sampler{num_chars, sample_size, comm.rank()};
+        SampleParams const params{
+            .local_size = num_chars,
+            .sample_distance = get_sample_distance(global_chars, total_num_samples),
+            .seed = comm.rank(),
+        };
+
+        _internal::CharIndexSampler<is_random> sampler{params};
+        size_t const sample_size = sampler.size();
 
         Result<StringSet> result;
         result.sample.reserve((num_chars / std::max<size_t>(1, ss.size()) + 1) * sample_size);
