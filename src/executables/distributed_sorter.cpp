@@ -577,6 +577,8 @@ int main(int argc, char* argv[]) {
         config["sampling-factor"] = args.sampler.sampling_factor;
         config["splitter-length-factor"] = args.sampler.splitter_length_factor;
         config["redistribute-sample"] = args.sampler.redistribute_sample;
+        config["level-adjusted-scaling"] = args.sampler.level_adjusted_scaling;
+        config["local-sorter"] = args.local_sorter;
         config["splitter-sequential"] = args.splitter_sequential;
 
         config["rquick-v1"] = args.rquick_v1;
