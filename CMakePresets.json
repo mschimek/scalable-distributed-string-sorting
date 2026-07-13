@@ -1,0 +1,43 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "dev",
+      "displayName": "dev (Debug, all CLI features)",
+      "description": "Debug build with assertions and every CLI variant compiled in, for development, fuzzing and end-to-end checks. Slower to build and to run.",
+      "binaryDir": "${sourceDir}/build-dev",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CLI_ENABLE_ALL": "On",
+        "DSS_BUILD_SPACE_EFFICIENT_SORTER": "On",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "On",
+        "CMAKE_POLICY_VERSION_MINIMUM": "3.5"
+      }
+    },
+    {
+      "name": "experiments",
+      "displayName": "experiments (Release, -O3 -march=native)",
+      "description": "Optimized build with assertions compiled out, for measurements. Only the default set of CLI variants is compiled in, so builds stay manageable.",
+      "binaryDir": "${sourceDir}/build-experiments",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_POLICY_VERSION_MINIMUM": "3.5"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "dev",
+      "configurePreset": "dev"
+    },
+    {
+      "name": "experiments",
+      "configurePreset": "experiments"
+    }
+  ]
+}
