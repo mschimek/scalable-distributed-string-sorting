@@ -82,6 +82,7 @@ struct CommonArgs {
                + " sampling_factor="    + std::to_string(sampler.sampling_factor)
                + " splitter_length_factor=" + std::to_string(sampler.splitter_length_factor)
                + " redistribute_sample=" + std::to_string(sampler.redistribute_sample)
+               + " level_adjusted_scaling=" + std::to_string(sampler.level_adjusted_scaling)
                + " rquick_v1="          + std::to_string(rquick_v1)
                + " rquick_lcp="         + std::to_string(rquick_lcp)
                + " long_filter="        + std::to_string(long_filter)
@@ -208,6 +209,12 @@ get_first_level(std::vector<size_t> const& levels, dss_mehnert::Communicator con
     });
 }
 
+// the input is partitioned once per level and once more in the final round
+inline size_t
+get_num_levels(std::vector<size_t> const& levels, dss_mehnert::Communicator const& comm) {
+    return static_cast<size_t>(std::distance(get_first_level(levels, comm), levels.end())) + 1;
+}
+
 template <typename Callback, typename... Args>
 void dispatch_bloomfilter(Callback cb, CommonArgs const& args) {
     using namespace dss_mehnert::bloomfilter;
@@ -317,6 +324,11 @@ inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
         "redistribute-sample",
         args.sampler.redistribute_sample,
         "pseudorandomly redistribute the splitter sample across PEs before sorting it"
+    );
+    cp.add_flag(
+        "level-adjusted-scaling",
+        args.sampler.level_adjusted_scaling,
+        "scale the sampling factor with the number of levels"
     );
     cp.add_flag('Q', "rquick-v1", args.rquick_v1, "use version 1 of RQuick (defaults to v2)");
     cp.add_flag('L', "rquick-lcp", args.rquick_lcp, "use LCP values in RQuick (only with v2)");
@@ -430,6 +442,12 @@ inline void add_common_args(CommonArgs& args, CLI::App& app) {
            "--redistribute-sample",
            args.sampler.redistribute_sample,
            "pseudorandomly redistribute the splitter sample across PEs before sorting it"
+    )
+        ->group("Sampling");
+    app.add_flag(
+           "--level-adjusted-scaling",
+           args.sampler.level_adjusted_scaling,
+           "scale the sampling factor with the number of levels"
     )
         ->group("Sampling");
 

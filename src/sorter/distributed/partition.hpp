@@ -133,7 +133,9 @@ public:
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
         {
-            // count sample size before the sample is consumed by the sort
+            // count sample size before the sample is consumed by the sort; appended rather
+            // than added, so that a multi-level sort reports one value per level instead of
+            // accumulating the levels into a single value
             using kamping::measurements::GlobalAggregationMode;
             std::vector<GlobalAggregationMode> const agg{
                 GlobalAggregationMode::min,
@@ -145,8 +147,8 @@ public:
             );
             auto const num_sample_chars =
                 static_cast<std::int64_t>(sample.sample.size()) - num_sample_strings;
-            kamping::measurements::counter().add("sample_num_strings", num_sample_strings, agg);
-            kamping::measurements::counter().add("sample_num_chars", num_sample_chars, agg);
+            kamping::measurements::counter().append("sample_num_strings", num_sample_strings, agg);
+            kamping::measurements::counter().append("sample_num_chars", num_sample_chars, agg);
         }
 
         measuring_tool.start("sort_samples");

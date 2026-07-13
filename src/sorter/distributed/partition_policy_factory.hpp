@@ -36,6 +36,18 @@ struct SamplerArgs {
     // Pseudorandomly redistribute the splitter sample across the PEs before it is
     // sorted, so RQuick's per-string-count balancing starts from a balanced sample.
     bool redistribute_sample = false;
+    // The imbalance bounds of the levels multiply, so with multiple levels the sampling
+    // factor is scaled by the number of levels to keep the *final* imbalance at the bound
+    // a single level would give.
+    bool level_adjusted_scaling = false;
+
+    SamplerArgs scaled_to_levels(size_t const num_levels) const {
+        SamplerArgs scaled = *this;
+        if (level_adjusted_scaling) {
+            scaled.sampling_factor *= std::max<size_t>(1, num_levels);
+        }
+        return scaled;
+    }
 };
 
 [[noreturn]] inline void die_with_feature(std::string_view feature) {

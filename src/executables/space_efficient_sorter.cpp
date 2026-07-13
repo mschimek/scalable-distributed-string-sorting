@@ -313,7 +313,7 @@ void run_space_efficient_sort(
                 sems::BloomFilterFirst<config, RedistributionPolicy, PartitionPolicy, BloomFilter>;
             run_sorter(BloomFilterPolicy{
                 dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
-                    args.sampler,
+                    args.sampler.scaled_to_levels(get_num_levels(args.levels, comm)),
                     args.get_splitter_sorter()
                 ),
                 std::move(redistribution),
@@ -325,7 +325,7 @@ void run_space_efficient_sort(
                 sems::NoBloomFilter<config, RedistributionPolicy, PartitionPolicy>;
             run_sorter(BloomFilterPolicy{
                 dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
-                    args.sampler,
+                    args.sampler.scaled_to_levels(get_num_levels(args.levels, comm)),
                     args.get_splitter_sorter()
                 ),
                 std::move(redistribution)

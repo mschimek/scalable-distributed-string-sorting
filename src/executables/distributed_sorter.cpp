@@ -188,7 +188,7 @@ void run_merge_sort(
         kamping::measurements::timer().synchronize_and_start("sorting_overall");
         MergeSort merge_sort{
             dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
-                args.sampler,
+                args.sampler.scaled_to_levels(get_num_levels(args.levels, comm)),
                 args.get_splitter_sorter()
             ),
             std::move(redistribution),
@@ -284,7 +284,7 @@ void run_prefix_doubling(
         kamping::measurements::timer().synchronize_and_start("sorting_overall");
         MergeSort merge_sort{
             dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
-                args.sampler,
+                args.sampler.scaled_to_levels(get_num_levels(args.levels, comm)),
                 args.get_splitter_sorter()
             ),
             std::move(redistribution),
