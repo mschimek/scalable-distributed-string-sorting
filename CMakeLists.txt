@@ -106,7 +106,7 @@ set(CMAKE_COLOR_DIAGNOSTICS ON)
 
 option(CLI_ENABLE_PREFIX_DOUBLING "enable prefix doubling merge sort" On)
 option(CLI_ENABLE_REDISTRIBUTION "enable support for redistribution strategies" Off)
-option(CLI_ENABLE_ALLTOALL "enable support for different AllToAll routines" Off)
+option(CLI_ENABLE_ALLTOALL "enable support for different AllToAll routines" On)
 option(CLI_ENABLE_RQUICK_V1 "enable version of RQuick" Off)
 option(CLI_ENABLE_RQUICK_LCP "enable RQuick using LCP values" On)
 option(CLI_ENABLE_RQUICK_LONG_FILTER "enable RQuick splitter sort with the long-string filter" On)
