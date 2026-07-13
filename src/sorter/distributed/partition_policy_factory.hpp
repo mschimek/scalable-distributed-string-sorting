@@ -196,11 +196,15 @@ using SpaceEfficientPartitionPolicy = PolymorphicPartitionPolicy<
     sample::DistPrefixes>;
 
 template <typename Char, typename PolymorphicPolicy>
-PolymorphicPolicy
-init_partition_policy(SamplerArgs const& sampler, SplitterSorter splitter_sorter) {
+PolymorphicPolicy init_partition_policy(
+    SamplerArgs const& sampler, SplitterSorter splitter_sorter, LocalSorter local_sorter
+) {
     auto dispatch_policy = [&]<typename PartitionPolicy> {
-        return PolymorphicPolicy{
-            PartitionPolicy{sampler.sampling_factor, sampler.redistribute_sample}};
+        return PolymorphicPolicy{PartitionPolicy{
+            sampler.sampling_factor,
+            sampler.redistribute_sample,
+            local_sorter
+        }};
     };
 
     auto dispatch_sorter = [&]<typename SamplePolicy> {

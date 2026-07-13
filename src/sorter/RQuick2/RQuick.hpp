@@ -49,6 +49,7 @@
 
 #include "./BinTreeMedianSelection.hpp"
 #include "./RandomBitStore.hpp"
+#include "sorter/local_sorter.hpp"
 #include "sorter/RQuick2/Util.hpp"
 #include "sorter/distributed/duplicate_sorting.hpp"
 
@@ -354,10 +355,10 @@ void sortRec(
 }
 
 template <class StringPtr>
-void sortLocally(StringPtr const& strptr) {
+void sortLocally(StringPtr const& strptr, dss_mehnert::LocalSorter const local_sorter) {
     if constexpr (StringPtr::StringSet::is_indexed) {
         if constexpr (StringPtr::with_lcp) {
-            tlx::sort_strings_detail::radixsort_CI3(strptr, 0, 0);
+            dss_mehnert::sort_strings_locally(strptr, local_sorter);
             dss_mehnert::sort_duplicates(strptr);
         } else {
             using StringSet = typename StringPtr::StringSet;
@@ -365,11 +366,11 @@ void sortLocally(StringPtr const& strptr) {
 
             std::vector<size_t> lcps(strptr.size());
             StringLcpPtr augmented_ptr{strptr.active(), lcps.data()};
-            tlx::sort_strings_detail::radixsort_CI3(augmented_ptr, 0, 0);
+            dss_mehnert::sort_strings_locally(augmented_ptr, local_sorter);
             dss_mehnert::sort_duplicates(augmented_ptr);
         }
     } else {
-        tlx::sort_strings_detail::radixsort_CI3(strptr, 0, 0);
+        dss_mehnert::sort_strings_locally(strptr, local_sorter);
     }
 }
 
@@ -379,7 +380,8 @@ Container<StringPtr> sort(
     Data<StringPtr>&& local_data,
     int const tag,
     Tracker&& tracker,
-    RBC::Comm comm
+    RBC::Comm comm,
+    dss_mehnert::LocalSorter const local_sorter
 ) {
     if (comm.getSize() == 1) {
         tracker.local_sort_t.start(comm);
@@ -387,7 +389,7 @@ Container<StringPtr> sort(
         local_strings.resize_strings(local_data.get_num_strings());
         local_data.read_into(make_auto_ptr(local_strings));
         std::swap(local_strings.raw_strings(), local_data.raw_strs);
-        sortLocally(make_auto_ptr(local_strings));
+        sortLocally(make_auto_ptr(local_strings), local_sorter);
         tracker.local_sort_t.stop();
 
         return local_strings;
@@ -449,7 +451,7 @@ Container<StringPtr> sort(
     buffers.recv_data = std::move(local_data);
 
     tracker.local_sort_t.start(comm);
-    sortLocally(make_auto_ptr(local_strings));
+    sortLocally(make_auto_ptr(local_strings), local_sorter);
     tracker.local_sort_t.stop();
 
     RandomBitStore bit_store;
@@ -484,7 +486,8 @@ Container<StringPtr> sort(
     Data<StringPtr>&& data,
     int const tag,
     std::mt19937_64& async_gen,
-    MPI_Comm const mpi_comm
+    MPI_Comm const mpi_comm,
+    dss_mehnert::LocalSorter const local_sorter
 ) {
     RBC::Comm comm;
     RBC::Create_Comm_from_MPI(mpi_comm, &comm);
@@ -493,15 +496,21 @@ Container<StringPtr> sort(
         std::move(data),
         tag,
         std::forward<Tracker>(tracker),
-        std::move(comm)
+        std::move(comm),
+        local_sorter
     );
 }
 
 template <class StringPtr>
-Container<StringPtr>
-sort(Data<StringPtr>&& data, int const tag, std::mt19937_64& async_gen, MPI_Comm const mpi_comm) {
+Container<StringPtr> sort(
+    Data<StringPtr>&& data,
+    int const tag,
+    std::mt19937_64& async_gen,
+    MPI_Comm const mpi_comm,
+    dss_mehnert::LocalSorter const local_sorter
+) {
     _internal::DummyTracker tracker;
-    return sort(tracker, std::move(data), tag, async_gen, mpi_comm);
+    return sort(tracker, std::move(data), tag, async_gen, mpi_comm, local_sorter);
 }
 
 } // namespace RQuick2

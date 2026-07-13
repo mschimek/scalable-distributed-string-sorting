@@ -282,9 +282,11 @@ void run_space_efficient_sort(
             std::move(bloom_filter),
             dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
                 args.quantile_sampler,
-                args.get_splitter_sorter()
+                args.get_splitter_sorter(),
+                args.get_local_sorter()
             ),
-            args.quantile_size
+            args.quantile_size,
+            args.get_local_sorter()
         };
         auto global_ranks = merge_sort.sort(std::move(input_container), comms);
         measuring_tool.stop("none", "sorting_overall", comm);
@@ -314,7 +316,8 @@ void run_space_efficient_sort(
             run_sorter(BloomFilterPolicy{
                 dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
                     args.sampler.scaled_to_levels(get_num_levels(args.levels, comm)),
-                    args.get_splitter_sorter()
+                    args.get_splitter_sorter(),
+                    args.get_local_sorter()
                 ),
                 std::move(redistribution),
                 args.bloomfilter_base_case
@@ -326,7 +329,8 @@ void run_space_efficient_sort(
             run_sorter(BloomFilterPolicy{
                 dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
                     args.sampler.scaled_to_levels(get_num_levels(args.levels, comm)),
-                    args.get_splitter_sorter()
+                    args.get_splitter_sorter(),
+                    args.get_local_sorter()
                 ),
                 std::move(redistribution)
             });

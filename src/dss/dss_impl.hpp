@@ -27,7 +27,8 @@ std::vector<CharType> dss::run_sorter(
     std::vector<CharType>& to_sort,
     Communicator const& comm,
     SamplerArgs const& sampler,
-    SplitterSorter splitter_sorter)
+    SplitterSorter splitter_sorter,
+    dss_mehnert::LocalSorter local_sorter)
 {
     using StringSet            = dss_mehnert::StringSet<CharType, dss_mehnert::Length>;
     using PartitionPolicy      = dss_mehnert::MergeSortPartitionPolicy<CharType>;
@@ -39,8 +40,11 @@ std::vector<CharType> dss::run_sorter(
 
     Subcommunicators comms{comm};
     MergeSort sorter{
-        dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(sampler, splitter_sorter),
+        dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
+            sampler, splitter_sorter, local_sorter),
         RedistributionPolicy{},
+        {},
+        local_sorter,
     };
     dss_mehnert::StringLcpContainer<StringSet> container{std::move(to_sort)};
     sorter.sort(container, comms, sampler.splitter_length_factor);
@@ -58,7 +62,8 @@ template <typename CharType, typename Communicator>
 std::pair<std::vector<CharType>, std::vector<std::uint64_t>> dss::run_rquick(
     std::vector<CharType>& to_sort,
     std::vector<std::uint64_t>& indices,
-    Communicator const& comm)
+    Communicator const& comm,
+    dss_mehnert::LocalSorter local_sorter)
 {
     using StringSet =
         dss_mehnert::StringSet<CharType, dss_mehnert::Length, dss_mehnert::Index>;
@@ -74,7 +79,7 @@ std::pair<std::vector<CharType>, std::vector<std::uint64_t>> dss::run_rquick(
     // LCP array initialization is handled by RQuick.
     RQuick2::Data<StringPtr> data{std::move(to_sort)};
     data.indices = std::move(indices);
-    auto container = RQuick2::sort(std::move(data), tag, gen, comm_mpi);
+    auto container = RQuick2::sort(std::move(data), tag, gen, comm_mpi, local_sorter);
 
     auto strings = container.release_strings();
     std::vector<CharType> out_chars;
@@ -89,7 +94,10 @@ std::pair<std::vector<CharType>, std::vector<std::uint64_t>> dss::run_rquick(
 }
 
 template <typename CharType, typename Communicator>
-std::vector<CharType> dss::run_rquick(std::vector<CharType>& to_sort, Communicator const& comm)
+std::vector<CharType> dss::run_rquick(
+    std::vector<CharType>& to_sort,
+    Communicator const& comm,
+    dss_mehnert::LocalSorter local_sorter)
 {
     using StringSet = dss_mehnert::StringSet<CharType, dss_mehnert::Length>;
     using StringPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
@@ -103,7 +111,7 @@ std::vector<CharType> dss::run_rquick(std::vector<CharType>& to_sort, Communicat
 
     // LCP array initialization is handled by RQuick.
     RQuick2::Data<StringPtr> data{std::move(to_sort)};
-    auto container = RQuick2::sort(std::move(data), tag, gen, comm_mpi);
+    auto container = RQuick2::sort(std::move(data), tag, gen, comm_mpi, local_sorter);
 
     auto strings = container.release_strings();
     std::vector<CharType> out;

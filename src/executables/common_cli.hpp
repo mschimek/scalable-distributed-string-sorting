@@ -28,6 +28,7 @@
 #include "sorter/distributed/prefix_doubling.hpp"
 #include "sorter/distributed/redistribution.hpp"
 #include "sorter/distributed/sample.hpp"
+#include "sorter/local_sorter.hpp"
 #include "strings/stringset.hpp"
 
 inline void check_path_exists(std::string const& path) {
@@ -58,6 +59,8 @@ struct CommonArgs {
     bool long_filter = false;
     bool splitter_sequential = false;
     size_t redistribution = static_cast<size_t>(Redistribution::grid);
+    size_t local_sorter =
+        static_cast<size_t>(dss_mehnert::LocalSorter::radixsort_CI3);
     bool prefix_compression = false;
     bool lcp_compression = false;
     bool prefix_doubling = false;
@@ -83,6 +86,7 @@ struct CommonArgs {
                + " splitter_length_factor=" + std::to_string(sampler.splitter_length_factor)
                + " redistribute_sample=" + std::to_string(sampler.redistribute_sample)
                + " level_adjusted_scaling=" + std::to_string(sampler.level_adjusted_scaling)
+               + " local_sorter="       + std::to_string(local_sorter)
                + " rquick_v1="          + std::to_string(rquick_v1)
                + " rquick_lcp="         + std::to_string(rquick_lcp)
                + " long_filter="        + std::to_string(long_filter)
@@ -105,6 +109,10 @@ struct CommonArgs {
             .num_slots = onefactor_num_slots,
             .use_issend = onefactor_use_issend,
         };
+    }
+
+    dss_mehnert::LocalSorter get_local_sorter() const {
+        return clamp_enum_value<dss_mehnert::LocalSorter>(local_sorter);
     }
 
     dss_mehnert::SplitterSorter get_splitter_sorter() const {
@@ -400,6 +408,11 @@ inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
         "(0=none, 1=naive, 2=simple-strings, 3=simple-chars, "
         " 4=det-strings, 5=det-chars, [6]=grid)"
     );
+    cp.add_size_t(
+        "local-sorter",
+        args.local_sorter,
+        "sequential sorter for the base case ([0]=radixsort_CI3, 1=multikey_quicksort)"
+    );
     cp.add_flag('v', "check-sorted", args.check_sorted, "check that the result is sorted");
     cp.add_flag('V', "check-complete", args.check_complete, "check that the result is complete");
     cp.add_flag("verbose", args.verbose, "print some debug output");
@@ -493,6 +506,12 @@ inline void add_common_args(CommonArgs& args, CLI::App& app) {
         ->group("Communication");
     app.add_flag("--prefix-compression", args.prefix_compression, "use LCP compression during string exchange")
         ->group("Communication");
+    app.add_option(
+           "--local-sorter",
+           args.local_sorter,
+           "sequential sorter for the base case ([0]=radixsort_CI3, 1=multikey_quicksort)"
+    )
+        ->group("General");
     app.add_option(
            "--redistribution",
            args.redistribution,
@@ -649,7 +668,8 @@ void run_rquick(
         using StringPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
         measuring_tool.start("none", "sorting_overall");
         RQuick2::Data<StringPtr> data{input_container.release_raw_strings()};
-        auto sorted_container = RQuick2::sort(std::move(data), tag, gen, mpi_comm);
+        auto sorted_container =
+            RQuick2::sort(std::move(data), tag, gen, mpi_comm, args.get_local_sorter());
         measuring_tool.stop("none", "sorting_overall", comm);
 
         measuring_tool.disable();
@@ -672,7 +692,8 @@ void run_rquick(
         using StringPtr = tlx::sort_strings_detail::StringPtr<StringSet>;
         measuring_tool.start("none", "sorting_overall");
         RQuick2::Data<StringPtr> data{input_container.release_raw_strings()};
-        auto sorted_container = RQuick2::sort(std::move(data), tag, gen, mpi_comm);
+        auto sorted_container =
+            RQuick2::sort(std::move(data), tag, gen, mpi_comm, args.get_local_sorter());
         measuring_tool.stop("none", "sorting_overall", comm);
 
         if (args.print_sorted) {

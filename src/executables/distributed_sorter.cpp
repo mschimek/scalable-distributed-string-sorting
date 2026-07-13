@@ -189,10 +189,12 @@ void run_merge_sort(
         MergeSort merge_sort{
             dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
                 args.sampler.scaled_to_levels(get_num_levels(args.levels, comm)),
-                args.get_splitter_sorter()
+                args.get_splitter_sorter(),
+                args.get_local_sorter()
             ),
             std::move(redistribution),
-            args.onefactor_params()
+            args.onefactor_params(),
+            args.get_local_sorter()
         };
         merge_sort.sort(input_container, comms, args.sampler.splitter_length_factor);
         kamping::measurements::timer().stop_and_append();
@@ -285,12 +287,14 @@ void run_prefix_doubling(
         MergeSort merge_sort{
             dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
                 args.sampler.scaled_to_levels(get_num_levels(args.levels, comm)),
-                args.get_splitter_sorter()
+                args.get_splitter_sorter(),
+                args.get_local_sorter()
             ),
             std::move(redistribution),
             args.bloomfilter_base_case,
             args.bloomfilter_level_dedup,
-            args.onefactor_params()
+            args.onefactor_params(),
+            args.get_local_sorter()
         };
         auto permutation = merge_sort.sort(std::move(input_container), comms);
         kamping::measurements::timer().stop_and_append();

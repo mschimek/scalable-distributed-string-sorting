@@ -20,6 +20,7 @@
 
 #include "mpi/communicator.hpp"
 #include "sorter/distributed/bloomfilter2.hpp"
+#include "sorter/local_sorter.hpp"
 #include "sorter/distributed/merge_sort.hpp"
 #include "sorter/distributed/permutation.hpp"
 #include "sorter/distributed/sample.hpp"
@@ -78,9 +79,10 @@ public:
         RedistributionPolicy redistribution,
         bool const bloomfilter_base_case,
         bool const bloomfilter_level_dedup = false,
-        mpi::OneFactorParams onefactor_params = {}
+        mpi::OneFactorParams onefactor_params = {},
+        LocalSorter local_sorter = LocalSorter::radixsort_CI3
     )
-        : Base{std::move(partition), std::move(redistribution), onefactor_params},
+        : Base{std::move(partition), std::move(redistribution), onefactor_params, local_sorter},
           bloomfilter_base_case_{bloomfilter_base_case},
           bloomfilter_level_dedup_{bloomfilter_level_dedup} {}
 
@@ -296,7 +298,7 @@ public:
 
         this->measuring_tool_.start("local_sorting", "sort_locally");
         kamping::measurements::timer().synchronize_and_start("sort_locally");
-        tlx::sort_strings_detail::radixsort_CI3(strptr, 0, 0);
+        sort_strings_locally(strptr, this->local_sorter_);
         kamping::measurements::timer().stop_and_append();
         this->measuring_tool_.stop("local_sorting", "sort_locally", comms.comm_root());
 

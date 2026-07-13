@@ -38,16 +38,18 @@ std::vector<CharType> run_sorter(
     std::vector<CharType>& to_sort,
     Communicator const& comm,
     SamplerArgs const& sampler,
-    SplitterSorter splitter_sorter);
+    SplitterSorter splitter_sorter,
+    dss_mehnert::LocalSorter local_sorter = dss_mehnert::LocalSorter::radixsort_CI3);
 
 template <typename CharType, typename Communicator>
 std::vector<CharType> run_sorter(
     std::vector<CharType>& to_sort,
     Communicator const& comm,
-    SplitterSorter splitter_sorter = SplitterSorter::Sequential)
+    SplitterSorter splitter_sorter = SplitterSorter::Sequential,
+    dss_mehnert::LocalSorter local_sorter = dss_mehnert::LocalSorter::radixsort_CI3)
 {
     return run_sorter<kDefaultAlltoallConfig>(
-        to_sort, comm, kDefaultSamplerArgs, splitter_sorter);
+        to_sort, comm, kDefaultSamplerArgs, splitter_sorter, local_sorter);
 }
 
 // Sorts a distributed set of (null-free) strings, packed as a single buffer of
@@ -56,7 +58,10 @@ std::vector<CharType> run_sorter(
 // in the same packed representation. Note that, as with RQuick, the output is
 // distributed across PEs and may be unbalanced (some PEs can end up empty).
 template <typename CharType, typename Communicator>
-std::vector<CharType> run_rquick(std::vector<CharType>& to_sort, Communicator const& comm);
+std::vector<CharType> run_rquick(
+    std::vector<CharType>& to_sort,
+    Communicator const& comm,
+    dss_mehnert::LocalSorter local_sorter = dss_mehnert::LocalSorter::radixsort_CI3);
 
 // Indexed variant of the above: each string carries a 64-bit index, and strings
 // are ordered lexicographically with the index as a tie-breaker (the same
@@ -68,7 +73,8 @@ template <typename CharType, typename Communicator>
 std::pair<std::vector<CharType>, std::vector<std::uint64_t>> run_rquick(
     std::vector<CharType>& to_sort,
     std::vector<std::uint64_t>& indices,
-    Communicator const& comm);
+    Communicator const& comm,
+    dss_mehnert::LocalSorter local_sorter = dss_mehnert::LocalSorter::radixsort_CI3);
 
 }  // namespace dss
 
@@ -78,13 +84,14 @@ namespace dss {
 extern template std::vector<unsigned char>
 run_sorter<kDefaultAlltoallConfig, unsigned char, dss_mehnert::Communicator>(
     std::vector<unsigned char>&, dss_mehnert::Communicator const&,
-    SamplerArgs const&, SplitterSorter);
+    SamplerArgs const&, SplitterSorter, dss_mehnert::LocalSorter);
 
 extern template std::vector<unsigned char>
 run_rquick<unsigned char, dss_mehnert::Communicator>(
-    std::vector<unsigned char>&, dss_mehnert::Communicator const&);
+    std::vector<unsigned char>&, dss_mehnert::Communicator const&, dss_mehnert::LocalSorter);
 
 extern template std::pair<std::vector<unsigned char>, std::vector<std::uint64_t>>
 run_rquick<unsigned char, dss_mehnert::Communicator>(
-    std::vector<unsigned char>&, std::vector<std::uint64_t>&, dss_mehnert::Communicator const&);
+    std::vector<unsigned char>&, std::vector<std::uint64_t>&, dss_mehnert::Communicator const&,
+    dss_mehnert::LocalSorter);
 }

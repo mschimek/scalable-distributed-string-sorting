@@ -39,6 +39,7 @@
 
 #include "./BinTreeMedianSelection.hpp"
 #include "./RandomBitStore.hpp"
+#include "sorter/local_sorter.hpp"
 #include "sorter/distributed/duplicate_sorting.hpp"
 #include "strings/stringcontainer.hpp"
 #include "strings/stringset.hpp"
@@ -638,15 +639,15 @@ StringContainer sortRec(
 }
 
 template <typename StringContainer>
-void sortLocally(StringContainer& container) {
+void sortLocally(StringContainer& container, dss_mehnert::LocalSorter const local_sorter) {
     if constexpr (StringContainer::is_indexed) {
         std::vector<uint64_t> lcp(container.size(), 0);
         auto strptr =
             tlx::sort_strings_detail::StringLcpPtr(container.make_string_set(), lcp.data());
-        tlx::sort_strings_detail::radixsort_CI3(strptr, 0, 0);
+        dss_mehnert::sort_strings_locally(strptr, local_sorter);
         dss_mehnert::sort_duplicates(strptr);
     } else {
-        tlx::sort_strings_detail::radixsort_CI3(container.make_string_ptr(), 0, 0);
+        dss_mehnert::sort_strings_locally(container.make_string_ptr(), local_sorter);
     }
 }
 
@@ -659,7 +660,8 @@ typename Data::StringContainer sort(
     Communicator comm,
     Tracker&& tracker,
     Comp&& comp,
-    bool is_robust
+    bool is_robust,
+    dss_mehnert::LocalSorter const local_sorter
 ) {
     using StringContainer = typename Data::StringContainer;
 
@@ -671,7 +673,7 @@ typename Data::StringContainer sort(
     if (nprocs == 1) {
         StringContainer container = data.moveToContainer();
         tracker.local_sort_t.start(comm);
-        sortLocally(container);
+        sortLocally(container, local_sorter);
         tracker.local_sort_t.stop();
 
         return container;
@@ -737,7 +739,7 @@ typename Data::StringContainer sort(
     tracker.parallel_shuffle_t.stop();
 
     tracker.local_sort_t.start(comm);
-    sortLocally(container);
+    sortLocally(container, local_sorter);
     tracker.local_sort_t.stop();
 
     RandomBitStore bit_store;
@@ -785,7 +787,8 @@ typename Data::StringContainer sort(
     int tag,
     MPI_Comm mpi_comm,
     Comp&& comp,
-    bool is_robust
+    bool is_robust,
+    dss_mehnert::LocalSorter const local_sorter
 ) {
     return RQuick::_internal::sort(
         async_gen,
@@ -795,7 +798,8 @@ typename Data::StringContainer sort(
         mpi_comm,
         std::forward<Tracker>(tracker),
         comp,
-        is_robust
+        is_robust,
+        local_sorter
     );
 }
 
@@ -807,7 +811,8 @@ typename Data::StringContainer sort(
     int tag,
     MPI_Comm mpi_comm,
     Comp&& comp,
-    bool is_robust
+    bool is_robust,
+    dss_mehnert::LocalSorter const local_sorter
 ) {
     _internal::DummyTracker tracker;
     return RQuick::_internal::sort(
@@ -818,7 +823,8 @@ typename Data::StringContainer sort(
         mpi_comm,
         tracker,
         comp,
-        is_robust
+        is_robust,
+        local_sorter
     );
 }
 

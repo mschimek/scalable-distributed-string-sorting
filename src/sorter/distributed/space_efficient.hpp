@@ -17,6 +17,7 @@
 
 #include "mpi/communicator.hpp"
 #include "mpi/rotate.hpp"
+#include "sorter/local_sorter.hpp"
 #include "sorter/distributed/permutation.hpp"
 #include "sorter/distributed/prefix_doubling.hpp"
 #include "sorter/distributed/sample.hpp"
@@ -292,11 +293,13 @@ public:
     SpaceEfficientSort(
         BloomFilterPolicy bloom_filter,
         QuantilePolicy quantile_partition,
-        size_t const quantile_size
+        size_t const quantile_size,
+        LocalSorter const local_sorter = LocalSorter::radixsort_CI3
     )
         : QuantilePolicy_{std::move(quantile_partition)},
           BloomFilterPolicy{std::move(bloom_filter)},
-          quantile_size_{quantile_size} {}
+          quantile_size_{quantile_size},
+          local_sorter_{local_sorter} {}
 
     template <typename StringSet>
     std::vector<size_t>
@@ -323,7 +326,7 @@ public:
         this->measuring_tool_.add(container.char_size(), "chars_in_set");
 
         this->measuring_tool_.start("local_sorting", "sort_locally");
-        tlx::sort_strings_detail::radixsort_CI3(strptr, 0, 500 * 1024 * 1024);
+        sort_strings_locally(strptr, local_sorter_, 0, 500 * 1024 * 1024);
         this->measuring_tool_.stop("local_sorting", "sort_locally", comm_root);
 
         std::vector<size_t> global_permutation(strptr.size());
@@ -394,6 +397,7 @@ private:
     static constexpr size_t start_depth = 8;
 
     size_t quantile_size_;
+    LocalSorter local_sorter_;
 
     template <typename StringPtr, typename ExtraArg>
     std::vector<size_t>

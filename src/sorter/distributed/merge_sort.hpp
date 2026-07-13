@@ -29,6 +29,7 @@
 #include "mpi/alltoall_strings.hpp"
 #include "sorter/distributed/merging.hpp"
 #include "sorter/distributed/misc.hpp"
+#include "sorter/local_sorter.hpp"
 #include "sorter/distributed/multi_level.hpp"
 #include "sorter/distributed/permutation.hpp"
 #include "sorter/distributed/sample.hpp"
@@ -45,11 +46,13 @@ public:
     explicit BaseDistributedMergeSort(
         PartitionPolicy partition,
         RedistributionPolicy redistribution,
-        mpi::OneFactorParams onefactor_params = {}
+        mpi::OneFactorParams onefactor_params = {},
+        LocalSorter local_sorter = LocalSorter::radixsort_CI3
     )
         : PartitionPolicy{std::move(partition)},
           RedistributionPolicy{std::move(redistribution)},
-          onefactor_params_{onefactor_params} {}
+          onefactor_params_{onefactor_params},
+          local_sorter_{local_sorter} {}
 
 protected:
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
@@ -60,6 +63,9 @@ protected:
 
     // runtime tuning for the 1-factor string exchange (ignored by other kinds)
     mpi::OneFactorParams onefactor_params_;
+
+    // the sequential sorter used for the local base case
+    LocalSorter local_sorter_;
 
     template <typename StringSet, typename PermutationBuilder>
         requires(StringSet::has_length)
@@ -299,7 +305,7 @@ public:
             this->measuring_tool_.start("local_sorting", "sort_locally");
             kamping::measurements::timer().synchronize_and_start("sort_locally");
             auto const strptr = container.make_string_lcp_ptr();
-            tlx::sort_strings_detail::radixsort_CI3(strptr, 0, 0);
+            sort_strings_locally(strptr, this->local_sorter_);
             kamping::measurements::timer().stop_and_append();
             this->measuring_tool_.stop("local_sorting", "sort_locally", comm_root);
         }

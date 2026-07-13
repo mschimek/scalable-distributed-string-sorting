@@ -7,13 +7,14 @@ namespace dss {
 template std::vector<unsigned char>
 run_sorter<kDefaultAlltoallConfig, unsigned char, dss_mehnert::Communicator>(
     std::vector<unsigned char>&, dss_mehnert::Communicator const&,
-    SamplerArgs const&, SplitterSorter);
+    SamplerArgs const&, SplitterSorter, dss_mehnert::LocalSorter);
 
 template std::vector<unsigned char>
 run_rquick<unsigned char, dss_mehnert::Communicator>(
-    std::vector<unsigned char>&, dss_mehnert::Communicator const&);
+    std::vector<unsigned char>&, dss_mehnert::Communicator const&, dss_mehnert::LocalSorter);
 
 template std::pair<std::vector<unsigned char>, std::vector<std::uint64_t>>
 run_rquick<unsigned char, dss_mehnert::Communicator>(
-    std::vector<unsigned char>&, std::vector<std::uint64_t>&, dss_mehnert::Communicator const&);
+    std::vector<unsigned char>&, std::vector<std::uint64_t>&, dss_mehnert::Communicator const&,
+    dss_mehnert::LocalSorter);
 }

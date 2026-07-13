@@ -81,7 +81,8 @@ public:
         Sample&& sample,
         size_t const num_partitions,
         Communicator const& comm,
-        bool const redistribute_sample
+        bool const redistribute_sample,
+        LocalSorter const local_sorter
     ) const {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
@@ -143,7 +144,7 @@ public:
         // untouched sample (the split/round-1 machinery would be a no-op)
         if (global_long_count == 0) {
             kamping::measurements::timer().start("sort_short_samples");
-            auto sorted = sort_indexed(std::move(sample), comm, tag_round2);
+            auto sorted = sort_indexed(std::move(sample), comm, tag_round2, local_sorter);
             kamping::measurements::timer().stop_and_append();
             kamping::measurements::timer().stop_and_append();
             measuring_tool.stop("sort_samples");
@@ -192,7 +193,12 @@ public:
         // order -- exactly what round 2 needs to complete l_thr-prefix ties.
         kamping::measurements::timer().start("sort_long_samples");
         auto sorted_longs =
-            sort_indexed(make_sample(std::move(long_chars), std::move(long_indices)), comm, tag_round1);
+            sort_indexed(
+                make_sample(std::move(long_chars), std::move(long_indices)),
+                comm,
+                tag_round1,
+                local_sorter
+            );
         kamping::measurements::timer().stop_and_append();
         size_t const rank_offset = comm.exscan_single(
             kamping::send_buf(sorted_longs.size()),
@@ -221,7 +227,8 @@ public:
         auto sorted_r2 = sort_indexed(
             make_sample(std::move(r2_chars), std::move(r2_indices), sample.local_offset),
             comm,
-            tag_round2
+            tag_round2,
+            local_sorter
         );
         kamping::measurements::timer().stop_and_append();
 
@@ -277,14 +284,19 @@ private:
     }
 
     // indexed RQuick2 sort, matching RQuickV2::sort_samples
-    static SortedContainer sort_indexed(Sample&& sample, Communicator const& comm, int const tag) {
+    static SortedContainer sort_indexed(
+        Sample&& sample,
+        Communicator const& comm,
+        int const tag,
+        LocalSorter const local_sorter
+    ) {
         std::mt19937_64 gen{seed + comm.rank()};
         auto const comm_mpi = comm.mpi_communicator();
 
         RQuick2::Data<R2StringPtr> data{std::move(sample.sample)};
         data.indices = std::move(sample.indices);
         // LCP array initialization is done by RQuick
-        return RQuick2::sort(std::move(data), tag, gen, comm_mpi);
+        return RQuick2::sort(std::move(data), tag, gen, comm_mpi, local_sorter);
     }
 
     // replace truncated-long splitters with their full chars + input id. The
