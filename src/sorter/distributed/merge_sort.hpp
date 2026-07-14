@@ -186,6 +186,23 @@ protected:
             kamping::recv_buf<kamping::BufferResizePolicy::resize_to_fit>(recv_counts)
         );
         kamping::measurements::timer().stop_and_append();
+
+        {
+            // strings this PE receives in this round; in the final round that is exactly the
+            // size of its bucket, so min/max/sum show how well the splitters balanced them.
+            // One value per PE (never one per bucket: that would make the counter's gather
+            // quadratic in the number of PEs).
+            using kamping::measurements::GlobalAggregationMode;
+            std::vector<GlobalAggregationMode> const agg{
+                GlobalAggregationMode::min,
+                GlobalAggregationMode::max,
+                GlobalAggregationMode::sum,
+            };
+            auto const num_recv = std::accumulate(recv_counts.begin(), recv_counts.end(), size_t{0});
+            kamping::measurements::counter()
+                .append("bucket_size", static_cast<std::int64_t>(num_recv), agg);
+        }
+
         comm.barrier();
         kamping::measurements::timer().start("all_to_all_strings_data");
 

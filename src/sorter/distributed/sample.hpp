@@ -32,8 +32,9 @@ namespace sample {
 // sampling.
 struct SampleParams {
     size_t local_size;
-    double sample_distance; // the elements controlled by a single sample
-    size_t seed;            // PE-dependent seed, used by the randomized samplers
+    size_t max_num_samples;  // a sample is a string, so there can be no more than ss.size()
+    double sample_distance;  // the elements controlled by a single sample
+    size_t seed;             // PE-dependent seed, used by the randomized samplers
 };
 
 // Deterministic sampling: on a balanced input this amounts to the sampling_factor *
@@ -41,7 +42,10 @@ struct SampleParams {
 inline size_t get_total_num_samples(
     size_t const num_partitions, size_t const sampling_factor, size_t const num_processes
 ) {
-    return num_processes * sampling_factor * (num_partitions - 1);
+    if (num_partitions < 2) {
+        return 0; // nothing to split
+    }
+    return num_processes * std::max<size_t>(1, sampling_factor) * (num_partitions - 1);
 }
 
 // Randomized sampling: sampling_factor * log2(P) samples per PE on a balanced input. P is the
@@ -50,7 +54,8 @@ inline size_t get_total_num_samples(
 inline size_t
 get_total_num_random_samples(size_t const sampling_factor, size_t const num_processes) {
     double const log_p = std::log2(std::max(2.0, static_cast<double>(kamping::world_size())));
-    double const num_samples = static_cast<double>(num_processes * sampling_factor) * log_p;
+    double const num_samples =
+        static_cast<double>(num_processes * std::max<size_t>(1, sampling_factor)) * log_p;
     return static_cast<size_t>(std::ceil(num_samples));
 }
 
@@ -62,13 +67,16 @@ inline double get_sample_distance(size_t const global_size, size_t const total_n
     return static_cast<double>(global_size) / static_cast<double>(total_num_samples);
 }
 
-// The number of samples drawn by this PE: one per omega strings/characters that it holds.
+// The number of samples drawn by this PE: one per omega strings/characters that it holds. If
+// more samples than strings are requested (omega < 1, or omega < avg. string length for
+// character-based sampling), the count is capped: the PE can not contribute more distinct
+// samples than it holds strings.
 inline size_t get_num_samples(SampleParams const& params) {
     if (params.local_size == 0 || !(params.sample_distance > 0.0)) {
         return 0; // nothing to sample from on this PE
     }
     double const num_samples = static_cast<double>(params.local_size) / params.sample_distance;
-    return std::min(params.local_size, static_cast<size_t>(std::llround(num_samples)));
+    return std::min(params.max_num_samples, static_cast<size_t>(std::llround(num_samples)));
 }
 
 inline size_t get_local_offset(size_t const local_size, Communicator const& comm) {
@@ -126,6 +134,18 @@ size_t accumulate_chars(StringSet const& ss, DistPrefixes const arg) {
     return std::accumulate(arg.prefixes.begin(), arg.prefixes.end(), size_t{0});
 }
 
+// The characters seen by the character-based sampler; uses the same (possibly truncated) lengths
+// as its consumer loop. With full lengths the boundaries are spread over more characters than the
+// loop can traverse and the trailing samples are lost.
+template <typename StringSet, typename ExtraArg>
+size_t accumulate_sample_chars(StringSet const& ss, ExtraArg const arg) {
+    size_t num_chars = 0, index = 0;
+    for (auto it = ss.begin(); it != ss.end(); ++it, ++index) {
+        num_chars += get_string_len(ss, ss[it], index, arg);
+    }
+    return num_chars;
+}
+
 template <typename Char, bool is_indexed>
 struct SampleResult;
 
@@ -143,12 +163,26 @@ struct SampleResult<Char, true> {
 
 namespace _internal {
 
+// The distance between two samples of this PE. This is omega, unless get_num_samples had to
+// cap the number of samples at the local size: the samples must still cover the whole local
+// input, so the distance is derived from the number of samples actually drawn.
+inline double get_local_sample_distance(SampleParams const& params, size_t const num_samples) {
+    if (num_samples == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(params.local_size) / static_cast<double>(num_samples);
+}
+
 // Shift the samples left by half of the sample distance.
 // A technique proposed by Claude to reduce the overloading of the first and last bucket - however,
 // this does not change the worst case bounds.
-inline size_t get_sample_position(size_t const index, SampleParams const& params) {
-    double const position = (static_cast<double>(index) + 0.5) * params.sample_distance;
-    return std::min(params.local_size - 1, static_cast<size_t>(position));
+inline size_t
+get_sample_position(size_t const index, size_t const local_size, double const sample_distance) {
+    if (local_size == 0) {
+        return 0; // no samples are drawn on an empty PE; guards the local_size - 1 below
+    }
+    double const position = (static_cast<double>(index) + 0.5) * sample_distance;
+    return std::min(local_size - 1, static_cast<size_t>(position));
 }
 
 template <bool is_random>
@@ -160,17 +194,21 @@ public:
     StringIndexSampler() = delete;
 
     explicit StringIndexSampler(SampleParams const& params)
-        : params_{params},
-          num_samples_{get_num_samples(params)} {}
+        : local_size_{params.local_size},
+          num_samples_{get_num_samples(params)},
+          sample_distance_{get_local_sample_distance(params, num_samples_)} {}
 
     size_t size() const { return num_samples_; }
 
     // a local string index
-    size_t get_sample(size_t const index) { return get_sample_position(index, params_); }
+    size_t get_sample(size_t const index) {
+        return get_sample_position(index, local_size_, sample_distance_);
+    }
 
 private:
-    SampleParams params_;
+    size_t local_size_;
     size_t num_samples_;
+    double sample_distance_;
 };
 
 template <>
@@ -204,18 +242,22 @@ public:
     CharIndexSampler() = delete;
 
     explicit CharIndexSampler(SampleParams const& params)
-        : params_{params},
+        : local_size_{params.local_size},
           num_samples_{get_num_samples(params)},
+          sample_distance_{get_local_sample_distance(params, num_samples_)},
           current_{0} {}
 
     size_t size() const { return num_samples_; }
 
     // boundaries are 1-based local character positions, see CharIndexSampler<true>
-    size_t next() { return get_sample_position(current_++, params_) + 1; }
+    size_t next() {
+        return get_sample_position(current_++, local_size_, sample_distance_) + 1;
+    }
 
 private:
-    SampleParams params_;
+    size_t local_size_;
     size_t num_samples_;
+    double sample_distance_;
     size_t current_;
 };
 
@@ -279,6 +321,7 @@ public:
 
         SampleParams const params{
             .local_size = ss.size(),
+            .max_num_samples = ss.size(),
             .sample_distance = get_sample_distance(global_strings, total_num_samples),
             .seed = comm.rank(),
         };
@@ -335,7 +378,7 @@ public:
         Communicator const& comm
     ) const {
         // n = global number of characters
-        size_t const num_chars = accumulate_chars(ss, arg);
+        size_t const num_chars = accumulate_sample_chars(ss, arg);
         size_t const global_chars =
             comm.allreduce_single(kamping::send_buf(num_chars), kamping::op(std::plus<>{}));
         size_t const total_num_samples =
@@ -344,6 +387,7 @@ public:
 
         SampleParams const params{
             .local_size = num_chars,
+            .max_num_samples = ss.size(),
             .sample_distance = get_sample_distance(global_chars, total_num_samples),
             .seed = comm.rank(),
         };
