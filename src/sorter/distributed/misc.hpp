@@ -31,11 +31,19 @@ namespace _internal {
 
 struct LocalSplitterInterval {
     size_t const global_prefix;
-    size_t const splitter_dist;
+    size_t const total_size; // the global number of samples, |S|
+    size_t const divisor;    // num_splitters + 1
     size_t const local_begin;
     size_t const local_end;
 
     size_t size() const { return local_end - local_begin; }
+
+    // The global sample index of the i-th splitter (i = 1 .. num_splitters). The multiplication
+    // happens before the division so the rounding remainder of |S| / divisor is spread evenly
+    // over all buckets rather than piling up in the final, unbounded bucket (which a floored
+    // splitter_dist with global_index = i * splitter_dist would do, overloading the last bucket
+    // by up to 1 / sampling_factor).
+    size_t global_index(size_t const i) const { return (i * total_size) / divisor; }
 
     size_t to_local_index(size_t const global_index) const { return global_index - global_prefix; }
 };
@@ -51,15 +59,23 @@ inline LocalSplitterInterval compute_splitter_interval(
     size_t total_size = global_prefix + local_sample_size;
     comm.bcast_single(kamping::send_recv_buf(total_size), kamping::root(comm.size() - 1));
 
+    if (total_size == 0) {
+        return {global_prefix, total_size, 1, 1, 1}; // no samples: an empty interval
+    }
+
     size_t const num_splitters = std::min(num_partitions - 1, total_size);
-    size_t const splitter_dist = std::max<size_t>(1, total_size / (num_splitters + 1));
+    size_t const divisor = num_splitters + 1;
 
+    // the splitter ranks whose sample index falls into this PE's range: rank i lands here iff
+    // global_prefix <= (i * total_size) / divisor < global_prefix + local_sample_size, i.e.
+    // i >= ceil(global_prefix * divisor / total_size) and likewise for the upper end
     auto clamp = [=](auto const x) { return std::clamp<size_t>(x, 1, num_partitions); };
-    size_t const local_begin = clamp(tlx::div_ceil(global_prefix, splitter_dist));
-    size_t const local_end = clamp(tlx::div_ceil(global_prefix + local_sample_size, splitter_dist));
+    size_t const local_begin = clamp(tlx::div_ceil(global_prefix * divisor, total_size));
+    size_t const local_end =
+        clamp(tlx::div_ceil((global_prefix + local_sample_size) * divisor, total_size));
 
-    assert(comm.is_same_on_all_ranks(splitter_dist));
-    return {global_prefix, splitter_dist, local_begin, local_end};
+    assert(comm.is_same_on_all_ranks(total_size));
+    return {global_prefix, total_size, divisor, local_begin, local_end};
 }
 
 } // namespace _internal
@@ -69,13 +85,16 @@ StringContainer<StringSet> choose_splitters(StringSet const& samples, size_t con
     assert(samples.check_order());
 
     size_t const num_splitters = std::min(num_partitions - 1, samples.size());
-    size_t const splitter_dist = samples.size() / (num_splitters + 1);
 
     StringContainer<StringSet> container;
     container.get_strings().reserve(num_splitters);
 
+    // The multiplication happens before the division so the rounding remainder of
+    // |samples| / (num_splitters + 1) is spread evenly over all buckets. Computing a floored
+    // splitter_dist and placing splitter i at i * splitter_dist instead dumps the entire
+    // remainder into the final, unbounded bucket, overloading it by up to 1 / sampling_factor.
     for (size_t i = 0; i < num_splitters; ++i) {
-        auto const& splitter = samples.at((i + 1) * splitter_dist);
+        auto const& splitter = samples.at(((i + 1) * samples.size()) / (num_splitters + 1));
         container.get_strings().emplace_back(splitter);
     }
 
@@ -104,7 +123,7 @@ StringContainer<StringSet> choose_splitters_distributed(
     }
 
     for (size_t i = splitter_interval.local_begin; i < splitter_interval.local_end; ++i) {
-        size_t const global_idx = i * splitter_interval.splitter_dist;
+        size_t const global_idx = splitter_interval.global_index(i);
         size_t const local_idx = splitter_interval.to_local_index(global_idx);
         assert(local_idx < ss.size());
 
