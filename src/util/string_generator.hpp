@@ -31,9 +31,14 @@ namespace dss_mehnert {
 
 namespace _internal {
 
-inline size_t get_global_seed(Communicator const& comm) {
-    std::random_device rand_seed;
-    size_t seed = rand_seed();
+// The default base seed used when the caller does not override it via --seed.
+inline constexpr size_t default_seed = 42;
+
+// Broadcasts `seed` from the root PE so every PE uses the same base seed. The
+// seed is supplied by the caller (see the --seed CLI option) rather than drawn
+// from std::random_device, so a run is reproducible: the same seed always
+// produces the same input.
+inline size_t get_global_seed(size_t seed, Communicator const& comm) {
     comm.bcast_single(kamping::send_recv_buf(seed));
     return seed;
 }
@@ -255,6 +260,8 @@ struct SkewedDNArgs {
     // the upper end of that interval, as a multiple of max_length
     double skew_factor = 1.0;
     IdPlacement placement = IdPlacement::random;
+    // base seed for the RNG; the same seed reproduces the same input
+    size_t seed = _internal::default_seed;
 };
 
 // A generator whose character mass is a function of the key rank.
@@ -281,7 +288,7 @@ public:
 
     SkewedDNRatioLengthGenerator(SkewedDNArgs const& args, Communicator const& comm)
         : args_{adjust_args(args)} {
-        size_t const seed = _internal::get_global_seed(comm);
+        size_t const seed = _internal::get_global_seed(args_.seed, comm);
         std::mt19937_64 gen{seed + comm.rank()};
 
         auto [ids, lengths] = generate_ids(args_, gen, comm);
@@ -537,8 +544,7 @@ public:
         Communicator const& comm
     ) {
         std::vector<Char> random_raw_string_data;
-        std::random_device rand_seed;
-        std::mt19937 rand_gen(_internal::get_global_seed(comm));
+        std::mt19937 rand_gen(_internal::get_global_seed(_internal::default_seed, comm));
         std::uniform_int_distribution<Char> small_char_dis(65, 70);
         std::uniform_int_distribution<Char> char_dis(65, 90);
 

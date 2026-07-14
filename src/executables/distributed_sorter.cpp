@@ -135,6 +135,7 @@ auto generate_strings(SorterArgs const& args, dss_mehnert::Communicator const& c
                         .skew_fraction = args.skew_fraction,
                         .skew_factor = args.skew_factor,
                         .placement = clamp_enum_value<IdPlacement>(args.id_placement),
+                        .seed = args.seed,
                     },
                     comm
                 };

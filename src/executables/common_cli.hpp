@@ -73,6 +73,8 @@ struct CommonArgs {
     bool verbose = false;
     bool count_prefixes = false;
     bool print_sorted = false;
+    // base seed for input generation; the same seed reproduces the same input
+    size_t seed = 42;
 
     std::string get_prefix(dss_mehnert::Communicator const& comm) const {
         // clang-format off
@@ -422,6 +424,7 @@ inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
         args.print_sorted,
         "gather the sorted strings on the root PE and print them (debug only)"
     );
+    cp.add_size_t("seed", args.seed, "base seed for input generation (default 42)");
 }
 
 // CLI11 equivalent of add_common_args. Kept in parallel with the tlx-based
@@ -434,6 +437,8 @@ inline void add_common_args(CommonArgs& args, CLI::App& app) {
     app.add_option("--experiment", args.experiment, "name to identify the experiment being run")
         ->group("General");
     app.add_option("--num-iterations", args.num_iterations, "number of sorting iterations to run")
+        ->group("General");
+    app.add_option("--seed", args.seed, "base seed for input generation (default 42)")
         ->group("General");
 
     // -- Sampling -------------------------------------------------------------
