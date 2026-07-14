@@ -140,6 +140,9 @@ message(STATUS "Examples Enabled: ${DSS_BUILD_EXAMPLES}")
 option(DSS_BUILD_SPACE_EFFICIENT_SORTER "build the space_efficient_sorter executable" Off)
 message(STATUS "Space Efficient Sorter Enabled: ${DSS_BUILD_SPACE_EFFICIENT_SORTER}")
 
+option(DSS_BUILD_TESTS "build the MPI tests in tests/ (run with ctest)" Off)
+message(STATUS "Tests Enabled: ${DSS_BUILD_TESTS}")
+
 list(APPEND
   DSS_MEHNERT_WARNING_FLAGS
   "-Wall"
@@ -251,5 +254,10 @@ endif()
 
 if(DSS_BUILD_EXAMPLES)
   add_subdirectory(examples)
+endif()
+
+if(DSS_BUILD_TESTS)
+  enable_testing()
+  add_subdirectory(tests)
 endif()
 

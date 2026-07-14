@@ -49,9 +49,9 @@
 
 #include "./BinTreeMedianSelection.hpp"
 #include "./RandomBitStore.hpp"
-#include "sorter/local_sorter.hpp"
 #include "sorter/RQuick2/Util.hpp"
 #include "sorter/distributed/duplicate_sorting.hpp"
+#include "sorter/local_sorter.hpp"
 
 namespace Tools {
 
@@ -272,7 +272,7 @@ void sortRec(
     TemporaryBuffers<StringPtr>& buffers,
     Tracker&& tracker,
     int const tag,
-    const RBC::Comm& comm
+    RBC::Comm const& comm
 ) {
     tracker.median_select_t.start(comm);
 
@@ -386,8 +386,8 @@ Container<StringPtr> sort(
     if (comm.getSize() == 1) {
         tracker.local_sort_t.start(comm);
         Container<StringPtr> local_strings;
-        local_strings.resize_strings(local_data.get_num_strings());
-        local_data.read_into(make_auto_ptr(local_strings));
+        local_strings.resize_strings(local_data.get_num_strings(true));
+        local_data.read_into(make_auto_ptr(local_strings), false);
         std::swap(local_strings.raw_strings(), local_data.raw_strs);
         sortLocally(make_auto_ptr(local_strings), local_sorter);
         tracker.local_sort_t.stop();

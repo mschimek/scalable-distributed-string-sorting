@@ -622,7 +622,7 @@ StringContainer sortRec(
 
         tracker.comm_split_t.stop();
 
-        return sortRec<StringContainer::is_indexed>(
+        return sortRec(
             gen,
             bit_store,
             std::move(stringContainer),
@@ -743,7 +743,7 @@ typename Data::StringContainer sort(
     tracker.local_sort_t.stop();
 
     RandomBitStore bit_store;
-    return _internal::sortRec<Data::isIndexed_>(
+    return _internal::sortRec(
         async_gen,
         bit_store,
         std::move(container),

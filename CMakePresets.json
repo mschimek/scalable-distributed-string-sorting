@@ -13,8 +13,7 @@
       "binaryDir": "${sourceDir}/build-dev",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CLI_ENABLE_ALL": "On",
-        "DSS_BUILD_SPACE_EFFICIENT_SORTER": "On",
+        "DSS_BUILD_TESTS": "On",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "On",
         "CMAKE_POLICY_VERSION_MINIMUM": "3.5"
       }
