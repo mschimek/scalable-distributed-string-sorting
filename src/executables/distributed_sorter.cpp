@@ -44,6 +44,7 @@ enum class StringGenerator {
     file,
     skewed_dn_ratio,
     suffix,
+    skewed_dn_length,
     sentinel,
 };
 
@@ -59,6 +60,11 @@ struct SorterArgs : public CommonArgs {
     std::string path;
     double dn_ratio = 0.5;
     bool dn_encode_padding = false;
+    // skewed_dn_length: the fraction of the smallest strings whose length is drawn from an
+    // interval that is skew_factor times longer, and which PE a string is generated on
+    double skew_fraction = 0.0;
+    double skew_factor = 1.0;
+    size_t id_placement = static_cast<size_t>(dss_mehnert::IdPlacement::random);
     size_t iteration = 0;
     bool strong_scaling = false;
     std::vector<size_t> levels;
@@ -118,6 +124,20 @@ auto generate_strings(SorterArgs const& args, dss_mehnert::Communicator const& c
             case StringGenerator::suffix: {
                 check_path_exists(args.path);
                 return SuffixGenerator<StringSet>{args.path, comm};
+            }
+            case StringGenerator::skewed_dn_length: {
+                return SkewedDNRatioLengthGenerator<StringSet>{
+                    {
+                        .global_strings = args.scaled_strings(comm),
+                        .min_length = args.len_strings_min,
+                        .max_length = args.len_strings_max,
+                        .dn_ratio = args.dn_ratio,
+                        .skew_fraction = args.skew_fraction,
+                        .skew_factor = args.skew_factor,
+                        .placement = clamp_enum_value<IdPlacement>(args.id_placement),
+                    },
+                    comm
+                };
             }
             case StringGenerator::sentinel: {
                 break;
@@ -427,7 +447,7 @@ void add_sorter_args(
            "--string-generator",
            args.string_generator,
            "type of string generation to use "
-           "(0=skewed, [1]=DNGen, 2=file, 3=skewedDNGen, 4=suffixGen)"
+           "(0=skewed, [1]=DNGen, 2=file, 3=skewedDNGen, 4=suffixGen, 5=skewedDNLenGen)"
     )
         ->group("Input");
     app.add_option(
@@ -452,6 +472,27 @@ void add_sorter_args(
     app.add_option("--min-len-strings", args.len_strings_min, "minimum length of generated strings")
         ->group("Input");
     app.add_option("--max-len-strings", args.len_strings_max, "maximum length of generated strings")
+        ->group("Input");
+    app.add_option(
+           "--skew-fraction",
+           args.skew_fraction,
+           "for skewedDNLenGen, the fraction of the smallest strings that are stretched; their "
+           "length is drawn from [min-len-strings, skew-factor * max-len-strings]"
+    )
+        ->group("Input");
+    app.add_option(
+           "--skew-factor",
+           args.skew_factor,
+           "for skewedDNLenGen, the factor by which the stretched strings may be longer"
+    )
+        ->group("Input");
+    app.add_option(
+           "--placement",
+           args.id_placement,
+           "for skewedDNLenGen, which PE a string is generated on ([0]=random, 1=contiguous); "
+           "with contiguous placement the stretched (smallest) strings all land on the low ranks, "
+           "so the input itself is imbalanced in characters"
+    )
         ->group("Input");
     app.add_flag("--strong-scaling", args.strong_scaling, "perform a strong scaling experiment")
         ->group("Input");

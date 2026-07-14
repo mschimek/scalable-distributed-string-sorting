@@ -13,10 +13,13 @@
 #include <limits>
 #include <numeric>
 #include <random>
+#include <tuple>
+#include <utility>
 
 #include <kamping/collectives/alltoall.hpp>
 #include <kamping/collectives/bcast.hpp>
 #include <kamping/named_parameters.hpp>
+#include <spdlog/spdlog.h>
 #include <tlx/die/core.hpp>
 #include <tlx/math/div_ceil.hpp>
 
@@ -233,6 +236,263 @@ private:
 
         return comm.alltoallv(kamping::send_buf(strings), kamping::send_counts(counts));
     }
+};
+
+// Which PE a string id is generated on. Only meaningful together with a length skew, which makes
+// the character mass a function of the key rank: with `random` placement the input stays balanced
+// and the skew shows up in the buckets, with `contiguous` placement the low ranks hold the long
+// strings and the input itself is imbalanced in characters.
+enum class IdPlacement { random = 0, contiguous, sentinel };
+
+struct SkewedDNArgs {
+    size_t global_strings;
+    size_t min_length;
+    size_t max_length;
+    // the fraction of a string that is its distinguishing prefix
+    double dn_ratio = 0.5;
+    // the fraction of the smallest prefix groups whose length is drawn from a longer interval
+    double skew_fraction = 0.0;
+    // the upper end of that interval, as a multiple of max_length
+    double skew_factor = 1.0;
+    IdPlacement placement = IdPlacement::random;
+};
+
+// A generator whose character mass is a function of the key rank.
+//
+// String `x` belongs to prefix group `g = x / 2` and looks like this:
+//
+//     [ enc(g, w) repeated (D - w) / w times ][ enc(x, w) ][ fill character ... ]
+//       shared with the other string of g      the id       no information
+//
+// where `w = ceil(log_sigma(n))` and `D = dn_ratio * length`, rounded so that the region before
+// the id block is a whole number of `w`-character blocks. Both strings of a group draw the same
+// length, so they are identical up to the id block, and `D` characters have to be inspected to
+// tell them apart -- exactly the D/N ratio that was asked for, for every string.
+//
+// Because the region is a whole number of blocks, every string starts with the fixed-width
+// encoding of its group: the lexicographic order is the id order, whatever the lengths are. The
+// skew therefore lengthens the lexicographically *smallest* strings, which is what makes the
+// instance hard: the character mass sits at the bottom of the key range, where character-based
+// sampling, character-based redistribution and the splitter length limit all have to cope with it.
+template <typename StringSet>
+class SkewedDNRatioLengthGenerator : public StringLcpContainer<StringSet> {
+public:
+    using CharType = StringSet::Char;
+
+    SkewedDNRatioLengthGenerator(SkewedDNArgs const& args, Communicator const& comm)
+        : args_{adjust_args(args)} {
+        size_t const seed = _internal::get_global_seed(comm);
+        std::mt19937_64 gen{seed + comm.rank()};
+
+        auto [ids, lengths] = generate_ids(args_, gen, comm);
+        if (args_.placement == IdPlacement::random) {
+            std::tie(ids, lengths) = scatter_ids(ids, lengths, gen, comm);
+        }
+
+        // the fill character carries no information, but it has to be the same on every PE
+        auto const fill_char = static_cast<CharType>(char_min + seed % char_range);
+        this->update(get_raw_strings(args_, ids, lengths, fill_char));
+        std::shuffle(this->get_strings().begin(), this->get_strings().end(), gen);
+        this->make_contiguous();
+    }
+
+    static std::string getName() { return "SkewedDNRatioLengthGenerator"; }
+
+    // the arguments the strings were actually generated with; the lengths may have been raised to
+    // meet the requested D/N ratio (see adjust_args)
+    SkewedDNArgs const& args() const { return args_; }
+
+    // The prefix region has to hold at least one whole block, or a short string would start with
+    // its id block while a long one starts with a group block -- and the two would be compared
+    // against each other, which would break the lexicographic order. Rather than rejecting such
+    // arguments, the lengths are raised to the smallest value that supports the requested ratio.
+    static SkewedDNArgs adjust_args(SkewedDNArgs args) {
+        tlx_die_unless(args.global_strings >= group_size);
+        tlx_die_unless(0.0 < args.dn_ratio && args.dn_ratio <= 1.0);
+        tlx_die_unless(0.0 <= args.skew_fraction && args.skew_fraction <= 1.0);
+        tlx_die_unless(args.skew_factor >= 1.0);
+
+        auto const min_length = min_admissible_length(args.global_strings, args.dn_ratio);
+        if (args.min_length < min_length) {
+            log_info(
+                "min length {} is too small for a D/N ratio of {} and {} strings, raising it to {}",
+                args.min_length,
+                args.dn_ratio,
+                args.global_strings,
+                min_length
+            );
+            args.min_length = min_length;
+        }
+        if (args.max_length < args.min_length) {
+            log_info(
+                "max length {} is below the min length, raising it to {}",
+                args.max_length,
+                args.min_length
+            );
+            args.max_length = args.min_length;
+        }
+        return args;
+    }
+
+    // number of characters needed to encode any string id in base char_range
+    static size_t id_width(size_t const global_strings) {
+        return std::max<size_t>(1, std::ceil(std::log(global_strings) / std::log(char_range)));
+    }
+
+    // the characters that have to be inspected to tell a string of the given length apart from
+    // every other string: the shared prefix region plus the id block
+    static size_t
+    distinguishing_prefix(size_t const length, size_t const global_strings, double const dn_ratio) {
+        size_t const w = id_width(global_strings);
+        size_t const k = std::clamp<size_t>(std::llround(dn_ratio * length), 2 * w, length);
+        return w * ((k - w) / w) + w; // the region holds a whole number of blocks
+    }
+
+    // the id a generated string encodes; the inverse of the layout above
+    static size_t decode_id(CharType const* string, size_t const length, SkewedDNArgs const& args) {
+        size_t const w = id_width(args.global_strings);
+        auto const prefix = distinguishing_prefix(length, args.global_strings, args.dn_ratio);
+        return decode_number(string + prefix - w, string + prefix);
+    }
+
+    // the smallest admissible min_length for the given arguments
+    static size_t min_admissible_length(size_t const global_strings, double const dn_ratio) {
+        return static_cast<size_t>(std::ceil(2 * id_width(global_strings) / dn_ratio));
+    }
+
+private:
+    static constexpr CharType char_min = 'A', char_max = 'Z';
+    static constexpr size_t char_range = char_max - char_min + 1;
+
+    // the number of strings that share a distinguishing prefix; two consecutive ids never carry
+    // in the last digit of their encoding, so their distinguishing prefix is exactly D
+    static constexpr size_t group_size = 2;
+
+    // on the root PE only; a no-op if the application has not set up the loggers
+    template <typename... Args>
+    static void log_info(fmt::format_string<Args...> fmt, Args&&... args) {
+        if (auto const logger = spdlog::get("root")) {
+            SPDLOG_LOGGER_INFO(logger, fmt, std::forward<Args>(args)...);
+        }
+    }
+
+    // Encode `value` in base-`char_range`, right-aligned, ending just before `end`. Positions
+    // that are not written must already contain the padding character (`char_min`).
+    template <typename It>
+    static void encode_number(It end, size_t value) {
+        for (; value != 0; value /= char_range) {
+            *(--end) = char_min + (value % char_range);
+        }
+    }
+
+    template <typename It>
+    static size_t decode_number(It begin, It end) {
+        size_t value = 0;
+        for (; begin != end; ++begin) {
+            value = value * char_range + static_cast<size_t>(*begin - char_min);
+        }
+        return value;
+    }
+
+    // The ids this PE generates, together with their lengths. The origin ranges are chunked by
+    // prefix group rather than by string id, so a group is always drawn by a single PE and the
+    // two strings of a group can not end up with different lengths.
+    static std::pair<std::vector<size_t>, std::vector<size_t>>
+    generate_ids(SkewedDNArgs const& args, std::mt19937_64& gen, Communicator const& comm) {
+        size_t const num_groups = tlx::div_ceil(args.global_strings, group_size);
+        size_t const chunk = tlx::div_ceil(num_groups, comm.size());
+        size_t const first_group = std::min(num_groups, comm.rank() * chunk);
+        size_t const last_group = std::min(num_groups, first_group + chunk);
+        size_t const num_skewed = static_cast<size_t>(args.skew_fraction * num_groups);
+
+        std::uniform_int_distribution<size_t> length{args.min_length, args.max_length};
+        std::uniform_int_distribution<size_t> skewed_length{
+            args.min_length,
+            std::max<size_t>(args.min_length, args.skew_factor * args.max_length)
+        };
+
+        std::vector<size_t> ids, lengths;
+        ids.reserve(group_size * (last_group - first_group));
+        lengths.reserve(ids.capacity());
+
+        for (size_t group = first_group; group != last_group; ++group) {
+            // one length per group: the strings of a group have to share their distinguishing
+            // prefix, so they have to share their length
+            size_t const len = group < num_skewed ? skewed_length(gen) : length(gen);
+
+            for (size_t i = 0; i != group_size; ++i) {
+                size_t const id = group_size * group + i;
+                if (id < args.global_strings) {
+                    ids.push_back(id);
+                    lengths.push_back(len);
+                }
+            }
+        }
+        return {std::move(ids), std::move(lengths)};
+    }
+
+    // send each string to a uniformly random PE, carrying its length along with its id
+    static std::pair<std::vector<size_t>, std::vector<size_t>> scatter_ids(
+        std::vector<size_t> const& ids,
+        std::vector<size_t> const& lengths,
+        std::mt19937_64& gen,
+        Communicator const& comm
+    ) {
+        std::uniform_int_distribution<int> rank_dist{0, comm.size_signed() - 1};
+
+        std::vector<int> dest(ids.size()), counts(comm.size()), offsets(comm.size());
+        std::generate(dest.begin(), dest.end(), [&] { return rank_dist(gen); });
+        std::for_each(dest.begin(), dest.end(), [&](auto const& n) { ++counts[n]; });
+        std::exclusive_scan(counts.begin(), counts.end(), offsets.begin(), size_t{0});
+
+        std::vector<size_t> send_ids(ids.size()), send_lengths(lengths.size());
+        for (size_t i = 0; i != dest.size(); ++i) {
+            size_t const pos = offsets[dest[i]]++;
+            send_ids[pos] = ids[i];
+            send_lengths[pos] = lengths[i];
+        }
+
+        return {
+            comm.alltoallv(kamping::send_buf(send_ids), kamping::send_counts(counts)),
+            comm.alltoallv(kamping::send_buf(send_lengths), kamping::send_counts(counts))
+        };
+    }
+
+    static std::vector<CharType> get_raw_strings(
+        SkewedDNArgs const& args,
+        std::vector<size_t> const& ids,
+        std::vector<size_t> const& lengths,
+        CharType const fill_char
+    ) {
+        size_t const w = id_width(args.global_strings);
+        size_t const num_chars = std::accumulate(lengths.begin(), lengths.end(), size_t{0});
+
+        // zero initialized, so the terminators are already in place
+        std::vector<CharType> raw_strings(num_chars + lengths.size());
+        std::vector<CharType> block(w);
+
+        auto dest = raw_strings.begin();
+        for (size_t i = 0; i != ids.size(); ++i) {
+            size_t const id = ids[i], len = lengths[i];
+            auto const prefix = distinguishing_prefix(len, args.global_strings, args.dn_ratio);
+
+            // the region before the id block: the group id, tiled block by block
+            std::fill(block.begin(), block.end(), char_min);
+            encode_number(block.end(), id / group_size);
+            for (auto out = dest; out != dest + (prefix - w); out += w) {
+                std::copy(block.begin(), block.end(), out);
+            }
+
+            std::fill_n(dest + (prefix - w), w, char_min);
+            encode_number(dest + prefix, id);
+            std::fill_n(dest + prefix, len - prefix, fill_char);
+
+            dest += len + 1;
+        }
+        return raw_strings;
+    }
+
+    SkewedDNArgs args_;
 };
 
 template <typename StringSet>
