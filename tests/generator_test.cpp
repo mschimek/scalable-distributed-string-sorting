@@ -8,6 +8,11 @@
 // and the length skew lands on the lexicographically smallest strings. The tests below check each
 // of those directly, because every downstream test that uses the generator as an oracle depends
 // on them.
+//
+// Every test runs in both prefix modes (use_uniform_prefix off/on). The tiled per-group prefix and
+// the uniform (constant-character) prefix share every property except one: only the tiled encoding
+// makes the lexicographic order the id order across different lengths, so that one test is skipped
+// for the uniform mode.
 
 #include <algorithm>
 #include <cstddef>
@@ -35,11 +40,12 @@ using dss_test::Communicator;
 using StringSet = dss_mehnert::StringSet<Char, dss_mehnert::Length>;
 using Generator = dss_mehnert::SkewedDNRatioLengthGenerator<StringSet>;
 
-SkewedDNArgs default_args() {
+SkewedDNArgs default_args(bool const use_uniform_prefix = false) {
     return {
         .global_strings = 2000,
         .min_length = 100,
         .max_length = 200,
+        .use_uniform_prefix = use_uniform_prefix,
         .dn_ratio = 0.5,
         .skew_fraction = 0.0,
         .skew_factor = 1.0,
@@ -76,9 +82,20 @@ size_t allreduce_sum(Communicator const& comm, size_t const value) {
     return comm.allreduce_single(kamping::send_buf(value), kamping::op(std::plus<>{}));
 }
 
-TEST(SkewedDNGenerator, EveryStringIsGeneratedExactlyOnce) {
+// GetParam() is use_uniform_prefix: false = tiled per-group prefix, true = constant-character
+// prefix.
+class SkewedDNGenerator : public ::testing::TestWithParam<bool> {};
+
+INSTANTIATE_TEST_SUITE_P(
+    PrefixEncoding,
+    SkewedDNGenerator,
+    ::testing::Bool(),
+    [](testing::TestParamInfo<bool> const& info) { return info.param ? "uniform" : "tiled"; }
+);
+
+TEST_P(SkewedDNGenerator, EveryStringIsGeneratedExactlyOnce) {
     Communicator comm;
-    auto args = default_args();
+    auto args = default_args(GetParam());
     auto const local = generate(args, comm);
 
     std::vector<size_t> ids;
@@ -93,10 +110,16 @@ TEST(SkewedDNGenerator, EveryStringIsGeneratedExactlyOnce) {
     EXPECT_EQ(all_ids, expected);
 }
 
-// The property the whole design rests on: the id block sits at the same offset in every string of
+// The property the tiled encoding rests on: the id block sits at the same offset in every string of
 // a group, and the region before it is a whole number of group blocks, so comparing two strings
-// always compares group id against group id (or, within a group, id against id).
-TEST(SkewedDNGenerator, LexicographicOrderIsIdOrder) {
+// always compares group id against group id (or, within a group, id against id). The uniform prefix
+// gives that up -- it pads with a constant character whose run length depends on the string's own
+// length, so a short string and a longer one are no longer ordered by id -- hence the skip.
+TEST_P(SkewedDNGenerator, LexicographicOrderIsIdOrder) {
+    if (GetParam()) {
+        GTEST_SKIP() << "uniform prefix does not preserve id order across different lengths";
+    }
+
     Communicator comm;
     for (auto const placement: {IdPlacement::random, IdPlacement::contiguous}) {
         for (double const skew_fraction: {0.0, 0.1}) {
@@ -129,10 +152,10 @@ TEST(SkewedDNGenerator, LexicographicOrderIsIdOrder) {
 // D characters have to be inspected to tell a string apart from every other, and D is dn_ratio of
 // the string's own length -- including the skewed strings, whose distinguishing prefix grows with
 // them.
-TEST(SkewedDNGenerator, DistinguishingPrefixMatchesTheDNRatio) {
+TEST_P(SkewedDNGenerator, DistinguishingPrefixMatchesTheDNRatio) {
     Communicator comm;
     for (double const dn_ratio: {0.25, 0.5, 1.0}) {
-        auto args = default_args();
+        auto args = default_args(GetParam());
         args.dn_ratio = dn_ratio;
         args.skew_fraction = 0.2;
         args.skew_factor = 4.0;
@@ -164,27 +187,37 @@ TEST(SkewedDNGenerator, DistinguishingPrefixMatchesTheDNRatio) {
 
 // The strings of a prefix group are identical up to their id block and differ in its last
 // character, so exactly D characters have to be inspected to tell them apart. This is what makes
-// D/N mean what it says: nothing shorter than D distinguishes a string from its group partner.
-TEST(SkewedDNGenerator, GroupMembersDifferOnlyInTheLastCharacterOfTheirPrefix) {
+// D/N mean what it says: nothing shorter than D distinguishes a string from its group partner. The
+// strings are paired by decoded id rather than by lexicographic order, because the uniform prefix
+// is not laid out in id order -- but the group property holds either way.
+TEST_P(SkewedDNGenerator, GroupMembersDifferOnlyInTheLastCharacterOfTheirPrefix) {
     Communicator comm;
-    auto args = default_args();
+    auto args = default_args(GetParam());
     args.skew_fraction = 0.2;
     args.skew_factor = 4.0;
 
     auto const local = generate(args, comm);
+    std::vector<size_t> local_ids;
     std::vector<std::string> local_chars;
     for (auto const& str: local) {
+        local_ids.push_back(str.id);
         local_chars.push_back(str.chars);
     }
 
-    auto all_strings =
+    auto const ids = comm.allgatherv(kamping::send_buf(local_ids));
+    auto const strings =
         dss_test::unpack(comm.allgatherv(kamping::send_buf(dss_test::pack(local_chars))));
-    std::sort(all_strings.begin(), all_strings.end()); // == sorted by id
-    ASSERT_EQ(all_strings.size(), args.global_strings);
+    ASSERT_EQ(ids.size(), args.global_strings);
+    ASSERT_EQ(strings.size(), ids.size());
 
-    for (size_t id = 0; id + 1 < all_strings.size(); id += 2) {
-        auto const& lhs = all_strings[id];
-        auto const& rhs = all_strings[id + 1];
+    std::vector<std::string> by_id(strings.size());
+    for (size_t i = 0; i != ids.size(); ++i) {
+        by_id[ids[i]] = strings[i];
+    }
+
+    for (size_t id = 0; id + 1 < by_id.size(); id += 2) {
+        auto const& lhs = by_id[id];
+        auto const& rhs = by_id[id + 1];
         auto const prefix =
             Generator::distinguishing_prefix(lhs.size(), args.global_strings, args.dn_ratio);
 
@@ -196,9 +229,9 @@ TEST(SkewedDNGenerator, GroupMembersDifferOnlyInTheLastCharacterOfTheirPrefix) {
     }
 }
 
-TEST(SkewedDNGenerator, SkewLengthensTheSmallestStrings) {
+TEST_P(SkewedDNGenerator, SkewLengthensTheSmallestStrings) {
     Communicator comm;
-    auto args = default_args();
+    auto args = default_args(GetParam());
     args.skew_fraction = 0.1;
     args.skew_factor = 10.0;
 
@@ -220,13 +253,13 @@ TEST(SkewedDNGenerator, SkewLengthensTheSmallestStrings) {
 // The two placements are the same instance, distributed differently: contiguous placement puts the
 // long strings on the low ranks, so the input itself is imbalanced in characters, while the string
 // counts stay balanced. That is the input the imbalance-aware (omega) sampling has to cope with.
-TEST(SkewedDNGenerator, ContiguousPlacementMakesTheInputCharacterImbalanced) {
+TEST_P(SkewedDNGenerator, ContiguousPlacementMakesTheInputCharacterImbalanced) {
     Communicator comm;
     if (comm.size() < 2) {
         GTEST_SKIP() << "needs at least two ranks";
     }
 
-    auto args = default_args();
+    auto args = default_args(GetParam());
     args.placement = IdPlacement::contiguous;
     args.skew_fraction = 1.0 / comm.size(); // the strings of the first rank
     args.skew_factor = 10.0;
@@ -248,13 +281,13 @@ TEST(SkewedDNGenerator, ContiguousPlacementMakesTheInputCharacterImbalanced) {
     EXPECT_GT(chars.front(), 2 * chars.back()) << "rank 0 should hold the long strings";
 }
 
-TEST(SkewedDNGenerator, RandomPlacementKeepsTheInputBalanced) {
+TEST_P(SkewedDNGenerator, RandomPlacementKeepsTheInputBalanced) {
     Communicator comm;
     if (comm.size() < 2) {
         GTEST_SKIP() << "needs at least two ranks";
     }
 
-    auto args = default_args();
+    auto args = default_args(GetParam());
     args.global_strings = 20000;
     args.placement = IdPlacement::random;
     args.skew_fraction = 0.1;

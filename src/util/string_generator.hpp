@@ -253,6 +253,7 @@ struct SkewedDNArgs {
     size_t global_strings;
     size_t min_length;
     size_t max_length;
+    bool use_uniform_prefix;
     // the fraction of a string that is its distinguishing prefix
     double dn_ratio = 0.5;
     // the fraction of the smallest prefix groups whose length is drawn from a longer interval
@@ -268,13 +269,15 @@ struct SkewedDNArgs {
 //
 // String `x` belongs to prefix group `g = x / 2` and looks like this:
 //
-//     [ enc(g, w) repeated (D - w) / w times ][ enc(x, w) ][ fill character ... ]
-//       shared with the other string of g      the id       no information
+//     [ enc(g, w) repeated (D - w) / w times ][ enc(x + 2, w) ][ fill character ... ]
+//       shared with the other string of g      the id           no information
 //
-// where `w = ceil(log_sigma(n))` and `D = dn_ratio * length`, rounded so that the region before
-// the id block is a whole number of `w`-character blocks. Both strings of a group draw the same
-// length, so they are identical up to the id block, and `D` characters have to be inspected to
-// tell them apart -- exactly the D/N ratio that was asked for, for every string.
+// where `w` is the number of base-sigma digits of the largest encoded id and `D = dn_ratio *
+// length`, rounded so that the region before the id block is a whole number of `w`-character
+// blocks. Both strings of a group draw the same length, so they are identical up to the id block,
+// and `D` characters have to be inspected to tell them apart -- exactly the D/N ratio that was
+// asked for, for every string. Ids are encoded with a `+2` offset (see `id_offset`) so that no
+// string is all padding characters.
 //
 // Because the region is a whole number of blocks, every string starts with the fixed-width
 // encoding of its group: the lexicographic order is the id order, whatever the lengths are. The
@@ -341,9 +344,10 @@ public:
         return args;
     }
 
-    // number of characters needed to encode any string id in base char_range
+    // number of characters needed to encode any string id in base char_range. The ids are encoded
+    // with an offset (see id_offset), so the widest value is (global_strings - 1) + id_offset.
     static size_t id_width(size_t const global_strings) {
-        return std::max<size_t>(1, std::ceil(std::log(global_strings) / std::log(char_range)));
+        return num_digits((global_strings - 1) + id_offset);
     }
 
     // the characters that have to be inspected to tell a string of the given length apart from
@@ -359,7 +363,7 @@ public:
     static size_t decode_id(CharType const* string, size_t const length, SkewedDNArgs const& args) {
         size_t const w = id_width(args.global_strings);
         auto const prefix = distinguishing_prefix(length, args.global_strings, args.dn_ratio);
-        return decode_number(string + prefix - w, string + prefix);
+        return decode_number(string + prefix - w, string + prefix) - id_offset;
     }
 
     // the smallest admissible min_length for the given arguments
@@ -375,12 +379,30 @@ private:
     // in the last digit of their encoding, so their distinguishing prefix is exactly D
     static constexpr size_t group_size = 2;
 
+    // Ids are encoded with this offset added, so the smallest encoded id is id_offset, not 0. An
+    // all-char_min string (id 0) would share an arbitrarily long prefix with the char_min padding
+    // of longer strings, inflating its distinguishing prefix up to its full length; offsetting
+    // past 0 removes that one degenerate string. The offset must be even so the first member of
+    // every group (2 * group) stays even after the shift and its partner (+1) never carries out of
+    // the last digit of its encoding.
+    static constexpr size_t id_offset = 2;
+
     // on the root PE only; a no-op if the application has not set up the loggers
     template <typename... Args>
     static void log_info(fmt::format_string<Args...> fmt, Args&&... args) {
         if (auto const logger = spdlog::get("root")) {
             SPDLOG_LOGGER_INFO(logger, fmt, std::forward<Args>(args)...);
         }
+    }
+
+    // the number of base-char_range digits of value (at least one). An exact integer count -- a
+    // floating-point logarithm would misround at exact powers of char_range.
+    static size_t num_digits(size_t value) {
+        size_t digits = 1;
+        for (; value >= char_range; value /= char_range) {
+            ++digits;
+        }
+        return digits;
     }
 
     // Encode `value` in base-`char_range`, right-aligned, ending just before `end`. Positions
@@ -483,15 +505,19 @@ private:
             size_t const id = ids[i], len = lengths[i];
             auto const prefix = distinguishing_prefix(len, args.global_strings, args.dn_ratio);
 
-            // the region before the id block: the group id, tiled block by block
-            std::fill(block.begin(), block.end(), char_min);
-            encode_number(block.end(), id / group_size);
-            for (auto out = dest; out != dest + (prefix - w); out += w) {
-                std::copy(block.begin(), block.end(), out);
-            }
+            if (args.use_uniform_prefix) {
+                std::fill_n(dest, prefix, char_min+30);
+            } else {
+                // the region before the id block: the group id, tiled block by block
+                std::fill(block.begin(), block.end(), char_min);
+                encode_number(block.end(), id / group_size);
+                for (auto out = dest; out != dest + (prefix - w); out += w) {
+                    std::copy(block.begin(), block.end(), out);
+                }
 
-            std::fill_n(dest + (prefix - w), w, char_min);
-            encode_number(dest + prefix, id);
+                std::fill_n(dest + (prefix - w), w, char_min);
+            }
+            encode_number(dest + prefix, id + id_offset);
             std::fill_n(dest + prefix, len - prefix, fill_char);
 
             dest += len + 1;

@@ -64,6 +64,9 @@ struct SorterArgs : public CommonArgs {
     // interval that is skew_factor times longer, and which PE a string is generated on
     double skew_fraction = 0.0;
     double skew_factor = 1.0;
+    // skewed_dn_length: pad the distinguishing prefix with a single constant character instead of
+    // the tiled per-group encoding
+    bool use_uniform_prefix = false;
     size_t id_placement = static_cast<size_t>(dss_mehnert::IdPlacement::random);
     size_t iteration = 0;
     bool strong_scaling = false;
@@ -131,6 +134,7 @@ auto generate_strings(SorterArgs const& args, dss_mehnert::Communicator const& c
                         .global_strings = args.scaled_strings(comm),
                         .min_length = args.len_strings_min,
                         .max_length = args.len_strings_max,
+                        .use_uniform_prefix = args.use_uniform_prefix,
                         .dn_ratio = args.dn_ratio,
                         .skew_fraction = args.skew_fraction,
                         .skew_factor = args.skew_factor,
@@ -487,6 +491,13 @@ void add_sorter_args(
            "for skewedDNLenGen, the factor by which the stretched strings may be longer"
     )
         ->group("Input");
+    app.add_flag(
+           "--input-use-uniform-prefix",
+           args.use_uniform_prefix,
+           "for skewedDNLenGen, pad the distinguishing prefix with a single constant character "
+           "instead of the tiled per-group encoding"
+    )
+        ->group("Input");
     app.add_option(
            "--placement",
            args.id_placement,
@@ -606,6 +617,7 @@ int main(int argc, char* argv[]) {
         config["input"]["max-len-strings"] = args.len_strings_max;
         config["input"]["DN-ratio"] = args.dn_ratio;
         config["input"]["dn-encode-padding"] = args.dn_encode_padding;
+        config["input"]["use-uniform-prefix"] = args.use_uniform_prefix;
 
         config["num-iterations"] = args.num_iterations;
         config["permutation"] = args.permutation;
