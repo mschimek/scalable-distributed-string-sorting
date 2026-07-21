@@ -126,25 +126,32 @@ distribute_file(std::string const& input_path, size_t const max_size, Communicat
 inline std::vector<unsigned char>
 distribute_lines(std::string const& input_path, size_t const max_size, Communicator const& comm) {
     auto result = distribute_file(input_path, max_size, comm);
-    auto first_newline = std::find(result.begin(), result.end(), '\n') - result.begin();
+    size_t const first_newline = std::find(result.begin(), result.end(), '\n') - result.begin();
 
     std::replace(result.begin(), result.end(), '\n', static_cast<char>(0));
+
+    // this PE's leading partial line: the bytes up to and including the first terminator, or the
+    // whole slice if it holds no line break at all.
+    size_t const shift_count = first_newline < result.size() ? first_newline + 1 : result.size();
 
     if (comm.size() > 1) {
         // Shift the first string to the previous PE, so that each PE ends with complete string.
         // This is still not perfect, e.g. if a string spans multiple PEs ¯\_(ツ)_/¯.
-        auto shifted_string = shift_left(result.data(), first_newline + 1, comm);
+        auto shifted_string = shift_left(result.data(), shift_count, comm);
 
         if (comm.rank() + 1 < comm.size()) {
             std::copy(shifted_string.begin(), shifted_string.end(), std::back_inserter(result));
         }
     }
 
+    // Drop the leading partial line that was handed to the previous PE before terminating what is
+    // left, so a PE whose whole slice was shifted away contributes nothing (terminating first would
+    // leave it with a stray terminator, i.e. a spurious empty string).
+    if (comm.rank() > 0) {
+        result.erase(result.begin(), result.begin() + shift_count);
+    }
     if (!result.empty() && result.back() != 0) {
         result.emplace_back(0);
-    }
-    if (comm.rank() > 0) {
-        result.erase(result.begin(), result.begin() + first_newline + 1);
     }
 
     return result;

@@ -58,6 +58,8 @@ struct SorterArgs : public CommonArgs {
     size_t len_strings_min = len_strings;
     size_t len_strings_max = len_strings + 10;
     std::string path;
+    // for the file generator: cap the number of bytes read from the file (0 = read the whole file)
+    size_t max_num_bytes = 0;
     double dn_ratio = 0.5;
     bool dn_encode_padding = false;
     // skewed_dn_length: the fraction of the smallest strings whose length is drawn from an
@@ -114,7 +116,7 @@ auto generate_strings(SorterArgs const& args, dss_mehnert::Communicator const& c
             }
             case StringGenerator::file: {
                 check_path_exists(args.path);
-                return FileDistributer<StringSet>{args.path, comm};
+                return FileDistributer<StringSet>{args.path, comm, args.max_num_bytes};
             }
             case StringGenerator::skewed_dn_ratio: {
                 return SkewedDNRatioGenerator<StringSet>{
@@ -462,6 +464,12 @@ void add_sorter_args(
     )
         ->group("Input");
     app.add_option("--path", args.path, "path to input file")->group("Input");
+    app.add_option(
+           "--max-num-bytes",
+           args.max_num_bytes,
+           "for the file generator, truncate the input to at most this many bytes (0 = whole file)"
+    )
+        ->group("Input");
     app.add_option("--DN-ratio", args.dn_ratio, "D/N ratio of generated strings")->group("Input");
     app.add_flag(
            "--dn-encode-padding",
@@ -611,6 +619,7 @@ int main(int argc, char* argv[]) {
 
         config["input"]["string-generator"] = args.string_generator;
         config["input"]["path"] = args.path;
+        config["input"]["max-num-bytes"] = args.max_num_bytes;
         config["input"]["num-strings"] = args.num_strings;
         config["input"]["length-strings"] = args.len_strings;
         config["input"]["min-len-strings"] = args.len_strings_min;

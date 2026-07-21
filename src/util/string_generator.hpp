@@ -49,8 +49,10 @@ inline size_t get_global_seed(size_t seed, Communicator const& comm) {
 template <typename StringSet>
 class FileDistributer : public StringLcpContainer<StringSet> {
 public:
-    FileDistributer(std::string const& path, Communicator const& comm)
-        : StringLcpContainer<StringSet>{distribute_lines(path, 0, comm)} {}
+    // max_size caps the number of bytes read from the file (0 = read the whole file). The cut is
+    // made at a byte boundary, so the last line may be truncated.
+    FileDistributer(std::string const& path, Communicator const& comm, size_t const max_size = 0)
+        : StringLcpContainer<StringSet>{distribute_lines(path, max_size, comm)} {}
 
     static std::string getName() { return "FileDistributer"; }
 };
@@ -506,7 +508,7 @@ private:
             auto const prefix = distinguishing_prefix(len, args.global_strings, args.dn_ratio);
 
             if (args.use_uniform_prefix) {
-                std::fill_n(dest, prefix, char_min+30);
+                std::fill_n(dest, prefix, char_min);
             } else {
                 // the region before the id block: the group id, tiled block by block
                 std::fill(block.begin(), block.end(), char_min);
