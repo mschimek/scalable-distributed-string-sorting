@@ -6,6 +6,7 @@ target_sources(dss_base
         byte_encoder.hpp
         communicator.hpp
         is_sorted.hpp
+        openmpi_style_pairwise.hpp
         read_input.hpp
         rotate.hpp
 )

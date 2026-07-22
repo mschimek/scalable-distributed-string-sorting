@@ -35,7 +35,7 @@ inline void check_path_exists(std::string const& path) {
     tlx_die_verbose_unless(std::filesystem::exists(path), "file not found: " << path);
 };
 
-enum class MPIRoutineAllToAll { native = 0, direct, combined, one_factor, sentinel };
+enum class MPIRoutineAllToAll { native = 0, direct, combined, one_factor, pairwise, sentinel };
 
 // clang-format off
 enum class Redistribution { none = 0, naive, simple_strings, simple_chars,
@@ -296,6 +296,14 @@ void dispatch_alltoall_strings(Callback cb, CommonArgs const& args) {
             }
             return;
         }
+        case MPIRoutineAllToAll::pairwise: {
+            if constexpr (CliOptions::enable_alltoall) {
+                dispatch_lcp_compression.template operator()<AlltoallKind::pairwise>();
+            } else {
+                dss_mehnert::die_with_feature("CLI_ENABLE_ALLTOALL");
+            }
+            return;
+        }
         case MPIRoutineAllToAll::sentinel: {
             break;
         }
@@ -383,7 +391,7 @@ inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
         "alltoall",
         args.alltoall_routine,
         "All-To-All routine to use during string exchange "
-        "([0]=native, 1=direct, 2=combined, 3=one_factor)"
+        "([0]=native, 1=direct, 2=combined, 3=one_factor, 4=pairwise)"
     );
     cp.add_size_t(
         "alltoall-onefactor-num-slots",
@@ -531,7 +539,7 @@ inline void add_common_args(CommonArgs& args, CLI::App& app) {
            "--alltoall",
            args.alltoall_routine,
            "All-To-All routine to use during string exchange "
-           "([0]=native, 1=direct, 2=combined, 3=one_factor)"
+           "([0]=native, 1=direct, 2=combined, 3=one_factor, 4=pairwise)"
     )
         ->group("All-to-All");
     app.add_option(

@@ -21,12 +21,13 @@
 
 #include "mpi/alltoall_onefactor.hpp"
 #include "mpi/big_type.hpp"
+#include "mpi/openmpi_style_pairwise.hpp"
 #include "util/measuringTool.hpp"
 
 namespace dss_mehnert {
 namespace mpi {
 
-enum class AlltoallvCombinedKind { combined, native, direct, one_factor };
+enum class AlltoallvCombinedKind { combined, native, direct, one_factor, pairwise };
 
 template <auto>
 inline constexpr bool always_false_v = false;
@@ -86,6 +87,13 @@ public:
                 send_counts,
                 recv_counts,
                 onefactor_params
+            );
+        } else if constexpr (kind == AlltoallvCombinedKind::pairwise) {
+            return alltoallv_pairwise(
+                this->to_communicator(),
+                send_buf,
+                send_counts,
+                recv_counts
             );
         } else {
             []<AlltoallvCombinedKind type_ = kind> {
