@@ -72,6 +72,8 @@ struct SorterArgs : public CommonArgs {
     size_t id_placement = static_cast<size_t>(dss_mehnert::IdPlacement::random);
     size_t iteration = 0;
     bool strong_scaling = false;
+    // number of irregular alltoallv warmup rounds run before each sort (0 = no warmup)
+    size_t mpi_warmup_rounds = 0;
     std::vector<size_t> levels;
 
     std::string get_prefix(dss_mehnert::Communicator const& comm) const {
@@ -210,7 +212,14 @@ void run_merge_sort(
         Subcommunicators comms{first_level, args.levels.end(), comm};
         kamping::measurements::timer().stop_and_append();
         measuring_tool.stop("none", "create_communicators", comm);
+        [[maybe_unused]] volatile std::size_t warmup_sink = 0;
+        for (std::size_t i = 0; i < args.mpi_warmup_rounds; ++i) {
+            kamping::measurements::timer().synchronize_and_start("warmup-round");
+            warmup_sink += mpi_irregular_warmup(50000, 50500, comms.comm_root());
+            kamping::measurements::timer().stop_and_append();
+        }
 
+        comm.barrier();
         measuring_tool.start("none", "sorting_overall");
         kamping::measurements::timer().synchronize_and_start("sorting_overall");
         MergeSort merge_sort{
@@ -516,6 +525,12 @@ void add_sorter_args(
         ->group("Input");
     app.add_flag("--strong-scaling", args.strong_scaling, "perform a strong scaling experiment")
         ->group("Input");
+    app.add_option(
+           "--mpi-warmup-rounds",
+           args.mpi_warmup_rounds,
+           "number of irregular alltoallv warmup rounds to run before each sort (0 = no warmup)"
+    )
+        ->group("Input");
 
     // -- Multi-level ----------------------------------------------------------
     app.add_option("--group-size", levels_param, "size of groups for multi-level merge sort")
@@ -629,6 +644,7 @@ int main(int argc, char* argv[]) {
         config["input"]["use-uniform-prefix"] = args.use_uniform_prefix;
 
         config["num-iterations"] = args.num_iterations;
+        config["mpi-warmup-rounds"] = args.mpi_warmup_rounds;
         config["permutation"] = args.permutation;
         config["num-levels"] = num_levels;
         config["cpus-per-node"] = cpus_per_node;
