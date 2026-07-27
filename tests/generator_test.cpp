@@ -170,9 +170,10 @@ TEST_P(SkewedDNGenerator, DistinguishingPrefixMatchesTheDNRatio) {
             );
             // D is dn_ratio of the string's *own* length -- the skewed strings get longer
             // distinguishing prefixes, they are not simply padded. Rounding the region down to
-            // whole blocks can lose at most w characters.
+            // whole blocks can lose at most w characters, and D can never drop below the w
+            // characters it takes to name one of the strings.
             double const requested = dn_ratio * static_cast<double>(str.length);
-            EXPECT_LE(prefix, requested + 1.0) << "id " << str.id;
+            EXPECT_LE(prefix, std::max(w, requested + 1.0)) << "id " << str.id;
             EXPECT_GT(prefix, requested - w - 1.0) << "id " << str.id;
 
             local_dist_chars += static_cast<size_t>(prefix);
@@ -182,6 +183,77 @@ TEST_P(SkewedDNGenerator, DistinguishingPrefixMatchesTheDNRatio) {
         double const realized = static_cast<double>(allreduce_sum(comm, local_dist_chars))
                                 / static_cast<double>(allreduce_sum(comm, local_chars));
         EXPECT_NEAR(realized, dn_ratio, 0.05) << "for a requested D/N ratio of " << dn_ratio;
+    }
+}
+
+// Naming one of `global_strings` strings takes w characters, so a string shorter than w / dn_ratio
+// cannot realize the requested ratio -- no layout can. The generator pins D at w for those strings
+// and reports the shortfall, rather than lengthening the strings and silently handing back an
+// instance nobody asked for.
+TEST_P(SkewedDNGenerator, ShortStringsKeepTheSmallestUsableDistinguishingPrefix) {
+    Communicator comm;
+    auto args = default_args(GetParam());
+    args.min_length = 20;
+    args.max_length = 400;
+    args.dn_ratio = 0.05; // w / dn_ratio = 60, so the short strings are below the floor
+
+    size_t const w = Generator::id_width(args.global_strings);
+    auto const local = generate(args, comm);
+
+    EXPECT_EQ(args.min_length, 20u) << "the lengths should not have been raised to meet the ratio";
+    EXPECT_EQ(args.max_length, 400u);
+
+    for (auto const& str: local) {
+        auto const prefix =
+            Generator::distinguishing_prefix(str.length, args.global_strings, args.dn_ratio);
+        auto const requested = static_cast<size_t>(args.dn_ratio * static_cast<double>(str.length));
+
+        EXPECT_GE(prefix, w) << "id " << str.id << " cannot be named in fewer than w characters";
+        EXPECT_LE(prefix, std::max(w, requested + 1)) << "id " << str.id;
+        if (requested < w) {
+            EXPECT_EQ(prefix, w) << "id " << str.id << " should carry exactly the id block";
+        }
+    }
+}
+
+// The regime the id-scale tiled block exists for: strings whose whole distinguishing prefix is a
+// single block, and so carry no tiled region at all, coexisting with strings that carry several.
+// Tiling the group index instead of the group's first id puts the two on different scales, and the
+// order comes out wrong -- but only when both kinds are present, which is why the test above, whose
+// strings all carry a tiled region, does not catch it.
+TEST_P(SkewedDNGenerator, LexicographicOrderIsIdOrderAcrossOneAndManyBlockPrefixes) {
+    if (GetParam()) {
+        GTEST_SKIP() << "uniform prefix does not preserve id order across different lengths";
+    }
+
+    Communicator comm;
+    auto args = default_args();
+    args.min_length = 20;
+    args.max_length = 400;
+    args.dn_ratio = 0.05;
+
+    auto const prefix_of = [&args](size_t const length) {
+        return Generator::distinguishing_prefix(length, args.global_strings, args.dn_ratio);
+    };
+    size_t const w = Generator::id_width(args.global_strings);
+    ASSERT_EQ(prefix_of(args.min_length), w) << "the short strings should carry only the id block";
+    ASSERT_GT(prefix_of(args.max_length), w) << "the long strings should carry a tiled region";
+
+    auto const local = generate(args, comm);
+    std::vector<std::string> chars;
+    for (auto const& str: local) {
+        chars.push_back(str.chars);
+    }
+
+    auto const all_chars = comm.allgatherv(kamping::send_buf(dss_test::pack(chars)));
+    auto sorted = dss_test::unpack(all_chars);
+    std::sort(sorted.begin(), sorted.end());
+
+    ASSERT_EQ(sorted.size(), args.global_strings);
+    for (size_t i = 0; i != sorted.size(); ++i) {
+        auto const* str = reinterpret_cast<Char const*>(sorted[i].data());
+        EXPECT_EQ(Generator::decode_id(str, sorted[i].size(), args), i)
+            << "string at rank " << i << " is not the string with id " << i;
     }
 }
 

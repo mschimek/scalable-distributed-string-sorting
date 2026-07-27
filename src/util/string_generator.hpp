@@ -272,8 +272,8 @@ struct SkewedDNArgs {
 //
 // String `x` belongs to prefix group `g = x / 2` and looks like this:
 //
-//     [ enc(g, w) repeated (D - w) / w times ][ enc(x + 2, w) ][ fill character ... ]
-//       shared with the other string of g      the id           no information
+//     [ enc(2g + 2, w) repeated (D - w) / w times ][ enc(x + 2, w) ][ fill character ... ]
+//       shared with the other string of g            the id           no information
 //
 // where `w` is the number of base-sigma digits of the largest encoded id and `D = dn_ratio *
 // length`, rounded so that the region before the id block is a whole number of `w`-character
@@ -282,11 +282,21 @@ struct SkewedDNArgs {
 // asked for, for every string. Ids are encoded with a `+2` offset (see `id_offset`) so that no
 // string is all padding characters.
 //
-// Because the region is a whole number of blocks, every string starts with the fixed-width
-// encoding of its group: the lexicographic order is the id order, whatever the lengths are. The
-// skew therefore lengthens the lexicographically *smallest* strings, which is what makes the
-// instance hard: the character mass sits at the bottom of the key range, where character-based
-// sampling, character-based redistribution and the splitter length limit all have to cope with it.
+// The tiled block holds `2g + 2`, the encoding of the group's *first id*, rather than `g` itself.
+// That puts it on the same scale as the id block, which is what lets a string carry no tiled region
+// at all: a string whose D is only one block wide starts with `enc(x + 2)`, and comparing it
+// against a longer string's leading `enc(2g + 2)` still orders the two by id. Encoding `g` would
+// compare `x + 2` against `g'` -- two different scales -- and the order would depend on the lengths.
+//
+// So every string starts with a fixed-width encoding that is monotone in its id: the lexicographic
+// order is the id order, whatever the lengths are. The skew therefore lengthens the
+// lexicographically *smallest* strings, which is what makes the instance hard: the character mass
+// sits at the bottom of the key range, where character-based sampling, character-based
+// redistribution and the splitter length limit all have to cope with it.
+//
+// `D` can never be smaller than `w`, because `w` characters are what it takes to name one of
+// `global_strings` strings -- a string shorter than `w / dn_ratio` therefore realizes a larger D/N
+// ratio than was asked for, and `adjust_args` says so rather than lengthening it.
 template <typename StringSet>
 class SkewedDNRatioLengthGenerator : public StringLcpContainer<StringSet> {
 public:
@@ -313,10 +323,12 @@ public:
     // meet the requested D/N ratio (see adjust_args)
     SkewedDNArgs const& args() const { return args_; }
 
-    // The prefix region has to hold at least one whole block, or a short string would start with
-    // its id block while a long one starts with a group block -- and the two would be compared
-    // against each other, which would break the lexicographic order. Rather than rejecting such
-    // arguments, the lengths are raised to the smallest value that supports the requested ratio.
+    // A string has to be able to hold its id block, so the lengths are raised to `w` if they are
+    // below it. Nothing else is required: a string too short to spend `dn_ratio` of itself on `w`
+    // characters simply carries a single block and realizes a larger ratio, which is reported
+    // rather than corrected -- no layout can name one of `global_strings` strings in fewer than `w`
+    // characters, so lengthening the strings to meet the request would silently replace the
+    // instance that was asked for.
     static SkewedDNArgs adjust_args(SkewedDNArgs args) {
         tlx_die_unless(args.global_strings >= group_size);
         tlx_die_unless(0.0 < args.dn_ratio && args.dn_ratio <= 1.0);
@@ -326,13 +338,30 @@ public:
         auto const min_length = min_admissible_length(args.global_strings, args.dn_ratio);
         if (args.min_length < min_length) {
             log_info(
-                "min length {} is too small for a D/N ratio of {} and {} strings, raising it to {}",
+                "min length {} cannot hold the {} characters it takes to name one of {} strings, "
+                "raising it to {}",
                 args.min_length,
-                args.dn_ratio,
+                min_length,
                 args.global_strings,
                 min_length
             );
             args.min_length = min_length;
+        }
+
+        // the shortest length that realizes the requested ratio; below it D is pinned at w
+        auto const w = id_width(args.global_strings);
+        if (auto const exact = static_cast<size_t>(std::ceil(w / args.dn_ratio));
+            args.min_length < exact) {
+            log_info(
+                "strings shorter than {} cannot realize a D/N ratio of {} with {} strings: their "
+                "distinguishing prefix stays at {} characters, so a string of length {} realizes {}",
+                exact,
+                args.dn_ratio,
+                args.global_strings,
+                w,
+                args.min_length,
+                static_cast<double>(w) / static_cast<double>(args.min_length)
+            );
         }
         if (args.max_length < args.min_length) {
             log_info(
@@ -356,7 +385,8 @@ public:
     static size_t
     distinguishing_prefix(size_t const length, size_t const global_strings, double const dn_ratio) {
         size_t const w = id_width(global_strings);
-        size_t const k = std::clamp<size_t>(std::llround(dn_ratio * length), 2 * w, length);
+        // at least the id block: w characters are what it takes to name one of the strings
+        size_t const k = std::clamp<size_t>(std::llround(dn_ratio * length), w, length);
         return w * ((k - w) / w) + w; // the region holds a whole number of blocks
     }
 
@@ -367,9 +397,11 @@ public:
         return decode_number(string + prefix - w, string + prefix) - id_offset;
     }
 
-    // the smallest admissible min_length for the given arguments
-    static size_t min_admissible_length(size_t const global_strings, double const dn_ratio) {
-        return static_cast<size_t>(std::ceil(2 * id_width(global_strings) / dn_ratio));
+    // The smallest admissible min_length: a string has to hold its id block. The requested D/N
+    // ratio does not enter into it -- a shorter string is not inadmissible, it just realizes a
+    // larger ratio than was asked for (see adjust_args).
+    static size_t min_admissible_length(size_t const global_strings, double const) {
+        return id_width(global_strings);
     }
 
     // The input a run with `num_pes` PEs produces, gathered into a single container on one PE: the
@@ -588,7 +620,10 @@ private:
             if (args.use_uniform_prefix) {
                 std::fill_n(dest, prefix, char_min);
             } else {
-                // the region before the id block: the group id, tiled block by block
+                // The region before the id block: the group's first id, tiled block by block. Not
+                // the group index itself -- the block has to be on the same scale as the id block
+                // so that a string with no tiled region at all still compares correctly against
+                // one that has some (see the layout description above).
                 std::fill(block.begin(), block.end(), char_min);
                 encode_number(block.end(), id / group_size);
                 for (auto out = dest; out != dest + (prefix - w); out += w) {
