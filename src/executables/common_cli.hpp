@@ -17,7 +17,7 @@
 #include <tlx/sort/strings/parallel_sample_sort.hpp>
 
 #include "kamping/named_parameters.hpp"
-#include "mpi/alltoall_combined.hpp"
+#include "mpi/alltoallv/dispatch.hpp"
 #include "mpi/communicator.hpp"
 #include "mpi/is_sorted.hpp"
 #include "mpi/print_strings.hpp"

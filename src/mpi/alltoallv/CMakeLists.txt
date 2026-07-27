@@ -1,0 +1,9 @@
+target_sources(dss_base
+    PUBLIC
+        direct.hpp
+        dispatch.hpp
+        native.hpp
+        onefactor.hpp
+        pairwise.hpp
+        params.hpp
+)

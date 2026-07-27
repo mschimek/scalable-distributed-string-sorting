@@ -15,7 +15,7 @@
 #include <kamping/named_parameters.hpp>
 #include <kamping/plugin/plugin_helpers.hpp>
 
-#include "mpi/alltoall_combined.hpp"
+#include "mpi/alltoallv/dispatch.hpp"
 #include "mpi/byte_encoder.hpp"
 #include "sorter/distributed/permutation.hpp"
 #include "strings/stringcontainer.hpp"

@@ -1,5 +1,8 @@
 // (c) 2024 Matthias Schimek
 // This code is licensed under BSD 2-Clause License (see LICENSE for details)
+//
+// All-to-all built from the 1-factor schedule: the pairwise exchanges are ordered so that
+// in every round each PE communicates with exactly one partner.
 
 #pragma once
 
@@ -19,23 +22,11 @@
 #include <kamping/request.hpp>
 #include <mpi.h>
 
+#include "mpi/alltoallv/params.hpp"
 #include "util/measuringTool.hpp"
 
 namespace dss_mehnert {
 namespace mpi {
-
-// Selects how the 1-factor exchanges:
-//   * windowed:     pipeline the exchanges over a fixed window of outstanding
-//                   isend/irecv pairs.
-//   * synchronized: perform the standard full 1-factor schedule as p (p-1 for even p)
-//                   pairwise MPI_Sendrecv exchanges
-enum class OneFactorMode { windowed, synchronized };
-
-struct OneFactorParams {
-    OneFactorMode mode = OneFactorMode::windowed;
-    size_t num_slots = 16;
-    bool use_issend = false;
-};
 
 // partner of `rank` in round k of the 1-factor schedule
 //   * p odd:  for k in [0, p)      partner j := (k - i) mod p

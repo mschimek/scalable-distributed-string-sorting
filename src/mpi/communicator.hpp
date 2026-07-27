@@ -13,7 +13,7 @@
 #include <kamping/named_parameter_selection.hpp>
 #include <kamping/named_parameter_types.hpp>
 
-#include "mpi/alltoall_combined.hpp"
+#include "mpi/alltoallv/dispatch.hpp"
 #include "mpi/alltoall_strings.hpp"
 #include "util/measuringTool.hpp"
 
