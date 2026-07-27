@@ -22,6 +22,7 @@
 #include <spdlog/spdlog.h>
 #include <tlx/die/core.hpp>
 #include <tlx/math/div_ceil.hpp>
+#include <tlx/vector_free.hpp>
 
 #include "mpi/communicator.hpp"
 #include "mpi/read_input.hpp"
@@ -296,14 +297,12 @@ public:
         size_t const seed = _internal::get_global_seed(args_.seed, comm);
         std::mt19937_64 gen{seed + comm.rank()};
 
-        auto [ids, lengths] = generate_ids(args_, gen, comm);
+        auto [ids, lengths] = generate_ids(args_, gen, comm.rank(), comm.size());
         if (args_.placement == IdPlacement::random) {
             std::tie(ids, lengths) = scatter_ids(ids, lengths, gen, comm);
         }
 
-        // the fill character carries no information, but it has to be the same on every PE
-        auto const fill_char = static_cast<CharType>(char_min + seed % char_range);
-        this->update(get_raw_strings(args_, ids, lengths, fill_char));
+        this->update(get_raw_strings(args_, ids, lengths, get_fill_char(seed)));
         std::shuffle(this->get_strings().begin(), this->get_strings().end(), gen);
         this->make_contiguous();
     }
@@ -373,6 +372,64 @@ public:
         return static_cast<size_t>(std::ceil(2 * id_width(global_strings) / dn_ratio));
     }
 
+    // The input a run with `num_pes` PEs produces, gathered into a single container on one PE: the
+    // strings of PE 0, then those of PE 1, and so on, byte for byte as those PEs would hold them.
+    // This is what makes a shared memory baseline comparable to a distributed run -- it sorts the
+    // very same input, in the very same order, rather than another draw from the same distribution.
+    static StringLcpContainer<StringSet>
+    simulate(SkewedDNArgs const& requested_args, size_t const num_pes) {
+        tlx_die_unless(num_pes > 0);
+        auto const args = adjust_args(requested_args);
+
+        // get_global_seed only broadcasts the root's seed, and every PE of a run is given the same
+        // one on the command line
+        size_t const seed = args.seed;
+
+        // the engines are kept across both passes: a PE draws its destinations before it knows
+        // what it receives, so its shuffle continues from the state pass one leaves behind
+        std::vector<std::mt19937_64> gens;
+        gens.reserve(num_pes);
+        std::vector<std::vector<size_t>> recv_ids(num_pes), recv_lengths(num_pes);
+
+        // Pass one: the PEs draw their ids and lengths, and hand each string to its destination.
+        for (size_t rank = 0; rank != num_pes; ++rank) {
+            auto& gen = gens.emplace_back(seed + rank);
+            auto [ids, lengths] = generate_ids(args, gen, rank, num_pes);
+
+            if (args.placement == IdPlacement::random) {
+                auto const dest = draw_destinations(ids.size(), num_pes, gen);
+                for (size_t i = 0; i != ids.size(); ++i) {
+                    recv_ids[dest[i]].push_back(ids[i]);
+                    recv_lengths[dest[i]].push_back(lengths[i]);
+                }
+            } else {
+                recv_ids[rank] = std::move(ids);
+                recv_lengths[rank] = std::move(lengths);
+            }
+        }
+
+        // Pass two: the steps the constructor takes, PE by PE.
+        std::vector<CharType> raw_strings;
+        for (size_t rank = 0; rank != num_pes; ++rank) {
+            StringLcpContainer<StringSet> local;
+            local.update(
+                get_raw_strings(args, recv_ids[rank], recv_lengths[rank], get_fill_char(seed))
+            );
+            tlx::vector_free(recv_ids[rank]);
+            tlx::vector_free(recv_lengths[rank]);
+
+            std::shuffle(local.get_strings().begin(), local.get_strings().end(), gens[rank]);
+            local.make_contiguous();
+
+            auto const& chars = local.raw_strings();
+            raw_strings.insert(raw_strings.end(), chars.begin(), chars.end());
+        }
+
+        StringLcpContainer<StringSet> container;
+        container.update(std::move(raw_strings));
+        return container;
+    }
+
 private:
     static constexpr CharType char_min = 'A', char_max = 'Z';
     static constexpr size_t char_range = char_max - char_min + 1;
@@ -395,6 +452,13 @@ private:
         if (auto const logger = spdlog::get("root")) {
             SPDLOG_LOGGER_INFO(logger, fmt, std::forward<Args>(args)...);
         }
+    }
+
+    // The character the region after the id block is padded with. It carries no information, but it
+    // has to be the same on every PE, so it is derived from the seed alone -- nothing about the PE
+    // may enter into it, which is exactly why a simulated run can reproduce it.
+    static CharType get_fill_char(size_t const seed) {
+        return static_cast<CharType>(char_min + seed % char_range);
     }
 
     // the number of base-char_range digits of value (at least one). An exact integer count -- a
@@ -425,14 +489,16 @@ private:
         return value;
     }
 
-    // The ids this PE generates, together with their lengths. The origin ranges are chunked by
+    // The ids PE `rank` generates, together with their lengths. The origin ranges are chunked by
     // prefix group rather than by string id, so a group is always drawn by a single PE and the
-    // two strings of a group can not end up with different lengths.
-    static std::pair<std::vector<size_t>, std::vector<size_t>>
-    generate_ids(SkewedDNArgs const& args, std::mt19937_64& gen, Communicator const& comm) {
+    // two strings of a group can not end up with different lengths. Takes the rank explicitly
+    // rather than a communicator, so `simulate` can replay it for a PE that is not this one.
+    static std::pair<std::vector<size_t>, std::vector<size_t>> generate_ids(
+        SkewedDNArgs const& args, std::mt19937_64& gen, size_t const rank, size_t const num_pes
+    ) {
         size_t const num_groups = tlx::div_ceil(args.global_strings, group_size);
-        size_t const chunk = tlx::div_ceil(num_groups, comm.size());
-        size_t const first_group = std::min(num_groups, comm.rank() * chunk);
+        size_t const chunk = tlx::div_ceil(num_groups, num_pes);
+        size_t const first_group = std::min(num_groups, rank * chunk);
         size_t const last_group = std::min(num_groups, first_group + chunk);
         size_t const num_skewed = static_cast<size_t>(args.skew_fraction * num_groups);
 
@@ -462,6 +528,18 @@ private:
         return {std::move(ids), std::move(lengths)};
     }
 
+    // The PE each local string is sent to: one uniform draw per string, in local index order.
+    // Separate from the exchange so that `simulate` can replay the draws -- and thereby advance the
+    // engine exactly as the real run does -- without an alltoallv.
+    static std::vector<int>
+    draw_destinations(size_t const count, size_t const num_pes, std::mt19937_64& gen) {
+        std::uniform_int_distribution<int> rank_dist{0, static_cast<int>(num_pes) - 1};
+
+        std::vector<int> dest(count);
+        std::generate(dest.begin(), dest.end(), [&] { return rank_dist(gen); });
+        return dest;
+    }
+
     // send each string to a uniformly random PE, carrying its length along with its id
     static std::pair<std::vector<size_t>, std::vector<size_t>> scatter_ids(
         std::vector<size_t> const& ids,
@@ -469,10 +547,10 @@ private:
         std::mt19937_64& gen,
         Communicator const& comm
     ) {
-        std::uniform_int_distribution<int> rank_dist{0, comm.size_signed() - 1};
+        auto const dest = draw_destinations(ids.size(), comm.size(), gen);
 
-        std::vector<int> dest(ids.size()), counts(comm.size()), offsets(comm.size());
-        std::generate(dest.begin(), dest.end(), [&] { return rank_dist(gen); });
+        std::vector<int> counts(comm.size());
+        std::vector<int> offsets(comm.size());
         std::for_each(dest.begin(), dest.end(), [&](auto const& n) { ++counts[n]; });
         std::exclusive_scan(counts.begin(), counts.end(), offsets.begin(), size_t{0});
 

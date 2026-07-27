@@ -70,6 +70,9 @@ struct SorterArgs : public CommonArgs {
     // the tiled per-group encoding
     bool use_uniform_prefix = false;
     size_t id_placement = static_cast<size_t>(dss_mehnert::IdPlacement::random);
+    // skewed_dn_length: reproduce on a single PE the input a run with this many PEs would produce,
+    // PE by PE in rank order (0 = generate normally)
+    size_t simulate_num_pes = 0;
     size_t iteration = 0;
     bool strong_scaling = false;
     // number of irregular alltoallv warmup rounds run before each sort (0 = no warmup)
@@ -88,8 +91,14 @@ struct SorterArgs : public CommonArgs {
         // clang-format on
     }
 
+    // the number of PEs the input is generated for: the simulated count when a run is being
+    // reproduced on a single PE, the actual one otherwise
+    size_t generating_pes(dss_mehnert::Communicator const& comm) const {
+        return simulate_num_pes != 0 ? simulate_num_pes : comm.size();
+    }
+
     size_t scaled_strings(dss_mehnert::Communicator const& comm) const {
-        return (strong_scaling ? 1 : comm.size()) * num_strings;
+        return (strong_scaling ? 1 : generating_pes(comm)) * num_strings;
     }
 };
 
@@ -133,20 +142,29 @@ auto generate_strings(SorterArgs const& args, dss_mehnert::Communicator const& c
                 return SuffixGenerator<StringSet>{args.path, comm};
             }
             case StringGenerator::skewed_dn_length: {
-                return SkewedDNRatioLengthGenerator<StringSet>{
-                    {
-                        .global_strings = args.scaled_strings(comm),
-                        .min_length = args.len_strings_min,
-                        .max_length = args.len_strings_max,
-                        .use_uniform_prefix = args.use_uniform_prefix,
-                        .dn_ratio = args.dn_ratio,
-                        .skew_fraction = args.skew_fraction,
-                        .skew_factor = args.skew_factor,
-                        .placement = clamp_enum_value<IdPlacement>(args.id_placement),
-                        .seed = args.seed,
-                    },
-                    comm
+                SkewedDNArgs const gen_args{
+                    .global_strings = args.scaled_strings(comm),
+                    .min_length = args.len_strings_min,
+                    .max_length = args.len_strings_max,
+                    .use_uniform_prefix = args.use_uniform_prefix,
+                    .dn_ratio = args.dn_ratio,
+                    .skew_fraction = args.skew_fraction,
+                    .skew_factor = args.skew_factor,
+                    .placement = clamp_enum_value<IdPlacement>(args.id_placement),
+                    .seed = args.seed,
                 };
+                if (args.simulate_num_pes != 0) {
+                    tlx_die_verbose_unless(
+                        comm.size() == 1,
+                        "--simulate-num-pes reproduces a distributed run on a single PE, so it has "
+                        "to be run with a single MPI rank"
+                    );
+                    return SkewedDNRatioLengthGenerator<StringSet>::simulate(
+                        gen_args,
+                        args.simulate_num_pes
+                    );
+                }
+                return SkewedDNRatioLengthGenerator<StringSet>{gen_args, comm};
             }
             case StringGenerator::sentinel: {
                 break;
@@ -523,6 +541,15 @@ void add_sorter_args(
            "so the input itself is imbalanced in characters"
     )
         ->group("Input");
+    app.add_option(
+           "--simulate-num-pes",
+           args.simulate_num_pes,
+           "for skewedDNLenGen, generate on a single PE the input a run with this many PEs would "
+           "produce, PE by PE in rank order (0 = generate normally). Pass the command line of that "
+           "run with this option added to sort the very same input, e.g. as a shared memory "
+           "baseline; requires a single MPI rank"
+    )
+        ->group("Input");
     app.add_flag("--strong-scaling", args.strong_scaling, "perform a strong scaling experiment")
         ->group("Input");
     app.add_option(
@@ -642,6 +669,11 @@ int main(int argc, char* argv[]) {
         config["input"]["DN-ratio"] = args.dn_ratio;
         config["input"]["dn-encode-padding"] = args.dn_encode_padding;
         config["input"]["use-uniform-prefix"] = args.use_uniform_prefix;
+        config["input"]["skew-fraction"] = args.skew_fraction;
+        config["input"]["skew-factor"] = args.skew_factor;
+        config["input"]["placement"] = args.id_placement;
+        // the run being reproduced; `p` above is 1 for a simulated run, so record it separately
+        config["input"]["simulate-num-pes"] = args.simulate_num_pes;
 
         config["num-iterations"] = args.num_iterations;
         config["mpi-warmup-rounds"] = args.mpi_warmup_rounds;

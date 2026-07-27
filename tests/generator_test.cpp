@@ -281,6 +281,64 @@ TEST_P(SkewedDNGenerator, ContiguousPlacementMakesTheInputCharacterImbalanced) {
     EXPECT_GT(chars.front(), 2 * chars.back()) << "rank 0 should hold the long strings";
 }
 
+// The claim `simulate` makes: on a single PE it produces the exact bytes the PEs of a real run
+// hold, concatenated in rank order. Byte equality is the strongest check available here -- it
+// covers the length every prefix group drew, which PE each string was scattered to, and the order
+// the strings ended up in within a PE. Anything weaker would also pass on an input that is merely
+// drawn from the same distribution, which is the thing the simulation exists to rule out.
+TEST_P(SkewedDNGenerator, SimulationReproducesTheDistributedInputByteForByte) {
+    Communicator comm;
+    for (auto const placement: {IdPlacement::random, IdPlacement::contiguous}) {
+        // 1001 leaves the last prefix group with a single string (the id < global_strings guard),
+        // 4 leaves the high ranks with nothing to generate at all
+        for (size_t const global_strings: {size_t{2000}, size_t{1001}, size_t{4}}) {
+            auto args = default_args(GetParam());
+            args.global_strings = global_strings;
+            args.placement = placement;
+            args.skew_fraction = 0.1;
+            args.skew_factor = 8.0;
+
+            Generator distributed{args, comm};
+            auto const gathered = comm.allgatherv(kamping::send_buf(distributed.raw_strings()));
+
+            auto simulated = Generator::simulate(args, comm.size());
+            auto const& raw = simulated.raw_strings();
+
+            ASSERT_EQ(raw.size(), gathered.size())
+                << "simulating " << comm.size() << " PEs, " << global_strings << " strings";
+            EXPECT_TRUE(raw == gathered)
+                << "the simulated input differs from the distributed one, simulating "
+                << comm.size() << " PEs, " << global_strings << " strings";
+        }
+    }
+}
+
+// The actual use case is a single PE standing in for a run far wider than itself, so the simulated
+// PE count is unrelated to the number of ranks the simulation runs on. The instance still has to be
+// the whole instance: every id exactly once.
+TEST_P(SkewedDNGenerator, SimulationForAWiderRunIsAWellFormedInstance) {
+    auto const args = Generator::adjust_args([&] {
+        auto args = default_args(GetParam());
+        args.skew_fraction = 0.1;
+        args.skew_factor = 8.0;
+        return args;
+    }());
+
+    auto simulated = Generator::simulate(args, 16);
+    auto const ss = simulated.make_string_set();
+
+    std::vector<size_t> ids;
+    ids.reserve(ss.size());
+    for (auto const& str: ss) {
+        ids.push_back(Generator::decode_id(ss.get_chars(str, 0), ss.get_length(str), args));
+    }
+    std::sort(ids.begin(), ids.end());
+
+    std::vector<size_t> expected(args.global_strings);
+    std::iota(expected.begin(), expected.end(), size_t{0});
+    EXPECT_EQ(ids, expected);
+}
+
 TEST_P(SkewedDNGenerator, RandomPlacementKeepsTheInputBalanced) {
     Communicator comm;
     if (comm.size() < 2) {

@@ -236,6 +236,20 @@ target_link_libraries(distributed_sorter CLI11::CLI11)
 target_link_libraries(distributed_sorter kassert::kassert)
 target_link_libraries(distributed_sorter spdlog::spdlog kamping::spdlog-adapter)
 
+add_executable(string_generator
+  src/executables/string_generator.cpp)
+
+target_include_directories(string_generator PRIVATE
+  "${CMAKE_CURRENT_BINARY_DIR}/include")
+
+target_compile_options(string_generator PRIVATE ${DSS_MEHNERT_WARNING_FLAGS})
+target_link_libraries(string_generator kamping::kamping)
+target_link_libraries(string_generator dss_base)
+target_link_libraries(string_generator tlx)
+target_link_libraries(string_generator CLI11::CLI11)
+target_link_libraries(string_generator kassert::kassert)
+target_link_libraries(string_generator spdlog::spdlog kamping::spdlog-adapter)
+
 if(DSS_BUILD_SPACE_EFFICIENT_SORTER)
   add_executable(space_efficient_sorter
     src/executables/space_efficient_sorter.cpp
