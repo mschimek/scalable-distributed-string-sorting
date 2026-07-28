@@ -625,7 +625,7 @@ private:
                 // so that a string with no tiled region at all still compares correctly against
                 // one that has some (see the layout description above).
                 std::fill(block.begin(), block.end(), char_min);
-                encode_number(block.end(), id / group_size);
+                encode_number(block.end(), group_size * (id / group_size) + id_offset);
                 for (auto out = dest; out != dest + (prefix - w); out += w) {
                     std::copy(block.begin(), block.end(), out);
                 }
