@@ -2,6 +2,7 @@ target_sources(dss_base
     PUBLIC
         direct.hpp
         dispatch.hpp
+        log.hpp
         native.hpp
         onefactor.hpp
         pairwise.hpp

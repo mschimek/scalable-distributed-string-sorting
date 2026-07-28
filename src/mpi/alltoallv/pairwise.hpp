@@ -17,6 +17,8 @@
 #include <kamping/p2p/send.hpp>
 #include <kamping/request.hpp>
 
+#include "mpi/alltoallv/log.hpp"
+
 namespace dss_mehnert {
 namespace mpi {
 
@@ -31,6 +33,8 @@ auto alltoallv_pairwise(
 ) {
     using namespace kamping;
     using DataType = std::remove_reference_t<SendBuf>::value_type;
+
+    _internal::log_alltoallv_impl("pairwise", comm.size());
 
     auto const p = static_cast<size_t>(comm.size());
 

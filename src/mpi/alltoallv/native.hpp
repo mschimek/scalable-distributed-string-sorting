@@ -18,6 +18,8 @@
 #include <kamping/named_parameters.hpp>
 #include <kassert/kassert.hpp>
 
+#include "mpi/alltoallv/log.hpp"
+
 namespace dss_mehnert {
 namespace mpi {
 
@@ -28,6 +30,8 @@ auto alltoallv_native(
     std::span<size_t const> send_counts,
     std::span<size_t const> recv_counts
 ) {
+    _internal::log_alltoallv_impl("native", comm.size());
+
     KAMPING_ASSERT(
         std::all_of(send_counts.begin(), send_counts.end(), std::in_range<int, size_t>),
         "all send counts need to fit into an int",

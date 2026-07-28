@@ -21,6 +21,7 @@
 #include <kamping/request.hpp>
 #include <mpi.h>
 
+#include "mpi/alltoallv/log.hpp"
 #include "mpi/alltoallv/params.hpp"
 
 namespace dss_mehnert {
@@ -65,6 +66,8 @@ auto alltoallv_onefactor_windowed(
 
     auto const num_slots = params.num_slots;
     auto const use_issend = params.use_issend;
+
+    _internal::log_alltoallv_impl("onefactor (windowed)", comm.size());
 
     auto const p = static_cast<size_t>(comm.size());
     auto const rank = static_cast<size_t>(comm.rank());
@@ -195,6 +198,8 @@ auto alltoallv_onefactor_synchronized(
 ) {
     using namespace kamping;
     using DataType = std::remove_reference_t<SendBuf>::value_type;
+
+    _internal::log_alltoallv_impl("onefactor (synchronized)", comm.size());
 
     auto const p = static_cast<size_t>(comm.size());
     auto const rank = static_cast<size_t>(comm.rank());

@@ -17,6 +17,7 @@
 
 #include <mpi.h>
 
+#include "mpi/alltoallv/log.hpp"
 #include "mpi/big_type.hpp"
 #include "util/measuringTool.hpp"
 
@@ -31,6 +32,8 @@ auto alltoallv_direct(
     std::span<size_t const> recv_counts
 ) {
     using DataType = std::remove_reference_t<SendBuf>::value_type;
+
+    _internal::log_alltoallv_impl("direct", comm.size());
 
     // todo this should use kamping, once irecv is merged into main
     auto& measuring_tool = measurement::MeasuringTool::measuringTool();
