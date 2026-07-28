@@ -16,6 +16,7 @@
 #include <tlx/die/core.hpp>
 #include <tlx/sort/strings/parallel_sample_sort.hpp>
 
+#include "executables/serialization.hpp"
 #include "kamping/named_parameters.hpp"
 #include "mpi/alltoallv/dispatch.hpp"
 #include "mpi/communicator.hpp"
@@ -39,10 +40,27 @@ inline void check_path_exists(std::string const& path) {
 // which applies to every algorithm rather than being one of them.
 enum class MPIRoutineAllToAll { native = 0, direct, onefactor, pairwise, sentinel };
 
+inline EnumNames<MPIRoutineAllToAll> const alltoall_names{
+    {"native", MPIRoutineAllToAll::native},
+    {"direct", MPIRoutineAllToAll::direct},
+    {"onefactor", MPIRoutineAllToAll::onefactor},
+    {"pairwise", MPIRoutineAllToAll::pairwise},
+};
+
 // clang-format off
 enum class Redistribution { none = 0, naive, simple_strings, simple_chars,
                             det_strings, det_chars, grid, sentinel };
 // clang-format on
+
+inline EnumNames<Redistribution> const redistribution_names{
+    {"none", Redistribution::none},
+    {"naive", Redistribution::naive},
+    {"simple-strings", Redistribution::simple_strings},
+    {"simple-chars", Redistribution::simple_chars},
+    {"det-strings", Redistribution::det_strings},
+    {"det-chars", Redistribution::det_chars},
+    {"grid", Redistribution::grid},
+};
 
 template <typename T>
 T clamp_enum_value(size_t const i) {
@@ -52,7 +70,7 @@ T clamp_enum_value(size_t const i) {
 struct CommonArgs {
     std::string experiment;
     size_t alltoall_algorithm = static_cast<size_t>(MPIRoutineAllToAll::native);
-    bool alltoall_large_counts = false;
+    bool alltoall_large_counts = true;
     size_t onefactor_num_slots = 16;
     bool onefactor_use_issend = false;
     bool onefactor_synchronized = false;
@@ -63,13 +81,13 @@ struct CommonArgs {
     bool splitter_sequential = false;
     size_t redistribution = static_cast<size_t>(Redistribution::grid);
     size_t local_sorter =
-        static_cast<size_t>(dss_mehnert::LocalSorter::radixsort_CI3);
+        static_cast<size_t>(dss_mehnert::LocalSorter::multikey_quicksort);
     bool prefix_compression = false;
     bool lcp_compression = false;
     bool prefix_doubling = false;
     bool grid_bloomfilter = true;
     bool bloomfilter_base_case = false;
-    bool bloomfilter_level_dedup = false;
+    bool bloomfilter_level_dedup = true;
     size_t num_iterations = 5;
     bool check_sorted = false;
     bool check_complete = false;
@@ -91,7 +109,7 @@ struct CommonArgs {
                + " splitter_length_factor=" + std::to_string(sampler.splitter_length_factor)
                + " redistribute_sample=" + std::to_string(sampler.redistribute_sample)
                + " level_adjusted_scaling=" + std::to_string(sampler.level_adjusted_scaling)
-               + " local_sorter="       + std::to_string(local_sorter)
+               + " local_sorter="       + enum_name(dss_mehnert::local_sorter_names, get_local_sorter())
                + " rquick_v1="          + std::to_string(rquick_v1)
                + " rquick_lcp="         + std::to_string(rquick_lcp)
                + " long_filter="        + std::to_string(long_filter)
@@ -101,7 +119,7 @@ struct CommonArgs {
                + " grid_bloomfilter="   + std::to_string(grid_bloomfilter)
                + " bloomfilter_base_case=" + std::to_string(bloomfilter_base_case)
                + " bloomfilter_level_dedup=" + std::to_string(bloomfilter_level_dedup)
-               + " alltoall="            + std::to_string(alltoall_algorithm)
+               + " alltoall="            + enum_name(alltoall_names, get_alltoall_routine())
                + " alltoall_large_counts=" + std::to_string(alltoall_large_counts)
                + " onefactor_num_slots=" + std::to_string(onefactor_num_slots)
                + " onefactor_use_issend=" + std::to_string(onefactor_use_issend)
@@ -109,10 +127,18 @@ struct CommonArgs {
         // clang-format on
     }
 
+    MPIRoutineAllToAll get_alltoall_routine() const {
+        return clamp_enum_value<MPIRoutineAllToAll>(alltoall_algorithm);
+    }
+
+    Redistribution get_redistribution() const {
+        return clamp_enum_value<Redistribution>(redistribution);
+    }
+
     dss_mehnert::mpi::AlltoallvAlgorithm get_alltoall_algorithm() const {
         using dss_mehnert::mpi::AlltoallvAlgorithm;
 
-        switch (clamp_enum_value<MPIRoutineAllToAll>(alltoall_algorithm)) {
+        switch (get_alltoall_routine()) {
             case MPIRoutineAllToAll::native:
                 return AlltoallvAlgorithm::native;
             case MPIRoutineAllToAll::direct:
@@ -378,7 +404,7 @@ inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
     cp.add_flag(
         "bloomfilter-level-dedup",
         args.bloomfilter_level_dedup,
-        "forward only one entry per distinct hash at each intermediate grid level"
+        "forward only one entry per distinct hash at each intermediate grid level [default]"
     );
     cp.add_size_t(
         'a',
@@ -388,10 +414,10 @@ inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
         "([0]=native, 1=direct, 2=onefactor, 3=pairwise)"
     );
     cp.add_flag(
-        "alltoall-large-counts",
+        "enable-large-counts-handling",
         args.alltoall_large_counts,
         "guard every alltoallv against exceeding the int32 count limit, falling back "
-        "to the big-datatype exchange when it would"
+        "to the big-datatype exchange when it would [default]"
     );
     cp.add_size_t(
         "alltoall-onefactor-num-slots",
@@ -508,9 +534,9 @@ inline void add_common_args(CommonArgs& args, CLI::App& app) {
     )
         ->group("Bloom Filter");
     app.add_flag(
-           "--bloomfilter-level-dedup",
+           "--bloomfilter-level-dedup,--no-bloomfilter-level-dedup{false}",
            args.bloomfilter_level_dedup,
-           "forward only one entry per distinct hash at each intermediate grid level"
+           "forward only one entry per distinct hash at each intermediate grid level [default]"
     )
         ->group("Bloom Filter");
 
@@ -519,34 +545,42 @@ inline void add_common_args(CommonArgs& args, CLI::App& app) {
         ->group("Communication");
     app.add_flag("--prefix-compression", args.prefix_compression, "use LCP compression during string exchange")
         ->group("Communication");
-    app.add_option(
-           "--local-sorter",
-           args.local_sorter,
-           "sequential sorter for the base case ([0]=radixsort_CI3, 1=multikey_quicksort)"
-    )
+    app.add_option("--local-sorter", args.local_sorter, "sequential sorter for the base case")
+        ->transform(
+            CLI::CheckedTransformer(dss_mehnert::local_sorter_names, CLI::ignore_case)
+                .description(enum_value_list(dss_mehnert::local_sorter_names))
+        )
+        ->default_str(enum_name(dss_mehnert::local_sorter_names, args.get_local_sorter()))
         ->group("General");
     app.add_option(
            "--redistribution",
            args.redistribution,
-           "redistribution scheme to use for multi-level sort "
-           "(0=none, 1=naive, 2=simple-strings, 3=simple-chars, "
-           " 4=det-strings, 5=det-chars, [6]=grid)"
+           "redistribution scheme to use for multi-level sort"
     )
+        ->transform(
+            CLI::CheckedTransformer(redistribution_names, CLI::ignore_case)
+                .description(enum_value_list(redistribution_names))
+        )
+        ->default_str(enum_name(redistribution_names, args.get_redistribution()))
         ->group("Communication");
 
     // -- All-to-All -----------------------------------------------------------
     app.add_option(
            "--alltoall",
            args.alltoall_algorithm,
-           "All-To-All routine to use during string exchange "
-           "([0]=native, 1=direct, 2=onefactor, 3=pairwise)"
+           "All-To-All routine to use during string exchange"
     )
+        ->transform(
+            CLI::CheckedTransformer(alltoall_names, CLI::ignore_case)
+                .description(enum_value_list(alltoall_names))
+        )
+        ->default_str(enum_name(alltoall_names, args.get_alltoall_routine()))
         ->group("All-to-All");
     app.add_flag(
-           "--alltoall-large-counts",
+           "--enable-large-counts-handling,!--disable-large-counts-handling",
            args.alltoall_large_counts,
            "guard every alltoallv against exceeding the int32 count limit, falling back "
-           "to the big-datatype exchange when it would"
+           "to the big-datatype exchange when it would [default]"
     )
         ->group("All-to-All");
     app.add_option(
@@ -775,7 +809,7 @@ void dispatch_redistribution(Callback cb, CommonArgs const& args) {
     using namespace dss_mehnert::redistribution;
     using dss_mehnert::Communicator;
 
-    auto const redistribution = clamp_enum_value<Redistribution>(args.redistribution);
+    auto const redistribution = args.get_redistribution();
     if constexpr (CliOptions::enable_redistribution) {
         using PolymorphicPolicy =
             PolymorphicRedistributionPolicy<StringSet, RowwiseSplit<Communicator>>;

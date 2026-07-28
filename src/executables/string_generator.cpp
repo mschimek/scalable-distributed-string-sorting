@@ -13,7 +13,9 @@
 // carries over unchanged apart from --num-pes and --output.
 //
 // The strings are written one per line. The generator's alphabet is 'A'-'Z', so no string can
-// contain a newline and the file round-trips through FileDistributer (--string-generator 2).
+// contain a newline and the file round-trips through FileDistributer (--string-generator file).
+
+#include "util/string_generator.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -30,9 +32,9 @@
 #include <spdlog/spdlog.h>
 #include <tlx/die/core.hpp>
 
+#include "executables/serialization.hpp"
 #include "mpi/communicator.hpp"
 #include "strings/stringset.hpp"
-#include "util/string_generator.hpp"
 
 namespace {
 
@@ -56,7 +58,7 @@ struct GeneratorArgs {
     double skew_fraction = 0.0;
     double skew_factor = 1.0;
     bool use_uniform_prefix = false;
-    size_t id_placement = static_cast<size_t>(dss_mehnert::IdPlacement::random);
+    dss_mehnert::IdPlacement id_placement = dss_mehnert::IdPlacement::random;
     size_t seed = 42;
 
     std::string output_path;
@@ -110,11 +112,12 @@ void add_generator_args(GeneratorArgs& args, CLI::App& app) {
            "per-group encoding"
     )
         ->group("Input");
-    app.add_option(
-           "--placement",
-           args.id_placement,
-           "which PE a string is generated on ([0]=random, 1=contiguous)"
-    )
+    app.add_option("--placement", args.id_placement, "which PE a string is generated on")
+        ->transform(
+            CLI::CheckedTransformer(dss_mehnert::id_placement_names, CLI::ignore_case)
+                .description(enum_value_list(dss_mehnert::id_placement_names))
+        )
+        ->default_str(enum_name(dss_mehnert::id_placement_names, args.id_placement))
         ->group("Input");
     app.add_option("--seed", args.seed, "base seed for input generation (default 42)")
         ->group("Input");
@@ -122,14 +125,6 @@ void add_generator_args(GeneratorArgs& args, CLI::App& app) {
     app.add_option("--output", args.output_path, "path of the file to write the strings to")
         ->required()
         ->group("Output");
-}
-
-// the clamping common_cli.hpp applies to enum-valued options, without pulling the sorter dispatch
-// tree into this executable
-dss_mehnert::IdPlacement clamp_placement(size_t const value) {
-    return static_cast<dss_mehnert::IdPlacement>(
-        std::min(value, static_cast<size_t>(dss_mehnert::IdPlacement::sentinel))
-    );
 }
 
 // The container holds the strings as `str \0 str \0 ...` in exactly the order the PEs would hold
@@ -180,7 +175,7 @@ int main(int argc, char* argv[]) {
         .dn_ratio = args.dn_ratio,
         .skew_fraction = args.skew_fraction,
         .skew_factor = args.skew_factor,
-        .placement = clamp_placement(args.id_placement),
+        .placement = args.id_placement,
         .seed = args.seed,
     };
 

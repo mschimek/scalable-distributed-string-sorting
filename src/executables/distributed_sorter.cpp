@@ -27,6 +27,7 @@
 
 #include "bench/reporting.hpp"
 #include "executables/common_cli.hpp"
+#include "executables/serialization.hpp"
 #include "mpi/communicator.hpp"
 #include "mpi/is_sorted.hpp"
 #include "mpi/print_strings.hpp"
@@ -48,11 +49,35 @@ enum class StringGenerator {
     sentinel,
 };
 
+EnumNames<StringGenerator> const string_generator_names{
+    {"skewed-random", StringGenerator::skewed_random},
+    {"dn-ratio", StringGenerator::dn_ratio},
+    {"file", StringGenerator::file},
+    {"skewed-dn-ratio", StringGenerator::skewed_dn_ratio},
+    {"suffix", StringGenerator::suffix},
+    {"skewed-dn-length", StringGenerator::skewed_dn_length},
+};
+
+template <typename Json>
+void to_json(Json& json, StringGenerator const value) {
+    json = enum_name(string_generator_names, value);
+}
+
 enum class Permutation { simple = 0, multi_level, sentinel };
 
+EnumNames<Permutation> const permutation_names{
+    {"simple", Permutation::simple},
+    {"multi-level", Permutation::multi_level},
+};
+
+template <typename Json>
+void to_json(Json& json, Permutation const value) {
+    json = enum_name(permutation_names, value);
+}
+
 struct SorterArgs : public CommonArgs {
-    size_t string_generator = static_cast<size_t>(StringGenerator::dn_ratio);
-    size_t permutation = static_cast<size_t>(Permutation::simple);
+    StringGenerator string_generator = StringGenerator::dn_ratio;
+    Permutation permutation = Permutation::simple;
     size_t num_strings = 100000;
     size_t len_strings = 100;
     size_t len_strings_min = len_strings;
@@ -69,7 +94,7 @@ struct SorterArgs : public CommonArgs {
     // skewed_dn_length: pad the distinguishing prefix with a single constant character instead of
     // the tiled per-group encoding
     bool use_uniform_prefix = false;
-    size_t id_placement = static_cast<size_t>(dss_mehnert::IdPlacement::random);
+    dss_mehnert::IdPlacement id_placement = dss_mehnert::IdPlacement::random;
     // skewed_dn_length: reproduce on a single PE the input a run with this many PEs would produce,
     // PE by PE in rank order (0 = generate normally)
     size_t simulate_num_pes = 0;
@@ -112,7 +137,7 @@ auto generate_strings(SorterArgs const& args, dss_mehnert::Communicator const& c
     measuring_tool.start("generate_strings");
 
     auto input_container = [&]() -> StringLcpContainer<StringSet> {
-        switch (clamp_enum_value<StringGenerator>(args.string_generator)) {
+        switch (args.string_generator) {
             case StringGenerator::skewed_random: {
                 tlx_die("not implemented");
             }
@@ -150,7 +175,7 @@ auto generate_strings(SorterArgs const& args, dss_mehnert::Communicator const& c
                     .dn_ratio = args.dn_ratio,
                     .skew_fraction = args.skew_fraction,
                     .skew_factor = args.skew_factor,
-                    .placement = clamp_enum_value<IdPlacement>(args.id_placement),
+                    .placement = args.id_placement,
                     .seed = args.seed,
                 };
                 if (args.simulate_num_pes != 0) {
@@ -395,7 +420,7 @@ void dispatch_permutation(
 ) {
     using namespace dss_mehnert;
 
-    switch (clamp_enum_value<Permutation>(args.permutation)) {
+    switch (args.permutation) {
         case Permutation::simple: {
             run_prefix_doubling<Args..., SimplePermutation>(args, prefix, comm);
             return;
@@ -479,18 +504,19 @@ void add_sorter_args(
     add_common_args(args, app);
 
     // -- Input ----------------------------------------------------------------
-    app.add_option(
-           "--string-generator",
-           args.string_generator,
-           "type of string generation to use "
-           "(0=skewed, [1]=DNGen, 2=file, 3=skewedDNGen, 4=suffixGen, 5=skewedDNLenGen)"
-    )
+    app.add_option("--string-generator", args.string_generator, "type of string generation to use")
+        ->transform(
+            CLI::CheckedTransformer(string_generator_names, CLI::ignore_case)
+                .description(enum_value_list(string_generator_names))
+        )
+        ->default_str(enum_name(string_generator_names, args.string_generator))
         ->group("Input");
-    app.add_option(
-           "--permutation",
-           args.permutation,
-           "type of permutation to use for PDMS ([0]=simple, 1=multi-level)"
-    )
+    app.add_option("--permutation", args.permutation, "type of permutation to use for PDMS")
+        ->transform(
+            CLI::CheckedTransformer(permutation_names, CLI::ignore_case)
+                .description(enum_value_list(permutation_names))
+        )
+        ->default_str(enum_name(permutation_names, args.permutation))
         ->group("Input");
     app.add_option("--path", args.path, "path to input file")->group("Input");
     app.add_option(
@@ -538,10 +564,15 @@ void add_sorter_args(
     app.add_option(
            "--placement",
            args.id_placement,
-           "for skewedDNLenGen, which PE a string is generated on ([0]=random, 1=contiguous); "
-           "with contiguous placement the stretched (smallest) strings all land on the low ranks, "
-           "so the input itself is imbalanced in characters"
+           "for skewedDNLenGen, which PE a string is generated on; with contiguous placement the "
+           "stretched (smallest) strings all land on the low ranks, so the input itself is "
+           "imbalanced in characters"
     )
+        ->transform(
+            CLI::CheckedTransformer(dss_mehnert::id_placement_names, CLI::ignore_case)
+                .description(enum_value_list(dss_mehnert::id_placement_names))
+        )
+        ->default_str(enum_name(dss_mehnert::id_placement_names, args.id_placement))
         ->group("Input");
     app.add_option(
            "--simulate-num-pes",
@@ -691,7 +722,7 @@ int main(int argc, char* argv[]) {
         config["splitter-length-factor"] = args.sampler.splitter_length_factor;
         config["redistribute-sample"] = args.sampler.redistribute_sample;
         config["level-adjusted-scaling"] = args.sampler.level_adjusted_scaling;
-        config["local-sorter"] = args.local_sorter;
+        config["local-sorter"] = args.get_local_sorter();
         config["splitter-sequential"] = args.splitter_sequential;
 
         config["rquick-v1"] = args.rquick_v1;
@@ -703,12 +734,12 @@ int main(int argc, char* argv[]) {
         config["bloomfilter-level-dedup"] = args.bloomfilter_level_dedup;
         config["lcp-compression"] = args.lcp_compression;
         config["prefix-compression"] = args.prefix_compression;
-        config["alltoall"] = args.alltoall_algorithm;
+        config["alltoall"] = enum_name(alltoall_names, args.get_alltoall_routine());
         config["alltoall_large_counts"] = args.alltoall_large_counts;
         config["alltoall_onefactor_num_slots"] = args.onefactor_num_slots;
         config["alltoall_onefactor_synchronized"] = args.onefactor_synchronized;
         config["alltoall_onefactor_use_issend"] = args.onefactor_use_issend;
-        config["redistribution"] = args.redistribution;
+        config["redistribution"] = enum_name(redistribution_names, args.get_redistribution());
         config["strong-scaling"] = args.strong_scaling;
 
         config["check-sorted"] = args.check_sorted;
