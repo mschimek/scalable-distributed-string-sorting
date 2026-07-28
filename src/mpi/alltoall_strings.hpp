@@ -25,7 +25,6 @@ namespace dss_mehnert {
 namespace mpi {
 
 struct AlltoallStringsConfig {
-    AlltoallvCombinedKind const alltoall_kind;
     bool const compress_lcps;
     bool const compress_prefixes;
 };
@@ -140,28 +139,28 @@ std::pair<std::vector<unsigned char>, std::vector<size_t>> write_send_buf(
 }
 
 
-template <bool use_compression, AlltoallvCombinedKind kind, typename Communicator>
+template <bool use_compression, typename Communicator>
 inline std::vector<size_t> send_integers(
     std::vector<size_t> const& values,
     std::span<size_t const> send_counts,
     std::span<size_t const> recv_counts,
     Communicator const& comm,
-    OneFactorParams const& onefactor_params = {}
+    AlltoallvParams const& alltoallv_params = {}
 ) {
     if constexpr (use_compression) {
         auto const compressed = IntegerCompression::writeRanges(send_counts, values.begin());
-        auto const recv_data = comm.template alltoallv_combined<kind>(
+        auto const recv_data = comm.alltoallv_dispatch(
             compressed.integers,
             compressed.counts,
-            onefactor_params
+            alltoallv_params
         );
         return IntegerCompression::readRanges(recv_counts, recv_data.begin());
     } else {
-        return comm.template alltoallv_combined<kind>(
+        return comm.alltoallv_dispatch(
             values,
             send_counts,
             recv_counts,
-            onefactor_params
+            alltoallv_params
         );
     }
 }
@@ -180,7 +179,7 @@ public:
         std::vector<size_t> const& send_counts,
         std::vector<size_t> const& recv_counts,
         Communicator const& comm,
-        OneFactorParams const& onefactor_params
+        AlltoallvParams const& alltoallv_params
     ) {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
@@ -190,12 +189,11 @@ public:
 
         // todo does 7-bit compression make sense for PE and string indices
         constexpr bool compress_lcps = config.compress_lcps;
-        constexpr auto alltoall_kind = config.alltoall_kind;
-        auto const send_idxs = _internal::send_integers<compress_lcps, alltoall_kind, Communicator>;
+        auto const send_idxs = _internal::send_integers<compress_lcps, Communicator>;
         auto recv_buf_rank =
-            send_idxs(permutation.ranks(), send_counts, recv_counts, comm, onefactor_params);
+            send_idxs(permutation.ranks(), send_counts, recv_counts, comm, alltoallv_params);
         auto recv_buf_index =
-            send_idxs(permutation.strings(), send_counts, recv_counts, comm, onefactor_params);
+            send_idxs(permutation.strings(), send_counts, recv_counts, comm, alltoallv_params);
         measuring_tool.stop("all_to_all_strings_send_idxs");
 
         measuring_tool.start("all_to_all_strings_init_container");
@@ -222,7 +220,7 @@ public:
         std::vector<size_t> const& send_counts,
         std::vector<size_t> const& recv_counts,
         Communicator const& comm,
-        [[maybe_unused]] OneFactorParams const& onefactor_params
+        [[maybe_unused]] AlltoallvParams const& alltoallv_params
     ) {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
@@ -256,27 +254,26 @@ public:
         std::vector<size_t> const& send_counts,
         std::vector<size_t> const& recv_counts,
         Communicator const& comm,
-        OneFactorParams const& onefactor_params
+        AlltoallvParams const& alltoallv_params
     ) {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
         constexpr bool compress_lcps = config.compress_lcps;
-        constexpr auto alltoall_kind = config.alltoall_kind;
 
         measuring_tool.start("all_to_all_strings_send_chars");
-        auto recv_buf_char = comm.template alltoallv_combined<alltoall_kind>(
+        auto recv_buf_char = comm.alltoallv_dispatch(
             send_buf_char,
             send_counts_char,
-            onefactor_params
+            alltoallv_params
         );
         send_buf_char.clear();
         send_buf_char.shrink_to_fit();
         measuring_tool.stop("all_to_all_strings_send_chars");
 
         measuring_tool.start("all_to_all_strings_send_lcps");
-        auto send_lcps = _internal::send_integers<compress_lcps, alltoall_kind, Communicator>;
+        auto send_lcps = _internal::send_integers<compress_lcps, Communicator>;
         auto recv_buf_lcp =
-            send_lcps(container.lcps(), send_counts, recv_counts, comm, onefactor_params);
+            send_lcps(container.lcps(), send_counts, recv_counts, comm, alltoallv_params);
         measuring_tool.stop("all_to_all_strings_send_lcps");
 
         measuring_tool.start("all_to_all_strings_send_idxs");
@@ -301,33 +298,32 @@ public:
         std::vector<size_t> const& send_counts,
         std::vector<size_t> const& recv_counts,
         Communicator const& comm,
-        OneFactorParams const& onefactor_params
+        AlltoallvParams const& alltoallv_params
     ) {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
         constexpr bool compress_lcps = config.compress_lcps;
-        constexpr auto alltoall_kind = config.alltoall_kind;
 
         measuring_tool.start("all_to_all_strings_send_chars");
-        auto recv_buf_char = comm.template alltoallv_combined<alltoall_kind>(
+        auto recv_buf_char = comm.alltoallv_dispatch(
             send_buf_char,
             send_counts_char,
-            onefactor_params
+            alltoallv_params
         );
         send_buf_char.clear();
         send_buf_char.shrink_to_fit();
         measuring_tool.stop("all_to_all_strings_send_chars");
 
         measuring_tool.start("all_to_all_strings_send_lcps");
-        auto const send_lcps = _internal::send_integers<compress_lcps, alltoall_kind, Communicator>;
+        auto const send_lcps = _internal::send_integers<compress_lcps, Communicator>;
         auto recv_buf_lcp =
-            send_lcps(container.lcps(), send_counts, recv_counts, comm, onefactor_params);
+            send_lcps(container.lcps(), send_counts, recv_counts, comm, alltoallv_params);
         container.delete_lcps();
         measuring_tool.stop("all_to_all_strings_send_lcps");
 
         using SendImpl = PermutationSendImpl<Permutation>;
         constexpr auto send = SendImpl::template send<config, StringSet, Communicator>;
-        send(container, recv_buf_char, recv_buf_lcp, send_counts, recv_counts, comm, onefactor_params);
+        send(container, recv_buf_char, recv_buf_lcp, send_counts, recv_counts, comm, alltoallv_params);
     }
 };
 
@@ -342,7 +338,7 @@ public:
         StringLcpContainer<StringSet>& container,
         std::vector<size_t> const& send_counts,
         std::vector<size_t> const& recv_counts,
-        OneFactorParams const& onefactor_params = {}
+        AlltoallvParams const& alltoallv_params = {}
     ) const {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
@@ -365,7 +361,7 @@ public:
             send_counts,
             recv_counts,
             comm,
-            onefactor_params
+            alltoallv_params
         );
         measuring_tool.stop("all_to_all_strings_alltoallv");
     }
@@ -376,7 +372,7 @@ public:
         std::vector<size_t> const& send_counts,
         std::vector<size_t> const& recv_counts,
         std::span<size_t const> prefixes,
-        OneFactorParams const& onefactor_params = {}
+        AlltoallvParams const& alltoallv_params = {}
     ) const {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
@@ -399,7 +395,7 @@ public:
             send_counts,
             recv_counts,
             comm,
-            onefactor_params
+            alltoallv_params
         );
         measuring_tool.stop("all_to_all_strings_alltoallv");
     }

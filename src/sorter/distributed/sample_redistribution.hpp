@@ -38,6 +38,7 @@ template <typename Char, bool is_indexed>
 SampleResult<Char, is_indexed> redistribute_random(
     SampleResult<Char, is_indexed>&& sample,
     Communicator const& comm,
+    mpi::AlltoallvParams const& alltoallv_params = {},
     uint64_t const seed = kDefaultRedistributionSeed
 ) {
     int const p = static_cast<int>(comm.size());
@@ -106,20 +107,15 @@ SampleResult<Char, is_indexed> redistribute_random(
     }
 
     // alltoallv the chars (keyed by per-PE char counts) and, if present, the
-    // indices (keyed by per-PE string counts). recv counts are derived by kamping.
+    // indices (keyed by per-PE string counts). recv counts are derived internally.
+    std::vector<size_t> const char_counts_sz{char_counts.begin(), char_counts.end()};
+
     SampleResult<Char, is_indexed> result;
-    comm.alltoallv(
-        kamping::send_buf(send_chars),
-        kamping::send_counts(char_counts),
-        kamping::recv_buf<kamping::BufferResizePolicy::resize_to_fit>(result.sample)
-    );
+    result.sample = comm.alltoallv_dispatch(send_chars, char_counts_sz, alltoallv_params);
     if constexpr (is_indexed) {
+        std::vector<size_t> const str_counts_sz{str_counts.begin(), str_counts.end()};
         result.local_offset = sample.local_offset;
-        comm.alltoallv(
-            kamping::send_buf(send_indices),
-            kamping::send_counts(str_counts),
-            kamping::recv_buf<kamping::BufferResizePolicy::resize_to_fit>(result.indices)
-        );
+        result.indices = comm.alltoallv_dispatch(send_indices, str_counts_sz, alltoallv_params);
     }
     return result;
 }
@@ -133,12 +129,13 @@ template <typename Char, bool is_indexed>
 SampleResult<Char, is_indexed> redistribute_random_timed(
     SampleResult<Char, is_indexed>&& sample,
     Communicator const& comm,
+    mpi::AlltoallvParams const& alltoallv_params = {},
     uint64_t const seed = kDefaultRedistributionSeed
 ) {
     using kamping::measurements::GlobalAggregationMode;
 
     kamping::measurements::timer().start("redistribute_sample");
-    auto result = redistribute_random(std::move(sample), comm, seed);
+    auto result = redistribute_random(std::move(sample), comm, alltoallv_params, seed);
     kamping::measurements::timer().stop_and_append();
 
     auto const num_strings =

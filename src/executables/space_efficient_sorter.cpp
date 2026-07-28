@@ -283,7 +283,8 @@ void run_space_efficient_sort(
             dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
                 args.quantile_sampler,
                 args.get_splitter_sorter(),
-                args.get_local_sorter()
+                args.get_local_sorter(),
+                args.alltoallv_params()
             ),
             args.quantile_size,
             args.get_local_sorter()
@@ -317,10 +318,13 @@ void run_space_efficient_sort(
                 dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
                     args.sampler.scaled_to_levels(get_num_levels(args.levels, comm)),
                     args.get_splitter_sorter(),
-                    args.get_local_sorter()
+                    args.get_local_sorter(),
+                    args.alltoallv_params()
                 ),
                 std::move(redistribution),
-                args.bloomfilter_base_case
+                args.bloomfilter_base_case,
+                args.bloomfilter_level_dedup,
+                args.alltoallv_params()
             });
         } else {
             // todo maybe add cmake flag for this
@@ -330,9 +334,11 @@ void run_space_efficient_sort(
                 dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
                     args.sampler.scaled_to_levels(get_num_levels(args.levels, comm)),
                     args.get_splitter_sorter(),
-                    args.get_local_sorter()
+                    args.get_local_sorter(),
+                    args.alltoallv_params()
                 ),
-                std::move(redistribution)
+                std::move(redistribution),
+                args.alltoallv_params()
             });
         }
     };

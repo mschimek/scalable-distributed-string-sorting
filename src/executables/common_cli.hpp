@@ -35,7 +35,9 @@ inline void check_path_exists(std::string const& path) {
     tlx_die_verbose_unless(std::filesystem::exists(path), "file not found: " << path);
 };
 
-enum class MPIRoutineAllToAll { native = 0, direct, combined, one_factor, pairwise, sentinel };
+// The old `combined` kind is gone: it is now the orthogonal `--alltoall-large-counts` flag,
+// which applies to every algorithm rather than being one of them.
+enum class MPIRoutineAllToAll { native = 0, direct, onefactor, pairwise, sentinel };
 
 // clang-format off
 enum class Redistribution { none = 0, naive, simple_strings, simple_chars,
@@ -49,7 +51,8 @@ T clamp_enum_value(size_t const i) {
 
 struct CommonArgs {
     std::string experiment;
-    size_t alltoall_routine = static_cast<size_t>(MPIRoutineAllToAll::native);
+    size_t alltoall_algorithm = static_cast<size_t>(MPIRoutineAllToAll::native);
+    bool alltoall_large_counts = false;
     size_t onefactor_num_slots = 16;
     bool onefactor_use_issend = false;
     bool onefactor_synchronized = false;
@@ -98,18 +101,52 @@ struct CommonArgs {
                + " grid_bloomfilter="   + std::to_string(grid_bloomfilter)
                + " bloomfilter_base_case=" + std::to_string(bloomfilter_base_case)
                + " bloomfilter_level_dedup=" + std::to_string(bloomfilter_level_dedup)
+               + " alltoall="            + std::to_string(alltoall_algorithm)
+               + " alltoall_large_counts=" + std::to_string(alltoall_large_counts)
                + " onefactor_num_slots=" + std::to_string(onefactor_num_slots)
                + " onefactor_use_issend=" + std::to_string(onefactor_use_issend)
                + " onefactor_synchronized=" + std::to_string(onefactor_synchronized);
         // clang-format on
     }
 
-    dss_mehnert::mpi::OneFactorParams onefactor_params() const {
+    dss_mehnert::mpi::AlltoallvAlgorithm get_alltoall_algorithm() const {
+        using dss_mehnert::mpi::AlltoallvAlgorithm;
+
+        switch (clamp_enum_value<MPIRoutineAllToAll>(alltoall_algorithm)) {
+            case MPIRoutineAllToAll::native:
+                return AlltoallvAlgorithm::native;
+            case MPIRoutineAllToAll::direct:
+                return AlltoallvAlgorithm::direct;
+            case MPIRoutineAllToAll::onefactor:
+                return AlltoallvAlgorithm::onefactor;
+            case MPIRoutineAllToAll::pairwise:
+                return AlltoallvAlgorithm::pairwise;
+            case MPIRoutineAllToAll::sentinel:
+                break;
+        }
+        tlx_die("unknown MPI routine");
+    }
+
+    dss_mehnert::mpi::AlltoallvParams alltoallv_params() const {
+        using dss_mehnert::mpi::AlltoallvAlgorithm;
         using dss_mehnert::mpi::OneFactorMode;
+
+        auto const algorithm = get_alltoall_algorithm();
+        tlx_die_verbose_if(
+            algorithm != AlltoallvAlgorithm::native && !CliOptions::enable_alltoall,
+            "this alltoallv algorithm requires the CLI_ENABLE_ALLTOALL feature"
+        );
+
         return {
-            .mode = onefactor_synchronized ? OneFactorMode::synchronized : OneFactorMode::windowed,
-            .num_slots = onefactor_num_slots,
-            .use_issend = onefactor_use_issend,
+            .algorithm = algorithm,
+            .large_counts = alltoall_large_counts,
+            .onefactor =
+                {
+                    .mode = onefactor_synchronized ? OneFactorMode::synchronized
+                                                   : OneFactorMode::windowed,
+                    .num_slots = onefactor_num_slots,
+                    .use_issend = onefactor_use_issend,
+                },
         };
     }
 
@@ -236,14 +273,13 @@ void dispatch_bloomfilter(Callback cb, CommonArgs const& args) {
     }
 }
 
+// The alltoallv algorithm is a runtime parameter (see CommonArgs::alltoallv_params), so only
+// the two compression flags are still peeled into template parameters here.
 template <typename Callback, typename CharType>
 void dispatch_alltoall_strings(Callback cb, CommonArgs const& args) {
-    using AlltoallKind = dss_mehnert::mpi::AlltoallvCombinedKind;
-
-    auto dispatch_config = [&]<AlltoallKind kind, bool compress_lcps, bool compress_prefixes> {
+    auto dispatch_config = [&]<bool compress_lcps, bool compress_prefixes> {
         using dss_mehnert::mpi::AlltoallStringsConfig;
         constexpr AlltoallStringsConfig config{
-            .alltoall_kind = kind,
             .compress_lcps = compress_lcps,
             .compress_prefixes = compress_prefixes,
         };
@@ -251,64 +287,22 @@ void dispatch_alltoall_strings(Callback cb, CommonArgs const& args) {
         dispatch_bloomfilter<Callback, CharType, Config>(cb, args);
     };
 
-    auto disptach_prefix_compression = [&]<AlltoallKind kind, bool compress_lcps> {
+    auto disptach_prefix_compression = [&]<bool compress_lcps> {
         if (args.prefix_compression) {
-            dispatch_config.template operator()<kind, compress_lcps, true>();
+            dispatch_config.template operator()<compress_lcps, true>();
         } else {
-            dispatch_config.template operator()<kind, compress_lcps, false>();
+            dispatch_config.template operator()<compress_lcps, false>();
         }
     };
 
-    auto dispatch_lcp_compression = [&]<AlltoallKind Kind> {
-        if (args.lcp_compression) {
-            disptach_prefix_compression.template operator()<Kind, true>();
-        } else {
-            disptach_prefix_compression.template operator()<Kind, false>();
-        }
-    };
+    // validates the selected algorithm against the enabled features
+    (void)args.alltoallv_params();
 
-    switch (clamp_enum_value<MPIRoutineAllToAll>(args.alltoall_routine)) {
-        case MPIRoutineAllToAll::native: {
-            dispatch_lcp_compression.template operator()<AlltoallKind::native>();
-            return;
-        }
-        case MPIRoutineAllToAll::direct: {
-            if constexpr (CliOptions::enable_alltoall) {
-                dispatch_lcp_compression.template operator()<AlltoallKind::direct>();
-            } else {
-                dss_mehnert::die_with_feature("CLI_ENABLE_ALLTOALL");
-            }
-            return;
-        }
-        case MPIRoutineAllToAll::combined: {
-            if constexpr (CliOptions::enable_alltoall) {
-                dispatch_lcp_compression.template operator()<AlltoallKind::combined>();
-            } else {
-                dss_mehnert::die_with_feature("CLI_ENABLE_ALLTOALL");
-            }
-            return;
-        }
-        case MPIRoutineAllToAll::one_factor: {
-            if constexpr (CliOptions::enable_alltoall) {
-                dispatch_lcp_compression.template operator()<AlltoallKind::one_factor>();
-            } else {
-                dss_mehnert::die_with_feature("CLI_ENABLE_ALLTOALL");
-            }
-            return;
-        }
-        case MPIRoutineAllToAll::pairwise: {
-            if constexpr (CliOptions::enable_alltoall) {
-                dispatch_lcp_compression.template operator()<AlltoallKind::pairwise>();
-            } else {
-                dss_mehnert::die_with_feature("CLI_ENABLE_ALLTOALL");
-            }
-            return;
-        }
-        case MPIRoutineAllToAll::sentinel: {
-            break;
-        }
+    if (args.lcp_compression) {
+        disptach_prefix_compression.template operator()<true>();
+    } else {
+        disptach_prefix_compression.template operator()<false>();
     }
-    tlx_die("unknown MPI routine");
 }
 
 template <typename Callback>
@@ -389,9 +383,15 @@ inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
     cp.add_size_t(
         'a',
         "alltoall",
-        args.alltoall_routine,
+        args.alltoall_algorithm,
         "All-To-All routine to use during string exchange "
-        "([0]=native, 1=direct, 2=combined, 3=one_factor, 4=pairwise)"
+        "([0]=native, 1=direct, 2=onefactor, 3=pairwise)"
+    );
+    cp.add_flag(
+        "alltoall-large-counts",
+        args.alltoall_large_counts,
+        "guard every alltoallv against exceeding the int32 count limit, falling back "
+        "to the big-datatype exchange when it would"
     );
     cp.add_size_t(
         "alltoall-onefactor-num-slots",
@@ -537,9 +537,16 @@ inline void add_common_args(CommonArgs& args, CLI::App& app) {
     // -- All-to-All -----------------------------------------------------------
     app.add_option(
            "--alltoall",
-           args.alltoall_routine,
+           args.alltoall_algorithm,
            "All-To-All routine to use during string exchange "
-           "([0]=native, 1=direct, 2=combined, 3=one_factor, 4=pairwise)"
+           "([0]=native, 1=direct, 2=onefactor, 3=pairwise)"
+    )
+        ->group("All-to-All");
+    app.add_flag(
+           "--alltoall-large-counts",
+           args.alltoall_large_counts,
+           "guard every alltoallv against exceeding the int32 count limit, falling back "
+           "to the big-datatype exchange when it would"
     )
         ->group("All-to-All");
     app.add_option(

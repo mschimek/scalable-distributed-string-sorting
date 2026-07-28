@@ -197,13 +197,17 @@ using SpaceEfficientPartitionPolicy = PolymorphicPartitionPolicy<
 
 template <typename Char, typename PolymorphicPolicy>
 PolymorphicPolicy init_partition_policy(
-    SamplerArgs const& sampler, SplitterSorter splitter_sorter, LocalSorter local_sorter
+    SamplerArgs const& sampler,
+    SplitterSorter splitter_sorter,
+    LocalSorter local_sorter,
+    mpi::AlltoallvParams const& alltoallv_params = {}
 ) {
     auto dispatch_policy = [&]<typename PartitionPolicy> {
         return PolymorphicPolicy{PartitionPolicy{
             sampler.sampling_factor,
             sampler.redistribute_sample,
-            local_sorter
+            local_sorter,
+            alltoallv_params
         }};
     };
 

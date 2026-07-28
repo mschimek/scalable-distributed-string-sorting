@@ -12,14 +12,10 @@
 #include <type_traits>
 #include <vector>
 
-#include <kamping/collectives/barrier.hpp>
-#include <kamping/measurements/timer.hpp>
 #include <kamping/named_parameters.hpp>
 #include <kamping/p2p/irecv.hpp>
 #include <kamping/p2p/send.hpp>
 #include <kamping/request.hpp>
-
-#include "util/measuringTool.hpp"
 
 namespace dss_mehnert {
 namespace mpi {
@@ -36,26 +32,19 @@ auto alltoallv_pairwise(
     using namespace kamping;
     using DataType = std::remove_reference_t<SendBuf>::value_type;
 
-    auto& measuring_tool = measurement::MeasuringTool::measuringTool();
-
     auto const p = static_cast<size_t>(comm.size());
 
     std::vector<size_t> send_displs(p), recv_displs(p);
     std::exclusive_scan(send_counts.begin(), send_counts.end(), send_displs.begin(), size_t{0});
     std::exclusive_scan(recv_counts.begin(), recv_counts.end(), recv_displs.begin(), size_t{0});
 
-    auto const send_total = send_displs.back() + send_counts.back();
-    measuring_tool.addRawCommunication(send_total * sizeof(DataType), "alltoallv_pairwise");
-
+    // comm volume is tracked by TrackingCommunicator on the comm.send below
     auto const recv_total = recv_displs.back() + recv_counts.back();
     std::vector<DataType> receive_data(recv_total);
 
     int const size = comm.size_signed();
     int const rank = comm.rank_signed();
     static constexpr int msg_tag = 44228;
-
-    comm.barrier();
-    kamping::measurements::timer().start("alltoall_pairwise");
 
     for (int step = 0; step < size; ++step) {
         int const send_to = (rank + step) % size;
@@ -88,8 +77,6 @@ auto alltoallv_pairwise(
             request.wait();
         }
     }
-
-    kamping::measurements::timer().stop_and_append();
 
     return receive_data;
 }

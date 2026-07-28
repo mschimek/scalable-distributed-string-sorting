@@ -82,7 +82,8 @@ public:
         size_t const num_partitions,
         Communicator const& comm,
         bool const redistribute_sample,
-        LocalSorter const local_sorter
+        LocalSorter const local_sorter,
+        mpi::AlltoallvParams const& alltoallv_params
     ) const {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
@@ -122,7 +123,7 @@ public:
         // (a PE that sampled a few very long strings would otherwise stay skewed).
         // qualified because the 'sample' parameter shadows the sample namespace.
         if (redistribute_sample) {
-            sample = dss_mehnert::sample::redistribute_random_timed(std::move(sample), comm);
+            sample = dss_mehnert::sample::redistribute_random_timed(std::move(sample), comm, alltoallv_params);
         }
 
         // pass 1: count local long strings to decide on the fast path

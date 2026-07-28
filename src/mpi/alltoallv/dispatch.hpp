@@ -17,8 +17,11 @@
 
 #include <kamping/collectives/allreduce.hpp>
 #include <kamping/collectives/alltoall.hpp>
+#include <kamping/collectives/barrier.hpp>
+#include <kamping/measurements/timer.hpp>
 #include <kamping/named_parameters.hpp>
 #include <kamping/plugin/plugin_helpers.hpp>
+#include <tlx/die/core.hpp>
 
 #include "mpi/alltoallv/direct.hpp"
 #include "mpi/alltoallv/native.hpp"
@@ -29,68 +32,107 @@
 namespace dss_mehnert {
 namespace mpi {
 
-template <auto>
-inline constexpr bool always_false_v = false;
+namespace _internal {
+
+// The largest quantity `algorithm` has to squeeze into an int32 for this exchange. The
+// algorithms differ here: MPI_Alltoallv takes int displacements, so its *totals* must fit,
+// whereas the point-to-point schedules only ever cast an individual count.
+inline size_t max_int32_critical_count(
+    AlltoallvAlgorithm const algorithm,
+    std::span<size_t const> send_counts,
+    std::span<size_t const> recv_counts
+) {
+    auto const max_of = [](std::span<size_t const> counts) {
+        auto const it = std::max_element(counts.begin(), counts.end());
+        return it == counts.end() ? size_t{0} : *it;
+    };
+    auto const total_of = [](std::span<size_t const> counts) {
+        return std::accumulate(counts.begin(), counts.end(), size_t{0});
+    };
+
+    switch (algorithm) {
+        case AlltoallvAlgorithm::native:
+            // displacements are ints, so the totals have to fit as well
+            return std::max(total_of(send_counts), total_of(recv_counts));
+        case AlltoallvAlgorithm::onefactor:
+        case AlltoallvAlgorithm::pairwise:
+            // per-partner point-to-point, only the individual counts are cast to int
+            return std::max(max_of(send_counts), max_of(recv_counts));
+        case AlltoallvAlgorithm::direct:
+            // uses derived big datatypes, no int32 limit applies
+            return 0;
+    }
+    tlx_die("unknown alltoallv algorithm");
+}
+
+} // namespace _internal
 
 template <typename Comm, template <typename...> typename DefaultContainerType>
-class AlltoallvCombinedPlugin
-    : public kamping::plugin::PluginBase<Comm, DefaultContainerType, AlltoallvCombinedPlugin> {
+class AlltoallvPlugin
+    : public kamping::plugin::PluginBase<Comm, DefaultContainerType, AlltoallvPlugin> {
 public:
-    template <AlltoallvCombinedKind combined_type, typename SendBuf>
-    auto alltoallv_combined(
-        SendBuf&& send_buf,
-        std::span<size_t const> send_counts,
-        OneFactorParams const& onefactor_params = {}
+    template <typename SendBuf>
+    auto alltoallv_dispatch(
+        SendBuf&& send_buf, std::span<size_t const> send_counts, AlltoallvParams const& params = {}
     ) const {
         auto const recv_counts = this->to_communicator().alltoall(kamping::send_buf(send_counts));
-        return alltoallv_combined<combined_type, SendBuf>(
+        return alltoallv_dispatch<SendBuf>(
             std::forward<SendBuf>(send_buf),
             send_counts,
             recv_counts,
-            onefactor_params
+            params
         );
     }
 
-    // `onefactor_params` only affects the one_factor kind; other kinds ignore it.
-    template <AlltoallvCombinedKind kind, typename SendBuf>
-    auto alltoallv_combined(
+    template <typename SendBuf>
+    auto alltoallv_dispatch(
         SendBuf&& send_buf,
         std::span<size_t const> send_counts,
         std::span<size_t const> recv_counts,
-        [[maybe_unused]] OneFactorParams const& onefactor_params = {}
+        AlltoallvParams const& params = {}
     ) const {
         auto const& comm = this->to_communicator();
 
-        if constexpr (kind == AlltoallvCombinedKind::combined) {
-            auto const send_total =
-                std::accumulate(send_counts.begin(), send_counts.end(), size_t{0});
-            auto const recv_total =
-                std::accumulate(recv_counts.begin(), recv_counts.end(), size_t{0});
-            auto const local_max = std::max<size_t>(send_total, recv_total);
+        auto algorithm = params.algorithm;
+        if (params.large_counts && algorithm != AlltoallvAlgorithm::direct) {
+            auto const local_max =
+                _internal::max_int32_critical_count(algorithm, send_counts, recv_counts);
             auto const global_max = comm.allreduce_single(
                 kamping::send_buf(local_max),
                 kamping::op(kamping::ops::max<>{})
             );
 
-            if (global_max < std::numeric_limits<int>::max()) {
-                return alltoallv_native(comm, send_buf, send_counts, recv_counts);
-            } else {
-                return alltoallv_direct(comm, send_buf, send_counts, recv_counts);
+            if (global_max >= static_cast<size_t>(std::numeric_limits<int>::max())) {
+                algorithm = AlltoallvAlgorithm::direct;
             }
-        } else if constexpr (kind == AlltoallvCombinedKind::native) {
-            return alltoallv_native(comm, send_buf, send_counts, recv_counts);
-        } else if constexpr (kind == AlltoallvCombinedKind::direct) {
-            return alltoallv_direct(comm, send_buf, send_counts, recv_counts);
-        } else if constexpr (kind == AlltoallvCombinedKind::one_factor) {
-            return alltoallv_onefactor(comm, send_buf, send_counts, recv_counts, onefactor_params);
-        } else if constexpr (kind == AlltoallvCombinedKind::pairwise) {
-            return alltoallv_pairwise(comm, send_buf, send_counts, recv_counts);
-        } else {
-            []<AlltoallvCombinedKind type_ = kind> {
-                static_assert(always_false_v<type_>, "invalid alltoallv combined kind used");
-            }
-            ();
         }
+
+        // barrier on `comm`, not on MPI_COMM_WORLD as synchronize_and_start() would
+        comm.barrier();
+        kamping::measurements::timer().start("alltoallv");
+
+        auto result = [&] {
+            switch (algorithm) {
+                case AlltoallvAlgorithm::native:
+                    return alltoallv_native(comm, send_buf, send_counts, recv_counts);
+                case AlltoallvAlgorithm::direct:
+                    return alltoallv_direct(comm, send_buf, send_counts, recv_counts);
+                case AlltoallvAlgorithm::onefactor:
+                    return alltoallv_onefactor(
+                        comm,
+                        send_buf,
+                        send_counts,
+                        recv_counts,
+                        params.onefactor
+                    );
+                case AlltoallvAlgorithm::pairwise:
+                    return alltoallv_pairwise(comm, send_buf, send_counts, recv_counts);
+            }
+            tlx_die("unknown alltoallv algorithm");
+        }();
+
+        kamping::measurements::timer().stop_and_append();
+        return result;
     }
 };
 

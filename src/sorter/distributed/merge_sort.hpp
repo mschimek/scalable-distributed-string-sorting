@@ -46,12 +46,12 @@ public:
     explicit BaseDistributedMergeSort(
         PartitionPolicy partition,
         RedistributionPolicy redistribution,
-        mpi::OneFactorParams onefactor_params = {},
+        mpi::AlltoallvParams alltoallv_params = {},
         LocalSorter local_sorter = LocalSorter::radixsort_CI3
     )
         : PartitionPolicy{std::move(partition)},
           RedistributionPolicy{std::move(redistribution)},
-          onefactor_params_{onefactor_params},
+          alltoallv_params_{alltoallv_params},
           local_sorter_{local_sorter} {}
 
 protected:
@@ -61,8 +61,8 @@ protected:
     using MeasuringTool = measurement::MeasuringTool;
     MeasuringTool& measuring_tool_ = MeasuringTool::measuringTool();
 
-    // runtime tuning for the 1-factor string exchange (ignored by other kinds)
-    mpi::OneFactorParams onefactor_params_;
+    // which alltoallv algorithm the string exchange uses, and how it is tuned
+    mpi::AlltoallvParams alltoallv_params_;
 
     // the sequential sorter used for the local base case
     LocalSorter local_sorter_;
@@ -213,14 +213,14 @@ protected:
                 send_counts,
                 recv_counts,
                 prefixes,
-                onefactor_params_
+                alltoallv_params_
             );
         } else {
             comm.template alltoall_strings<config, Permutation>(
                 container,
                 send_counts,
                 recv_counts,
-                onefactor_params_
+                alltoallv_params_
             );
         };
         kamping::measurements::timer().stop_and_append();

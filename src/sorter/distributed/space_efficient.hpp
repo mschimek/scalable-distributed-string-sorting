@@ -47,10 +47,13 @@ public:
 
     template <PermutationStringPtr StringPtr, typename Subcommunicators>
     void apply(
-        StringPtr const& strptr, std::span<size_t> global_permutation, Subcommunicators const& comms
+        StringPtr const& strptr,
+        std::span<size_t> global_permutation,
+        Subcommunicators const& comms,
+        mpi::AlltoallvParams const& alltoallv_params = {}
     ) {
         Permutation const permutation{strptr.active()};
-        permutation.apply(global_permutation, global_offset_, comms);
+        permutation.apply(global_permutation, global_offset_, comms, alltoallv_params);
 
         global_offset_ += comms.comm_root().allreduce_single(
             kamping::send_buf(strptr.size()),
@@ -85,9 +88,12 @@ public:
 
     template <PermutationStringPtr StringPtr, typename Subcommunicators>
     void apply(
-        StringPtr const& strptr, std::span<size_t> global_permutation, Subcommunicators const& comms
+        StringPtr const& strptr,
+        std::span<size_t> global_permutation,
+        Subcommunicators const& comms,
+        mpi::AlltoallvParams const& alltoallv_params = {}
     ) {
-        permutation_.apply(global_permutation, global_offset_, comms);
+        permutation_.apply(global_permutation, global_offset_, comms, alltoallv_params);
         global_offset_ += comms.comm_root().allreduce_single(
             kamping::send_buf(strptr.size()),
             kamping::op(std::plus<>{})
@@ -124,10 +130,13 @@ public:
 
     template <PermutationStringPtr StringPtr, typename Subcommunicators>
     void apply(
-        StringPtr const& strptr, std::span<size_t> global_permutation, Subcommunicators const& comms
+        StringPtr const& strptr,
+        std::span<size_t> global_permutation,
+        Subcommunicators const& comms,
+        mpi::AlltoallvParams const& alltoallv_params = {}
     ) {
         write_offsets(strptr, comms.comm_root());
-        permutation_.apply(global_permutation, global_offset_, comms);
+        permutation_.apply(global_permutation, global_offset_, comms, alltoallv_params);
 
         auto const& offsets = permutation_.index_offsets();
         // todo this is being computed/communicated redundantly multiple times
@@ -380,7 +389,7 @@ public:
 
             this->measuring_tool_.start("sort_globally", "write_global_permutation");
             auto const sorted_ptr = quantile_container.make_string_lcp_ptr();
-            builder.apply(sorted_ptr, global_permutation, comms);
+            builder.apply(sorted_ptr, global_permutation, comms, this->alltoallv_params_);
             this->measuring_tool_.stop("sort_globally", "write_global_permutation");
             this->measuring_tool_.stop("sort_globally", "quantile_overall");
 

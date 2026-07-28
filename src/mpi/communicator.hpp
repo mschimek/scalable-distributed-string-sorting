@@ -13,8 +13,8 @@
 #include <kamping/named_parameter_selection.hpp>
 #include <kamping/named_parameter_types.hpp>
 
-#include "mpi/alltoallv/dispatch.hpp"
 #include "mpi/alltoall_strings.hpp"
+#include "mpi/alltoallv/dispatch.hpp"
 #include "util/measuringTool.hpp"
 
 namespace dss_mehnert {
@@ -48,6 +48,7 @@ public:
     DSS_MPI_TRACKING_DELEGATE(alltoall)
 
     DSS_MPI_TRACKING_DELEGATE(send)
+    DSS_MPI_TRACKING_DELEGATE(sendrecv)
     DSS_MPI_TRACKING_DELEGATE(bsend)
     DSS_MPI_TRACKING_DELEGATE(ssend)
     DSS_MPI_TRACKING_DELEGATE(rsend)
@@ -197,7 +198,7 @@ private:
 };
 
 using Communicator =
-    TrackingCommunicator<std::vector, mpi::AlltoallvCombinedPlugin, mpi::AlltoallStringsPlugin>;
+    TrackingCommunicator<std::vector, mpi::AlltoallvPlugin, mpi::AlltoallStringsPlugin>;
 
 } // namespace mpi
 

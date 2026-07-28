@@ -208,13 +208,18 @@ inline std::vector<hash_t> extract_hash_values(std::vector<T> const& values) {
 }
 
 inline RecvData send_hash_values(
-    std::vector<hash_t> const& hashes, HashRange const hash_range, Communicator const& comm
+    std::vector<hash_t> const& hashes,
+    HashRange const hash_range,
+    Communicator const& comm,
+    mpi::AlltoallvParams const& alltoallv_params
 ) {
-    auto interval_sizes = _internal::compute_interval_sizes(hashes, hash_range, comm.size());
+    auto const interval_sizes = _internal::compute_interval_sizes(hashes, hash_range, comm.size());
 
     std::vector<int> offsets(interval_sizes.size());
     std::exclusive_scan(interval_sizes.begin(), interval_sizes.end(), offsets.begin(), 0);
     assert_equal(offsets.back() + interval_sizes.back(), std::ssize(hashes));
+
+    std::vector<size_t> const send_counts{interval_sizes.begin(), interval_sizes.end()};
 
     RecvData recv_data;
     kamping::measurements::timer().start("bloomfilter_alltoall_hashes");
@@ -222,14 +227,20 @@ inline RecvData send_hash_values(
         kamping::send_buf(offsets),
         kamping::recv_buf<kamping::BufferResizePolicy::resize_to_fit>(recv_data.global_offsets)
     );
-    comm.alltoallv(
-        kamping::send_buf(hashes),
-        kamping::send_counts(interval_sizes),
-        kamping::send_displs(offsets),
-        kamping::recv_buf<kamping::BufferResizePolicy::resize_to_fit>(recv_data.hashes),
-        kamping::recv_counts_out<kamping::BufferResizePolicy::resize_to_fit>(recv_data.interval_sizes),
-        kamping::recv_displs_out<kamping::BufferResizePolicy::resize_to_fit>(recv_data.local_offsets)
+
+    // alltoallv_dispatch returns only the data, so derive the recv counts and displacements
+    // here rather than through recv_counts_out/recv_displs_out
+    auto const recv_counts = comm.alltoall(kamping::send_buf(send_counts));
+    recv_data.interval_sizes.assign(recv_counts.begin(), recv_counts.end());
+    recv_data.local_offsets.resize(recv_counts.size());
+    std::exclusive_scan(
+        recv_data.interval_sizes.begin(),
+        recv_data.interval_sizes.end(),
+        recv_data.local_offsets.begin(),
+        0
     );
+
+    recv_data.hashes = comm.alltoallv_dispatch(hashes, send_counts, recv_counts, alltoallv_params);
     kamping::measurements::timer().stop_and_append();
     return recv_data;
 }
@@ -711,7 +722,9 @@ private:
         measuring_tool.start("bloomfilter_send_hashes");
         kamping::measurements::timer().start("bloomfilter_send_hashes");
         auto hash_values = _internal::extract_hash_values(hash_str_pairs);
-        auto recv_data = _internal::send_hash_values(hash_values, hash_range, comm_);
+        // v1 is dead code (only the class names survive as tag types for bloomfilter2::v1_traits),
+        // so it keeps the default alltoallv rather than being plumbed through
+        auto recv_data = _internal::send_hash_values(hash_values, hash_range, comm_, {});
         auto hash_rank_pairs = _internal::merge_intervals(
             recv_data.compute_hash_rank_pairs(),
             recv_data.local_offsets,
@@ -809,7 +822,9 @@ private:
         auto const& comm = *comm_first;
 
         auto hash_values = _internal::extract_hash_values(hash_pairs);
-        auto recv_data = _internal::send_hash_values(hash_values, hash_range, comm);
+        // v1 is dead code (only the class names survive as tag types for bloomfilter2::v1_traits),
+        // so it keeps the default alltoallv rather than being plumbed through
+        auto recv_data = _internal::send_hash_values(hash_values, hash_range, comm, {});
         auto hash_rank_pairs = _internal::merge_intervals(
             recv_data.compute_hash_rank_pairs(),
             recv_data.local_offsets,

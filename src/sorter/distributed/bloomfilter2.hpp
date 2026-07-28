@@ -224,11 +224,15 @@ public:
 class AlltoallDuplicateDetector final : public RemoteDuplicateDetector {
 public:
     AlltoallDuplicateDetector(
-        Communicator const& comm_root, std::vector<Communicator> comms, bool const dedup_per_level
+        Communicator const& comm_root,
+        std::vector<Communicator> comms,
+        bool const dedup_per_level,
+        mpi::AlltoallvParams const& alltoallv_params
     )
         : comm_root_{comm_root},
           comms_{std::move(comms)},
-          dedup_per_level_{dedup_per_level} {
+          dedup_per_level_{dedup_per_level},
+          alltoallv_params_{alltoallv_params} {
         KASSERT(!comms_.empty());
     }
 
@@ -254,6 +258,8 @@ private:
     std::vector<Communicator> comms_;
     //! forward one entry per distinct hash at each intermediate level (no effect if single level)
     bool dedup_per_level_;
+    //! which alltoallv algorithm the hash and index exchanges use
+    mpi::AlltoallvParams alltoallv_params_;
 
     template <typename CommIt, typename T>
     std::optional<std::vector<int>> find_recursive(
@@ -268,7 +274,7 @@ private:
         auto const& comm = *comm_first;
 
         auto hash_values = _internal::extract_hash_values(hash_pairs);
-        auto recv_data = _internal::send_hash_values(hash_values, hash_range, comm);
+        auto recv_data = _internal::send_hash_values(hash_values, hash_range, comm, alltoallv_params_);
         auto hash_rank_pairs = _internal::merge_intervals(
             recv_data.compute_hash_rank_pairs(),
             recv_data.local_offsets,
@@ -391,20 +397,19 @@ private:
         return duplicates;
     }
 
-    static std::vector<int> send_dups_recursive(
+    std::vector<int> send_dups_recursive(
         std::vector<HashRank> const& hash_rank_pairs,
         std::vector<int> const& duplicates,
         std::vector<int>& global_offsets,
         Communicator const& comm
-    ) {
-        std::vector<int> send_counts(global_offsets.size());
+    ) const {
+        std::vector<size_t> send_counts(global_offsets.size());
         for (auto const& duplicate: duplicates) {
             send_counts[hash_rank_pairs[duplicate].rank]++;
         }
 
-        std::vector<int> offsets{send_counts};
-        std::exclusive_scan(offsets.begin(), offsets.end(), offsets.begin(), 0);
-        std::vector<int> send_displs{offsets};
+        std::vector<size_t> offsets{send_counts};
+        std::exclusive_scan(offsets.begin(), offsets.end(), offsets.begin(), size_t{0});
 
         std::vector<int> remote_idxs(duplicates.size());
         auto counters = std::move(global_offsets);
@@ -417,11 +422,7 @@ private:
         }
 
         kamping::measurements::timer().start("bloomfilter_alltoall_indices");
-        auto result = comm.alltoallv(
-            kamping::send_buf(remote_idxs),
-            kamping::send_counts(send_counts),
-            kamping::send_displs(send_displs)
-        );
+        auto result = comm.alltoallv_dispatch(remote_idxs, send_counts, alltoallv_params_);
         kamping::measurements::timer().stop_and_append();
         return result;
     }
@@ -464,7 +465,8 @@ inline std::unique_ptr<RemoteDuplicateDetector> make_remote_duplicate_detector(
     Subcommunicators const& comms,
     bool const grid,
     bool const enable_base_case,
-    bool const dedup_per_level
+    bool const dedup_per_level,
+    mpi::AlltoallvParams const& alltoallv_params
 ) {
     // single-level == a grid whose only level is the root communicator
     std::vector<Communicator> levels;
@@ -478,7 +480,8 @@ inline std::unique_ptr<RemoteDuplicateDetector> make_remote_duplicate_detector(
         std::make_unique<AlltoallDuplicateDetector>(
             comms.comm_root(),
             std::move(levels),
-            dedup_per_level
+            dedup_per_level,
+            alltoallv_params
         );
 
     if (enable_base_case) {

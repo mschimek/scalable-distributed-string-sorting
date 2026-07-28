@@ -16,6 +16,7 @@
 #include <kamping/named_parameters.hpp>
 #include <tlx/die.hpp>
 
+#include "mpi/alltoallv/params.hpp"
 #include "strings/stringset.hpp"
 
 namespace dss_mehnert {
@@ -91,29 +92,26 @@ public:
     void apply(
         std::span<index_type> global_permutation,
         index_type const global_index_offset,
-        Subcommunicators const& comms
+        Subcommunicators const& comms,
+        mpi::AlltoallvParams const& alltoallv_params = {}
     ) const {
         namespace kmp = kamping;
 
         auto const& comm = comms.comm_root();
-        std::vector<int> counts(comm.size()), offsets(comm.size());
+        std::vector<size_t> counts(comm.size()), offsets(comm.size());
         std::for_each(ranks_.begin(), ranks_.end(), [&](auto const rank) { ++counts[rank]; });
-        std::exclusive_scan(counts.begin(), counts.end(), offsets.begin(), 0);
+        std::exclusive_scan(counts.begin(), counts.end(), offsets.begin(), size_t{0});
 
         index_type const local_index_offset =
             comm.exscan_single(kmp::send_buf(size()), kmp::op(std::plus<>{}));
         index_type const index_offset = global_index_offset + local_index_offset;
 
-        std::vector<std::array<index_type, 2>> send_buf(size()), recv_buf;
+        std::vector<std::array<index_type, 2>> send_buf(size());
         for (size_type i = 0; i != size(); ++i) {
             send_buf[offsets[ranks_[i]]++] = {strings_[i], index_offset + i};
         }
 
-        comm.alltoallv(
-            kmp::send_buf(send_buf),
-            kmp::send_counts(counts),
-            kmp::recv_buf<kamping::BufferResizePolicy::resize_to_fit>(recv_buf)
-        );
+        auto const recv_buf = comm.alltoallv_dispatch(send_buf, counts, alltoallv_params);
 
         for (auto const& [local_index, global_index]: recv_buf) {
             global_permutation[local_index] = global_index;
@@ -189,7 +187,8 @@ public:
     void apply(
         std::span<index_type> global_permutation,
         index_type const global_index_offset,
-        Subcommunicators const& comms
+        Subcommunicators const& comms,
+        mpi::AlltoallvParams const& alltoallv_params = {}
     ) const {
         assert(comms.comm_root().is_same_on_all_ranks(global_index_offset));
 
@@ -204,7 +203,7 @@ public:
                 dest[offsets[ranks[i]]++] = index_offset + i;
             }
         };
-        apply_(global_permutation, compute_indices, comms);
+        apply_(global_permutation, compute_indices, comms, alltoallv_params);
     }
 
 protected:
@@ -212,7 +211,8 @@ protected:
     void apply_(
         std::span<index_type> global_permutation,
         ComputeIndices compute_indices,
-        Subcommunicators const& comms
+        Subcommunicators const& comms,
+        mpi::AlltoallvParams const& alltoallv_params
     ) const {
         if (comms.comm_root().size() == 1) {
             for (size_t i = 0; i != local_permutation_.size(); ++i) {
@@ -252,12 +252,8 @@ protected:
             }
 
             auto const& comm = is_first ? comms.comm_final() : (*level_it++).comm_exchange;
-            comm.alltoallv(
-                kamping::send_buf(send_buf),
-                kamping::send_counts(counts),
-                kamping::send_displs(offsets),
-                kamping::recv_buf<kamping::BufferResizePolicy::resize_to_fit>(recv_buf)
-            );
+            std::vector<size_t> const send_counts{counts.begin(), counts.end()};
+            recv_buf = comm.alltoallv_dispatch(send_buf, send_counts, alltoallv_params);
         }
 
         for (size_type i = 0; auto const global_index: recv_buf) {
@@ -304,7 +300,8 @@ public:
     void apply(
         std::span<index_type> global_permutation,
         index_type const global_index_offset,
-        Subcommunicators const& comms
+        Subcommunicators const& comms,
+        mpi::AlltoallvParams const& alltoallv_params = {}
     ) const {
         assert(comms.comm_root().is_same_on_all_ranks(global_index_offset));
 
@@ -323,7 +320,12 @@ public:
                 dest[offsets[ranks[i]]++] = current_index;
             }
         };
-        MultiLevelPermutation::apply_(global_permutation, compute_indices, comms);
+        MultiLevelPermutation::apply_(
+            global_permutation,
+            compute_indices,
+            comms,
+            alltoallv_params
+        );
     }
 
 private:

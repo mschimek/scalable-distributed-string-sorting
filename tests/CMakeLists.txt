@@ -22,6 +22,7 @@ function(dss_add_mpi_test DSS_TEST_TARGET)
   katestrophe_add_mpi_test(${DSS_TEST_TARGET} CORES ${DSS_CORES})
 endfunction()
 
+dss_add_mpi_test(test_alltoallv FILES alltoallv_test.cpp CORES 1 2 3 4)
 dss_add_mpi_test(test_sampling FILES sampling_test.cpp CORES 1 2 3 4)
 dss_add_mpi_test(test_end_to_end FILES end_to_end_test.cpp CORES 1 2 3 4)
 dss_add_mpi_test(test_generator FILES generator_test.cpp CORES 1 2 3 4)

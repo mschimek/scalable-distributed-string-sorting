@@ -13,7 +13,6 @@
 #include <type_traits>
 #include <vector>
 
-#include <kamping/measurements/timer.hpp>
 #include <kamping/named_parameters.hpp>
 #include <kamping/p2p/irecv.hpp>
 #include <kamping/p2p/isend.hpp>
@@ -23,7 +22,6 @@
 #include <mpi.h>
 
 #include "mpi/alltoallv/params.hpp"
-#include "util/measuringTool.hpp"
 
 namespace dss_mehnert {
 namespace mpi {
@@ -68,8 +66,6 @@ auto alltoallv_onefactor_windowed(
     auto const num_slots = params.num_slots;
     auto const use_issend = params.use_issend;
 
-    auto& measuring_tool = measurement::MeasuringTool::measuringTool();
-
     auto const p = static_cast<size_t>(comm.size());
     auto const rank = static_cast<size_t>(comm.rank());
 
@@ -77,9 +73,7 @@ auto alltoallv_onefactor_windowed(
     std::exclusive_scan(send_counts.begin(), send_counts.end(), send_displs.begin(), size_t{0});
     std::exclusive_scan(recv_counts.begin(), recv_counts.end(), recv_displs.begin(), size_t{0});
 
-    auto const send_total = send_displs.back() + send_counts.back();
-    measuring_tool.addRawCommunication(send_total * sizeof(DataType), "alltoallv_one_factor");
-
+    // comm volume is tracked by TrackingCommunicator on the comm.isend below
     auto const recv_total = recv_displs.back() + recv_counts.back();
     std::vector<DataType> receive_data(recv_total);
 
@@ -163,9 +157,6 @@ auto alltoallv_onefactor_windowed(
         }
     };
 
-    comm.barrier();
-    kamping::measurements::timer().start("alltoallv_onefactor_windowed");
-
     // initially fill every slot
     for (size_t slot = 0; slot < num_recv_slots; ++slot) {
         post_recv(slot);
@@ -187,8 +178,6 @@ auto alltoallv_onefactor_windowed(
         }
     }
 
-    kamping::measurements::timer().stop_and_append();
-
     return receive_data;
 }
 
@@ -207,8 +196,6 @@ auto alltoallv_onefactor_synchronized(
     using namespace kamping;
     using DataType = std::remove_reference_t<SendBuf>::value_type;
 
-    auto& measuring_tool = measurement::MeasuringTool::measuringTool();
-
     auto const p = static_cast<size_t>(comm.size());
     auto const rank = static_cast<size_t>(comm.rank());
 
@@ -216,9 +203,7 @@ auto alltoallv_onefactor_synchronized(
     std::exclusive_scan(send_counts.begin(), send_counts.end(), send_displs.begin(), size_t{0});
     std::exclusive_scan(recv_counts.begin(), recv_counts.end(), recv_displs.begin(), size_t{0});
 
-    auto const send_total = send_displs.back() + send_counts.back();
-    measuring_tool.addRawCommunication(send_total * sizeof(DataType), "alltoallv_one_factor");
-
+    // comm volume is tracked by TrackingCommunicator on the comm.sendrecv below
     auto const recv_total = recv_displs.back() + recv_counts.back();
     std::vector<DataType> receive_data(recv_total);
 
@@ -233,9 +218,6 @@ auto alltoallv_onefactor_synchronized(
 
     static constexpr int msg_tag = 16228;
     size_t const num_rounds = onefactor_num_rounds(p);
-
-    comm.barrier();
-    kamping::measurements::timer().start("alltoallv_onefactor_synchronized");
 
     for (size_t k = 0; k < num_rounds; ++k) {
         size_t const j = onefactor_partner(p, rank, k);
@@ -255,8 +237,6 @@ auto alltoallv_onefactor_synchronized(
             recv_tag(msg_tag)
         );
     }
-
-    kamping::measurements::timer().stop_and_append();
 
     return receive_data;
 }

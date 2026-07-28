@@ -28,7 +28,8 @@ std::vector<CharType> dss::run_sorter(
     Communicator const& comm,
     SamplerArgs const& sampler,
     SplitterSorter splitter_sorter,
-    dss_mehnert::LocalSorter local_sorter)
+    dss_mehnert::LocalSorter local_sorter,
+    dss_mehnert::mpi::AlltoallvParams const& alltoallv_params)
 {
     using StringSet            = dss_mehnert::StringSet<CharType, dss_mehnert::Length>;
     using PartitionPolicy      = dss_mehnert::MergeSortPartitionPolicy<CharType>;
@@ -41,9 +42,9 @@ std::vector<CharType> dss::run_sorter(
     Subcommunicators comms{comm};
     MergeSort sorter{
         dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
-            sampler, splitter_sorter, local_sorter),
+            sampler, splitter_sorter, local_sorter, alltoallv_params),
         RedistributionPolicy{},
-        {},
+        alltoallv_params,
         local_sorter,
     };
     dss_mehnert::StringLcpContainer<StringSet> container{std::move(to_sort)};

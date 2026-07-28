@@ -44,11 +44,13 @@ public:
     PartitionPolicy(
         size_t const sampling_factor,
         bool const redistribute_sample,
-        LocalSorter const local_sorter
+        LocalSorter const local_sorter,
+        mpi::AlltoallvParams const& alltoallv_params
     )
         : SamplePolicy{sampling_factor},
           redistribute_sample_{redistribute_sample},
-          local_sorter_{local_sorter} {}
+          local_sorter_{local_sorter},
+          alltoallv_params_{alltoallv_params} {}
 
     template <typename StringPtr, typename SamplerArg>
     std::vector<size_t> compute_partition(
@@ -77,7 +79,8 @@ public:
             num_partitions,
             comm,
             redistribute_sample_,
-            local_sorter_
+            local_sorter_,
+            alltoallv_params_
         );
 
         measuring_tool.start("compute_intervals");
@@ -107,6 +110,8 @@ private:
     bool redistribute_sample_ = false;
     // the sequential sorter used to sort the splitter sample
     LocalSorter local_sorter_ = LocalSorter::radixsort_CI3;
+    // which alltoallv algorithm the sample redistribution uses
+    mpi::AlltoallvParams alltoallv_params_{};
 };
 
 template <typename Char, bool is_indexed, typename Derived>
@@ -121,7 +126,8 @@ public:
         size_t const num_partitions,
         Communicator const& comm,
         bool const redistribute_sample,
-        LocalSorter const local_sorter
+        LocalSorter const local_sorter,
+        mpi::AlltoallvParams const& alltoallv_params
     ) {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
@@ -148,7 +154,13 @@ public:
         comm.barrier();
         kamping::measurements::timer().start("sort_samples");
         auto sorted_sample =
-            Derived::sort_samples(std::move(sample), comm, redistribute_sample, local_sorter);
+            Derived::sort_samples(
+                std::move(sample),
+                comm,
+                redistribute_sample,
+                local_sorter,
+                alltoallv_params
+            );
         kamping::measurements::timer().stop_and_append();
         measuring_tool.stop("sort_samples");
 
@@ -181,12 +193,13 @@ private:
         Sample&& sample,
         Communicator const& comm,
         bool const redistribute_sample,
-        LocalSorter const local_sorter
+        LocalSorter const local_sorter,
+        mpi::AlltoallvParams const& alltoallv_params
     ) {
         // balance the sample across PEs before RQuick (which balances by string
         // count, not characters) sorts it
         if (redistribute_sample) {
-            sample = dss_mehnert::sample::redistribute_random_timed(std::move(sample), comm);
+            sample = dss_mehnert::sample::redistribute_random_timed(std::move(sample), comm, alltoallv_params);
         }
 
         RQuick2::Comparator<StringPtr> const comp;
@@ -240,12 +253,13 @@ private:
         Sample&& sample,
         Communicator const& comm,
         bool const redistribute_sample,
-        LocalSorter const local_sorter
+        LocalSorter const local_sorter,
+        mpi::AlltoallvParams const& alltoallv_params
     ) {
         // balance the sample across PEs before RQuick (which balances by string
         // count, not characters) sorts it
         if (redistribute_sample) {
-            sample = dss_mehnert::sample::redistribute_random_timed(std::move(sample), comm);
+            sample = dss_mehnert::sample::redistribute_random_timed(std::move(sample), comm, alltoallv_params);
         }
 
         std::mt19937_64 gen{seed + comm.rank()};
@@ -281,7 +295,8 @@ private:
         Sample&& sample,
         Communicator const& comm,
         bool const /*redistribute_sample*/,
-        LocalSorter const local_sorter
+        LocalSorter const local_sorter,
+        mpi::AlltoallvParams const& /*alltoallv_params*/
     ) {
         // the sequential sorter allgathers the whole sample, so there is nothing
         // to rebalance beforehand -- the redistribute_sample flag does not apply

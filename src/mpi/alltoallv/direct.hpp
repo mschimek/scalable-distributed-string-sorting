@@ -40,7 +40,7 @@ auto alltoallv_direct(
     std::exclusive_scan(recv_counts.begin(), recv_counts.end(), recv_displs.begin(), size_t{0});
 
     auto const send_total = send_displs.back() + send_counts.back();
-    measuring_tool.addRawCommunication(send_total * sizeof(DataType), "alltoallv_direct");
+    measuring_tool.addRawCommunication(send_total * sizeof(DataType), "alltoallv");
 
     auto const recv_total = recv_displs.back() + recv_counts.back();
     std::vector<DataType> receive_data(recv_total);

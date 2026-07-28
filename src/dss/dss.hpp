@@ -17,7 +17,6 @@ using SamplerArgs = dss_mehnert::SamplerArgs;
 using SplitterSorter = dss_mehnert::SplitterSorter;
 
 inline constexpr dss_mehnert::mpi::AlltoallStringsConfig kDefaultAlltoallConfig{
-    .alltoall_kind     = dss_mehnert::mpi::AlltoallvCombinedKind::native,
     .compress_lcps     = true,
     .compress_prefixes = true,
 };
@@ -39,7 +38,8 @@ std::vector<CharType> run_sorter(
     Communicator const& comm,
     SamplerArgs const& sampler,
     SplitterSorter splitter_sorter,
-    dss_mehnert::LocalSorter local_sorter = dss_mehnert::LocalSorter::radixsort_CI3);
+    dss_mehnert::LocalSorter local_sorter = dss_mehnert::LocalSorter::radixsort_CI3,
+    dss_mehnert::mpi::AlltoallvParams const& alltoallv_params = {});
 
 template <typename CharType, typename Communicator>
 std::vector<CharType> run_sorter(
@@ -84,7 +84,8 @@ namespace dss {
 extern template std::vector<unsigned char>
 run_sorter<kDefaultAlltoallConfig, unsigned char, dss_mehnert::Communicator>(
     std::vector<unsigned char>&, dss_mehnert::Communicator const&,
-    SamplerArgs const&, SplitterSorter, dss_mehnert::LocalSorter);
+    SamplerArgs const&, SplitterSorter, dss_mehnert::LocalSorter,
+    dss_mehnert::mpi::AlltoallvParams const&);
 
 extern template std::vector<unsigned char>
 run_rquick<unsigned char, dss_mehnert::Communicator>(

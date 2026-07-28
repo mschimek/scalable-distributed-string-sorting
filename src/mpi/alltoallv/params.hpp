@@ -13,7 +13,8 @@
 namespace dss_mehnert {
 namespace mpi {
 
-enum class AlltoallvCombinedKind { combined, native, direct, one_factor, pairwise };
+// The MPI-level algorithm used to realise an alltoallv.
+enum class AlltoallvAlgorithm { native, direct, onefactor, pairwise };
 
 // Selects how the 1-factor exchanges:
 //   * windowed:     pipeline the exchanges over a fixed window of outstanding
@@ -26,6 +27,21 @@ struct OneFactorParams {
     OneFactorMode mode = OneFactorMode::windowed;
     size_t num_slots = 16;
     bool use_issend = false;
+};
+
+// Selection of, and tuning for, the alltoallv used by a call site. `large_counts` is
+// orthogonal to `algorithm`: it only decides whether the call guards against exceeding
+// the int32 count limit, not how the exchange is performed when it doesn't.
+struct AlltoallvParams {
+    AlltoallvAlgorithm algorithm = AlltoallvAlgorithm::native;
+
+    // check whether any PE exceeds the int32 count limit and, if so, fall back to
+    // `direct` (which uses derived big datatypes) for that one exchange. Costs one
+    // additional allreduce per call.
+    bool large_counts = false;
+
+    // only consulted by AlltoallvAlgorithm::onefactor
+    OneFactorParams onefactor{};
 };
 
 } // namespace mpi
