@@ -8,5 +8,4 @@ target_sources(dss_base
         communicator.hpp
         is_sorted.hpp
         read_input.hpp
-        rotate.hpp
 )

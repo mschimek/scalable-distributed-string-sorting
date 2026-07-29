@@ -209,7 +209,6 @@ public:
 
 template <typename Permutation>
     requires std::is_same_v<Permutation, MultiLevelPermutation>
-             || std::is_same_v<Permutation, NonUniquePermutation>
 class PermutationSendImpl<Permutation> {
 public:
     template <AlltoallStringsConfig config, typename StringSet, typename Communicator>

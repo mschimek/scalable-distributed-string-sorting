@@ -20,7 +20,6 @@
 #include <kamping/measurements/timer.hpp>
 #include <kamping/spdlog_adapter/logging.hpp>
 #include <spdlog/cfg/env.h>
-#include <tlx/cmdline_parser.hpp>
 #include <tlx/die.hpp>
 #include <tlx/die/core.hpp>
 #include <tlx/sort/strings/string_ptr.hpp>
@@ -617,14 +616,7 @@ int main(int argc, char* argv[]) {
     size_t cpus_per_node = 48;
     size_t num_levels = 1;
 
-    add_sorter_args(
-        args,
-        app,
-        timer_json_path,
-        levels_param,
-        cpus_per_node,
-        num_levels
-    );
+    add_sorter_args(args, app, timer_json_path, levels_param, cpus_per_node, num_levels);
 
     CLI11_PARSE(app, argc, argv);
 

@@ -188,13 +188,6 @@ using PrefixDoublingPartitionPolicy = PolymorphicPartitionPolicy<
     sample::NoExtraArg,
     sample::DistPrefixes>;
 
-template <typename Char, typename LengthType, typename Permutation>
-using SpaceEfficientPartitionPolicy = PolymorphicPartitionPolicy<
-    sorter::AugmentedStringSet<CompressedStringSet<Char, LengthType>, Permutation>,
-    sample::NoExtraArg,
-    sample::MaxLength,
-    sample::DistPrefixes>;
-
 template <typename Char, typename PolymorphicPolicy>
 PolymorphicPolicy init_partition_policy(
     SamplerArgs const& sampler,

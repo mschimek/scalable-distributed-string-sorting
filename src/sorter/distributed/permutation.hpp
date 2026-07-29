@@ -55,8 +55,6 @@ class NoPermutation {};
 
 class SimplePermutation {
 public:
-    static constexpr bool is_unique = true;
-
     using size_type = std::size_t;
     using rank_type = std::size_t;
     using index_type = std::size_t;
@@ -125,8 +123,6 @@ private:
 
 class MultiLevelPermutation {
 public:
-    static constexpr bool is_unique = true;
-
     using size_type = std::size_t;
     using rank_type = int;
     using index_type = std::size_t;
@@ -266,72 +262,6 @@ private:
     std::vector<RemotePermutation> remote_permutations_;
 };
 
-class NonUniquePermutation : private MultiLevelPermutation {
-public:
-    static constexpr bool is_unique = false;
-
-    using MultiLevelPermutation::index_type;
-    using MultiLevelPermutation::rank_type;
-    using MultiLevelPermutation::size_type;
-
-    using offset_type = std::uint8_t;
-
-    using MultiLevelPermutation::LocalPermutation;
-    using MultiLevelPermutation::RemotePermutation;
-
-    explicit NonUniquePermutation(size_type const depth) : MultiLevelPermutation(depth) {}
-
-    NonUniquePermutation(
-        LocalPermutation local,
-        std::vector<RemotePermutation> remote,
-        std::vector<offset_type> index_offsets
-    )
-        : MultiLevelPermutation{std::move(local), std::move(remote)},
-          index_offsets_{std::move(index_offsets)} {}
-
-    using MultiLevelPermutation::depth;
-    using MultiLevelPermutation::local;
-    using MultiLevelPermutation::remote;
-
-    std::vector<offset_type> const& index_offsets() const { return index_offsets_; }
-    std::vector<offset_type>& index_offsets() { return index_offsets_; }
-
-    template <typename Subcommunicators>
-    void apply(
-        std::span<index_type> global_permutation,
-        index_type const global_index_offset,
-        Subcommunicators const& comms,
-        mpi::AlltoallvParams const& alltoallv_params = {}
-    ) const {
-        assert(comms.comm_root().is_same_on_all_ranks(global_index_offset));
-
-        auto compute_indices = [&](auto const& ranks, auto& offsets, auto& dest) {
-            index_type const local_offset_sum =
-                std::accumulate(index_offsets_.begin(), index_offsets_.end(), index_type{0});
-            index_type const local_index_offset = comms.comm_root().exscan_single(
-                kamping::send_buf(local_offset_sum),
-                kamping::op(std::plus<>{})
-            );
-            index_type const index_offset = global_index_offset + local_index_offset;
-
-            index_type current_index = index_offset;
-            for (size_type i = 0; i != ranks.size(); ++i) {
-                current_index += index_offsets_[i];
-                dest[offsets[ranks[i]]++] = current_index;
-            }
-        };
-        MultiLevelPermutation::apply_(
-            global_permutation,
-            compute_indices,
-            comms,
-            alltoallv_params
-        );
-    }
-
-private:
-    std::vector<offset_type> index_offsets_;
-};
-
 inline std::ostream& operator<<(std::ostream& stream, SimplePermutation const& permutation) {
     for (size_t i = 0; i != permutation.size(); ++i) {
         stream << "{" << permutation.rank(i) << ", " << permutation.string(i) << "}, ";
@@ -351,26 +281,6 @@ inline std::ostream& operator<<(std::ostream& stream, MultiLevelPermutation cons
         std::copy(ranks.begin(), ranks.end(), std::ostream_iterator<int>(std::cout, ", "));
         std::cout << std::endl;
     }
-    return stream;
-}
-
-inline std::ostream& operator<<(std::ostream& stream, NonUniquePermutation const& permutation) {
-    auto const& local = permutation.local();
-    std::cout << "local permutation: ";
-    std::copy(local.begin(), local.end(), std::ostream_iterator<size_t>(std::cout, ", "));
-    std::cout << std::endl;
-
-    for (size_t depth = 0; depth != permutation.depth(); ++depth) {
-        auto const& ranks = permutation.remote(depth).ranks;
-        std::cout << "remote permutation[" << depth << "]: ";
-        std::copy(ranks.begin(), ranks.end(), std::ostream_iterator<int>(std::cout, ", "));
-        std::cout << std::endl;
-    }
-
-    auto const& offsets = permutation.index_offsets();
-    std::cout << "index offsets: ";
-    std::copy(offsets.begin(), offsets.end(), std::ostream_iterator<int>(std::cout, ", "));
-    std::cout << std::endl;
     return stream;
 }
 

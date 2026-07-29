@@ -13,7 +13,6 @@
 
 #include <CLI/CLI.hpp>
 #include <kamping/collectives/alltoall.hpp>
-#include <tlx/cmdline_parser.hpp>
 #include <tlx/die/core.hpp>
 #include <tlx/sort/strings/parallel_sample_sort.hpp>
 
@@ -81,8 +80,7 @@ struct CommonArgs {
     bool long_filter = false;
     bool splitter_sequential = false;
     size_t redistribution = static_cast<size_t>(Redistribution::grid);
-    size_t local_sorter =
-        static_cast<size_t>(dss_mehnert::LocalSorter::multikey_quicksort);
+    size_t local_sorter = static_cast<size_t>(dss_mehnert::LocalSorter::multikey_quicksort);
     bool prefix_compression = false;
     bool lcp_compression = false;
     bool prefix_doubling = false;
@@ -170,13 +168,12 @@ struct CommonArgs {
         return {
             .algorithm = algorithm,
             .large_counts = alltoall_large_counts,
-            .onefactor =
-                {
-                    .mode = onefactor_synchronized ? OneFactorMode::synchronized
-                                                   : OneFactorMode::windowed,
-                    .num_slots = onefactor_num_slots,
-                    .use_issend = onefactor_use_issend,
-                },
+            .onefactor = {
+                .mode =
+                    onefactor_synchronized ? OneFactorMode::synchronized : OneFactorMode::windowed,
+                .num_slots = onefactor_num_slots,
+                .use_issend = onefactor_use_issend,
+            },
         };
     }
 
@@ -340,131 +337,6 @@ inline void dispatch_common_args(Callback cb, CommonArgs const& args) {
     dispatch_alltoall_strings<Callback, unsigned char>(cb, args);
 }
 
-inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
-    cp.add_string('e', "experiment", args.experiment, "name to identify the experiment being run");
-    cp.add_size_t(
-        'i',
-        "num-iterations",
-        args.num_iterations,
-        "number of sorting iterations to run"
-    );
-    cp.add_flag('C', "sample-chars", args.sampler.sample_chars, "use character based sampling");
-    cp.add_flag('I', "sample-indexed", args.sampler.sample_indexed, "use indexed sampling");
-    cp.add_flag('R', "sample-random", args.sampler.sample_random, "use random sampling");
-    cp.add_size_t(
-        'S',
-        "sampling-factor",
-        args.sampler.sampling_factor,
-        "use the given oversampling factor"
-    );
-    cp.add_size_t(
-        "splitter-length-factor",
-        args.sampler.splitter_length_factor,
-        "maximum splitter length as a multiple of (avg_lcp + 5)"
-    );
-    cp.add_flag(
-        "redistribute-sample",
-        args.sampler.redistribute_sample,
-        "pseudorandomly redistribute the splitter sample across PEs before sorting it"
-    );
-    cp.add_flag(
-        "level-adjusted-scaling",
-        args.sampler.level_adjusted_scaling,
-        "scale the sampling factor with the number of levels"
-    );
-    cp.add_flag('Q', "rquick-v1", args.rquick_v1, "use version 1 of RQuick (defaults to v2)");
-    cp.add_flag('L', "rquick-lcp", args.rquick_lcp, "use LCP values in RQuick (only with v2)");
-    cp.add_flag(
-        "long-filter",
-        args.long_filter,
-        "sort the splitter sample with the long-string filter (RQuick v2, indexed only)"
-    );
-    cp.add_flag("splitter-sequential", args.splitter_sequential, "use sequential splitter sorting");
-    cp.add_flag(
-        'l',
-        "lcp-compression",
-        args.lcp_compression,
-        "compress LCP values during string exchange"
-    );
-    cp.add_flag(
-        'p',
-        "prefix-compression",
-        args.prefix_compression,
-        "use LCP compression during string exchange"
-    );
-    cp.add_flag('d', "prefix-doubling", args.prefix_doubling, "use prefix doubling merge sort");
-    cp.add_flag(
-        'g',
-        "grid-bloomfilter",
-        args.grid_bloomfilter,
-        "use gridwise bloom filter (requires prefix doubling) [default]"
-    );
-    cp.add_flag(
-        "bloomfilter-base-case",
-        args.bloomfilter_base_case,
-        "enable the allgather-based bloom filter base case when every PE holds "
-        "at most one hash value"
-    );
-    cp.add_flag(
-        "bloomfilter-level-dedup",
-        args.bloomfilter_level_dedup,
-        "forward only one entry per distinct hash at each intermediate grid level [default]"
-    );
-    cp.add_size_t(
-        'a',
-        "alltoallv",
-        args.alltoall_algorithm,
-        "All-To-All routine to use during string exchange "
-        "([0]=native, 1=direct, 2=onefactor, 3=pairwise)"
-    );
-    cp.add_flag(
-        "enable-large-counts-handling",
-        args.alltoall_large_counts,
-        "guard every alltoallv against exceeding the int32 count limit, falling back "
-        "to the big-datatype exchange when it would [default]"
-    );
-    cp.add_size_t(
-        "alltoallv-onefactor-num-slots",
-        args.onefactor_num_slots,
-        "number of outstanding isend/irecv pairs for the one_factor routine"
-    );
-    cp.add_flag(
-        "alltoallv-onefactor-issend",
-        args.onefactor_use_issend,
-        "use synchronous (rendezvous) sends instead of standard sends in the "
-        "one_factor routine"
-    );
-    cp.add_flag(
-        "alltoallv-onefactor-synchronized",
-        args.onefactor_synchronized,
-        "run the one_factor routine as p lock-step Sendrecv rounds instead of "
-        "the pipelined window"
-    );
-    cp.add_size_t(
-        't',
-        "redistribution",
-        args.redistribution,
-        "redistribution scheme to use for multi-level sort "
-        "(0=none, 1=naive, 2=simple-strings, 3=simple-chars, "
-        " 4=det-strings, 5=det-chars, [6]=grid)"
-    );
-    cp.add_size_t(
-        "local-sorter",
-        args.local_sorter,
-        "sequential sorter for the base case ([0]=radixsort_CI3, 1=multikey_quicksort)"
-    );
-    cp.add_flag('v', "check-sorted", args.check_sorted, "check that the result is sorted");
-    cp.add_flag('V', "check-complete", args.check_complete, "check that the result is complete");
-    cp.add_flag("verbose", args.verbose, "print some debug output");
-    cp.add_flag("count-prefixes", args.count_prefixes, "count LCPs and dist prefixes");
-    cp.add_flag(
-        "print-sorted",
-        args.print_sorted,
-        "gather the sorted strings on the root PE and print them (debug only)"
-    );
-    cp.add_size_t("seed", args.seed, "base seed for input generation (default 42)");
-}
-
 // CLI11 equivalent of add_common_args. Kept in parallel with the tlx-based
 // add_common_args above so the two can be compared before switching over; the
 // options are identical (same names, short flags, defaults) but organised into
@@ -486,7 +358,11 @@ inline void add_common_args(CommonArgs& args, CLI::App& app) {
         ->group("Sampling");
     app.add_flag("--sample-random", args.sampler.sample_random, "use random sampling")
         ->group("Sampling");
-    app.add_option("--sampling-factor", args.sampler.sampling_factor, "use the given oversampling factor")
+    app.add_option(
+           "--sampling-factor",
+           args.sampler.sampling_factor,
+           "use the given oversampling factor"
+    )
         ->group("Sampling");
     app.add_option(
            "--splitter-length-factor",
@@ -518,7 +394,11 @@ inline void add_common_args(CommonArgs& args, CLI::App& app) {
            "sort the splitter sample with the long-string filter (RQuick v2, indexed only)"
     )
         ->group("Splitter Sorting");
-    app.add_flag("--splitter-sequential", args.splitter_sequential, "use sequential splitter sorting")
+    app.add_flag(
+           "--splitter-sequential",
+           args.splitter_sequential,
+           "use sequential splitter sorting"
+    )
         ->group("Splitter Sorting");
 
     // -- Bloom filter ---------------------------------------------------------
@@ -545,9 +425,17 @@ inline void add_common_args(CommonArgs& args, CLI::App& app) {
         ->group("Bloom Filter");
 
     // -- Communication --------------------------------------------------------
-    app.add_flag("--lcp-compression", args.lcp_compression, "compress LCP values during string exchange")
+    app.add_flag(
+           "--lcp-compression",
+           args.lcp_compression,
+           "compress LCP values during string exchange"
+    )
         ->group("Communication");
-    app.add_flag("--prefix-compression", args.prefix_compression, "use LCP compression during string exchange")
+    app.add_flag(
+           "--prefix-compression",
+           args.prefix_compression,
+           "use LCP compression during string exchange"
+    )
         ->group("Communication");
     app.add_option("--local-sorter", args.local_sorter, "sequential sorter for the base case")
         ->transform(
