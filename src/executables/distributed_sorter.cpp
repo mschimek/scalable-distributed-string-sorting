@@ -212,7 +212,7 @@ void run_rquick(
         measuring_tool.start("none", "sorting_overall");
         RQuick2::Data<StringPtr> data{input_container.release_raw_strings()};
         auto sorted_container =
-            RQuick2::sort(std::move(data), tag, gen, mpi_comm, args.get_local_sorter());
+            RQuick2::sort(std::move(data), tag, gen, mpi_comm, args.local_sorter);
         measuring_tool.stop("none", "sorting_overall", comm);
 
         measuring_tool.disable();
@@ -236,7 +236,7 @@ void run_rquick(
         measuring_tool.start("none", "sorting_overall");
         RQuick2::Data<StringPtr> data{input_container.release_raw_strings()};
         auto sorted_container =
-            RQuick2::sort(std::move(data), tag, gen, mpi_comm, args.get_local_sorter());
+            RQuick2::sort(std::move(data), tag, gen, mpi_comm, args.local_sorter);
         measuring_tool.stop("none", "sorting_overall", comm);
 
         if (args.print_sorted) {
@@ -298,7 +298,7 @@ void dispatch_redistribution(Callback cb, CommonArgs const& args) {
     using namespace dss_mehnert::redistribution;
     using dss_mehnert::Communicator;
 
-    auto const redistribution = args.get_redistribution();
+    auto const redistribution = args.redistribution;
     if constexpr (CliOptions::enable_redistribution) {
         using PolymorphicPolicy =
             PolymorphicRedistributionPolicy<StringSet, RowwiseSplit<Communicator>>;
@@ -478,12 +478,12 @@ void run_merge_sort(
             dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
                 args.sampler.scaled_to_levels(get_num_levels(args.levels, comm)),
                 args.get_splitter_sorter(),
-                args.get_local_sorter(),
+                args.local_sorter,
                 args.alltoallv_params()
             ),
             std::move(redistribution),
             args.alltoallv_params(),
-            args.get_local_sorter()
+            args.local_sorter
         };
         merge_sort.sort(input_container, comms, args.sampler.splitter_length_factor);
         kamping::measurements::timer().stop_and_append();
@@ -577,14 +577,14 @@ void run_prefix_doubling(
             dss_mehnert::init_partition_policy<CharType, PartitionPolicy>(
                 args.sampler.scaled_to_levels(get_num_levels(args.levels, comm)),
                 args.get_splitter_sorter(),
-                args.get_local_sorter(),
+                args.local_sorter,
                 args.alltoallv_params()
             ),
             std::move(redistribution),
             args.bloomfilter_base_case,
             args.bloomfilter_level_dedup,
             args.alltoallv_params(),
-            args.get_local_sorter()
+            args.local_sorter
         };
         auto permutation = merge_sort.sort(std::move(input_container), comms);
         kamping::measurements::timer().stop_and_append();
@@ -774,7 +774,7 @@ int main(int argc, char* argv[]) {
         config["splitter-length-factor"] = args.sampler.splitter_length_factor;
         config["redistribute-sample"] = args.sampler.redistribute_sample;
         config["level-adjusted-scaling"] = args.sampler.level_adjusted_scaling;
-        config["local-sorter"] = args.get_local_sorter();
+        config["local-sorter"] = args.local_sorter;
         config["splitter-sequential"] = args.splitter_sequential;
 
         config["rquick-v1"] = args.rquick_v1;
@@ -786,12 +786,12 @@ int main(int argc, char* argv[]) {
         config["bloomfilter-level-dedup"] = args.bloomfilter_level_dedup;
         config["lcp-compression"] = args.lcp_compression;
         config["prefix-compression"] = args.prefix_compression;
-        config["alltoall"] = enum_name(alltoall_names, args.get_alltoall_routine());
+        config["alltoall"] = enum_name(alltoall_names, args.alltoall_routine);
         config["alltoall_large_counts"] = args.alltoall_large_counts;
         config["alltoall_onefactor_num_slots"] = args.onefactor_num_slots;
         config["alltoall_onefactor_synchronized"] = args.onefactor_synchronized;
         config["alltoall_onefactor_use_issend"] = args.onefactor_use_issend;
-        config["redistribution"] = enum_name(redistribution_names, args.get_redistribution());
+        config["redistribution"] = enum_name(redistribution_names, args.redistribution);
         config["strong-scaling"] = args.strong_scaling;
 
         config["check-sorted"] = args.check_sorted;
