@@ -36,7 +36,7 @@ inline void log_alltoallv_impl(std::string_view const name, size_t const comm_si
 
     static std::set<std::pair<std::string_view, size_t>> announced;
     if (announced.emplace(name, comm_size).second) {
-        SPDLOG_LOGGER_INFO(logger, "alltoallv: running {} on {} PEs", name, comm_size);
+        SPDLOG_LOGGER_DEBUG(logger, "alltoallv: running {} on {} PEs", name, comm_size);
     }
     SPDLOG_LOGGER_DEBUG(logger, "alltoallv: running {} on {} PEs", name, comm_size);
 }
