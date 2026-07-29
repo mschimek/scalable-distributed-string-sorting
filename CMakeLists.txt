@@ -137,9 +137,6 @@ message(STATUS "RQuick Sort Enabled: ${USE_RQUICK_SORT}")
 option(DSS_BUILD_EXAMPLES "build example programs in examples/" Off)
 message(STATUS "Examples Enabled: ${DSS_BUILD_EXAMPLES}")
 
-option(DSS_BUILD_SPACE_EFFICIENT_SORTER "build the space_efficient_sorter executable" Off)
-message(STATUS "Space Efficient Sorter Enabled: ${DSS_BUILD_SPACE_EFFICIENT_SORTER}")
-
 option(DSS_BUILD_TESTS "build the MPI tests in tests/ (run with ctest)" Off)
 message(STATUS "Tests Enabled: ${DSS_BUILD_TESTS}")
 
@@ -250,23 +247,6 @@ target_link_libraries(string_generator nlohmann_json::nlohmann_json)
 target_link_libraries(string_generator CLI11::CLI11)
 target_link_libraries(string_generator kassert::kassert)
 target_link_libraries(string_generator spdlog::spdlog kamping::spdlog-adapter)
-
-if(DSS_BUILD_SPACE_EFFICIENT_SORTER)
-  add_executable(space_efficient_sorter
-    src/executables/space_efficient_sorter.cpp
-    src/executables/common_cli.hpp)
-
-  target_include_directories(space_efficient_sorter PRIVATE
-    "${CMAKE_CURRENT_BINARY_DIR}/include")
-
-  target_compile_options(space_efficient_sorter PRIVATE ${DSS_MEHNERT_WARNING_FLAGS})
-  target_link_libraries(space_efficient_sorter kamping::kamping)
-  target_link_libraries(space_efficient_sorter dss_base)
-  target_link_libraries(space_efficient_sorter tlx)
-  target_link_libraries(space_efficient_sorter nlohmann_json::nlohmann_json)
-  target_link_libraries(space_efficient_sorter CLI11::CLI11)
-  target_link_libraries(space_efficient_sorter kassert::kassert)
-endif()
 
 if(DSS_BUILD_EXAMPLES)
   add_subdirectory(examples)
