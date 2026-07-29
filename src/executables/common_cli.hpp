@@ -408,7 +408,7 @@ inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
     );
     cp.add_size_t(
         'a',
-        "alltoall",
+        "alltoallv",
         args.alltoall_algorithm,
         "All-To-All routine to use during string exchange "
         "([0]=native, 1=direct, 2=onefactor, 3=pairwise)"
@@ -420,18 +420,18 @@ inline void add_common_args(CommonArgs& args, tlx::CmdlineParser& cp) {
         "to the big-datatype exchange when it would [default]"
     );
     cp.add_size_t(
-        "alltoall-onefactor-num-slots",
+        "alltoallv-onefactor-num-slots",
         args.onefactor_num_slots,
         "number of outstanding isend/irecv pairs for the one_factor routine"
     );
     cp.add_flag(
-        "alltoall-onefactor-issend",
+        "alltoallv-onefactor-issend",
         args.onefactor_use_issend,
         "use synchronous (rendezvous) sends instead of standard sends in the "
         "one_factor routine"
     );
     cp.add_flag(
-        "alltoall-onefactor-synchronized",
+        "alltoallv-onefactor-synchronized",
         args.onefactor_synchronized,
         "run the one_factor routine as p lock-step Sendrecv rounds instead of "
         "the pipelined window"
@@ -566,7 +566,7 @@ inline void add_common_args(CommonArgs& args, CLI::App& app) {
 
     // -- All-to-All -----------------------------------------------------------
     app.add_option(
-           "--alltoall",
+           "--alltoallv",
            args.alltoall_algorithm,
            "All-To-All routine to use during string exchange"
     )
@@ -584,20 +584,20 @@ inline void add_common_args(CommonArgs& args, CLI::App& app) {
     )
         ->group("All-to-All");
     app.add_option(
-           "--alltoall-onefactor-num-slots",
+           "--alltoallv-onefactor-num-slots",
            args.onefactor_num_slots,
            "number of outstanding isend/irecv pairs for the one_factor routine"
     )
         ->group("All-to-All");
     app.add_flag(
-           "--alltoall-onefactor-issend",
+           "--alltoallv-onefactor-issend",
            args.onefactor_use_issend,
            "use synchronous (rendezvous) sends instead of standard sends in the "
            "one_factor routine"
     )
         ->group("All-to-All");
     app.add_flag(
-           "--alltoall-onefactor-synchronized",
+           "--alltoallv-onefactor-synchronized",
            args.onefactor_synchronized,
            "run the one_factor routine as p lock-step Sendrecv rounds instead of "
            "the pipelined window"
