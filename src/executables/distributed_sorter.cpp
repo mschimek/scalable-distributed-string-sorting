@@ -283,7 +283,7 @@ void run_merge_sort(
             dss_mehnert::gather_and_print_strings(input_container, comm);
         }
 
-        measuring_tool.write_on_root(std::cout, comm);
+        measuring_tool.write_on_root(*args.measurement_output, comm);
         measuring_tool.reset();
     };
 
@@ -387,7 +387,7 @@ void run_prefix_doubling(
             }
         }
 
-        measuring_tool.write_on_root(std::cout, comm);
+        measuring_tool.write_on_root(*args.measurement_output, comm);
         measuring_tool.reset();
     };
 
@@ -660,16 +660,20 @@ int main(int argc, char* argv[]) {
             }
         }
     };
-    // redirect
-    if (kamping::comm_world().is_root()) {
-        std::ofstream out(output_path);
-        std::streambuf* coutbuf = std::cout.rdbuf();
-        std::cout.rdbuf(out.rdbuf());
-        run_algo();
-        std::cout.rdbuf(coutbuf);
-    } else {
-        run_algo();
+    // the RESULT records go next to the timer JSON, rather than into a redirected stdout
+    std::ofstream measurement_file;
+    if (!timer_json_path.empty() && kamping::comm_world().is_root()) {
+        auto path = std::filesystem::path(timer_json_path);
+        if (path.extension() == ".json") {
+            path.replace_extension();
+        }
+        path += "_additional_measurements.txt";
+
+        measurement_file.open(path);
+        tlx_die_verbose_unless(measurement_file, "could not open '" << path.string() << "'");
+        args.measurement_output = &measurement_file;
     }
+    run_algo();
 
     if (!timer_json_path.empty() && kamping::comm_world().is_root()) {
         nlohmann::ordered_json config;

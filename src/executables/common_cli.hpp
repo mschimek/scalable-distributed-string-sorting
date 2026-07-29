@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <iostream>
 #include <numeric>
 #include <type_traits>
 #include <utility>
@@ -96,6 +97,9 @@ struct CommonArgs {
     bool print_sorted = false;
     // base seed for input generation; the same seed reproduces the same input
     size_t seed = 42;
+    // where MeasuringTool writes its RESULT records; main points this at a file when one is
+    // requested, and only on the root PE, which is the only one that writes
+    std::ostream* measurement_output = &std::cout;
 
     std::string get_prefix(dss_mehnert::Communicator const& comm) const {
         // clang-format off
@@ -755,7 +759,7 @@ void run_rquick(
         }
     }
 
-    measuring_tool.write_on_root(std::cout, comm);
+    measuring_tool.write_on_root(*args.measurement_output, comm);
     measuring_tool.reset();
 }
 
