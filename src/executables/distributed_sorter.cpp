@@ -476,7 +476,6 @@ void set_experiment(SorterArgs& args, size_t num_levels) {
 void add_sorter_args(
     SorterArgs& args,
     CLI::App& app,
-    std::string& output_path,
     std::string& timer_json_path,
     std::vector<std::string>& levels_param,
     size_t& cpus_per_node,
@@ -599,7 +598,6 @@ void add_sorter_args(
         ->group("Multi-level");
 
     // -- Output ---------------------------------------------------------------
-    app.add_option("--json_output_path", output_path, "path to output file")->group("Output");
     app.add_option(
            "--timer-json-path",
            timer_json_path,
@@ -614,7 +612,6 @@ int main(int argc, char* argv[]) {
     CLI::App app{"a distributed string sorter"};
     app.option_defaults()->always_capture_default();
 
-    std::string output_path;
     std::string timer_json_path;
     std::vector<std::string> levels_param;
     size_t cpus_per_node = 48;
@@ -623,7 +620,6 @@ int main(int argc, char* argv[]) {
     add_sorter_args(
         args,
         app,
-        output_path,
         timer_json_path,
         levels_param,
         cpus_per_node,
