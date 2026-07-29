@@ -218,7 +218,7 @@ target_link_libraries(dss_lib
 
 add_executable(distributed_sorter
   src/executables/distributed_sorter.cpp
-  src/executables/common_cli.hpp)
+  src/executables/cli.hpp)
 
 target_include_directories(distributed_sorter PRIVATE
   "${CMAKE_CURRENT_BINARY_DIR}/include")

@@ -3,10 +3,12 @@
 // This code is licensed under BSD 2-Clause License (see LICENSE for details)
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
+#include <iostream>
 #include <map>
 #include <numeric>
 #include <string>
@@ -22,103 +24,330 @@
 #include <spdlog/cfg/env.h>
 #include <tlx/die.hpp>
 #include <tlx/die/core.hpp>
+#include <tlx/sort/strings/parallel_sample_sort.hpp>
 #include <tlx/sort/strings/string_ptr.hpp>
 
 #include "bench/reporting.hpp"
-#include "executables/common_cli.hpp"
+#include "executables/cli.hpp"
 #include "executables/serialization.hpp"
 #include "mpi/communicator.hpp"
 #include "mpi/is_sorted.hpp"
 #include "mpi/print_strings.hpp"
 #include "options.hpp"
+#include "sorter/distributed/bloomfilter.hpp"
 #include "sorter/distributed/merge_sort.hpp"
 #include "sorter/distributed/permutation.hpp"
 #include "sorter/distributed/prefix_doubling.hpp"
+#include "sorter/distributed/redistribution.hpp"
 #include "strings/stringset.hpp"
 #include "util/measuringTool.hpp"
 #include "util/string_generator.hpp"
 
-enum class StringGenerator {
-    dn_ratio,
-    dn_ratio_random,
-    file,
-    sentinel,
+
+inline void check_path_exists(std::string const& path) {
+    tlx_die_verbose_unless(std::filesystem::exists(path), "file not found: " << path);
 };
 
-EnumNames<StringGenerator> const string_generator_names{
-    {"dn-ratio", StringGenerator::dn_ratio},
-    {"dn-ratio-random", StringGenerator::dn_ratio_random},
-    {"file", StringGenerator::file},
-};
-
-template <typename Json>
-void to_json(Json& json, StringGenerator const value) {
-    json = enum_name(string_generator_names, value);
+inline auto
+get_first_level(std::vector<size_t> const& levels, dss_mehnert::Communicator const& comm) {
+    return std::find_if(levels.begin(), levels.end(), [&](auto const& group_size) {
+        return group_size < comm.size();
+    });
 }
 
-enum class Permutation { simple = 0, multi_level, sentinel };
-
-EnumNames<Permutation> const permutation_names{
-    {"simple", Permutation::simple},
-    {"multi-level", Permutation::multi_level},
-};
-
-template <typename Json>
-void to_json(Json& json, Permutation const value) {
-    json = enum_name(permutation_names, value);
+// the input is partitioned once per level and once more in the final round
+inline size_t
+get_num_levels(std::vector<size_t> const& levels, dss_mehnert::Communicator const& comm) {
+    return static_cast<size_t>(std::distance(get_first_level(levels, comm), levels.end())) + 1;
 }
 
-struct SorterArgs : public CommonArgs {
-    StringGenerator string_generator = StringGenerator::dn_ratio;
-    Permutation permutation = Permutation::simple;
-    size_t num_strings = 100000;
-    size_t len_strings = 100;
-    size_t len_strings_min = len_strings;
-    size_t len_strings_max = len_strings + 10;
-    std::string path;
-    // for the file generator: cap the number of bytes read from the file (0 = read the whole file)
-    size_t max_num_bytes = 0;
-    double dn_ratio = 0.5;
-    bool dn_encode_padding = false;
-    // skewed_dn_length: the fraction of the smallest strings whose length is drawn from an
-    // interval that is skew_factor times longer, and which PE a string is generated on
-    double skew_fraction = 0.0;
-    double skew_factor = 1.0;
-    // skewed_dn_length: pad the distinguishing prefix with a single constant character instead of
-    // the tiled per-group encoding
-    bool use_uniform_prefix = false;
-    dss_mehnert::IdPlacement id_placement = dss_mehnert::IdPlacement::random;
-    // skewed_dn_length: reproduce on a single PE the input a run with this many PEs would produce,
-    // PE by PE in rank order (0 = generate normally)
-    size_t simulate_num_pes = 0;
-    size_t iteration = 0;
-    bool strong_scaling = false;
-    // number of irregular alltoallv warmup rounds run before each sort (0 = no warmup)
-    size_t mpi_warmup_rounds = 0;
-    std::vector<size_t> levels;
+template <typename Callback, typename... Args>
+void dispatch_bloomfilter(Callback cb, CommonArgs const& args) {
+    using namespace dss_mehnert::bloomfilter;
 
-    std::string get_prefix(dss_mehnert::Communicator const& comm) const {
-        // clang-format off
-        return CommonArgs::get_prefix(comm) 
-               + " num_strings="    + std::to_string(num_strings)
-               + " len_strings="    + std::to_string(len_strings)
-               + " num_levels="     + std::to_string(levels.size())
-               + " iteration="      + std::to_string(iteration)
-               + " strong_scaling=" + std::to_string(strong_scaling)
-               + " dn_ratio="       + std::to_string(dn_ratio);
-        // clang-format on
+    if (args.grid_bloomfilter) {
+        cb.template operator()<Args..., MultiLevel<true, XXHasher>>();
+    } else {
+        cb.template operator()<Args..., SingleLevel<true, XXHasher>>();
+    }
+}
+
+// The alltoallv algorithm is a runtime parameter (see CommonArgs::alltoallv_params), so only
+// the two compression flags are still peeled into template parameters here.
+template <typename Callback, typename CharType>
+void dispatch_alltoall_strings(Callback cb, CommonArgs const& args) {
+    auto dispatch_config = [&]<bool compress_lcps, bool compress_prefixes> {
+        using dss_mehnert::mpi::AlltoallStringsConfig;
+        constexpr AlltoallStringsConfig config{
+            .compress_lcps = compress_lcps,
+            .compress_prefixes = compress_prefixes,
+        };
+        using Config = std::integral_constant<AlltoallStringsConfig, config>;
+        dispatch_bloomfilter<Callback, CharType, Config>(cb, args);
+    };
+
+    auto disptach_prefix_compression = [&]<bool compress_lcps> {
+        if (args.prefix_compression) {
+            dispatch_config.template operator()<compress_lcps, true>();
+        } else {
+            dispatch_config.template operator()<compress_lcps, false>();
+        }
+    };
+
+    // validates the selected algorithm against the enabled features
+    (void)args.alltoallv_params();
+
+    if (args.lcp_compression) {
+        disptach_prefix_compression.template operator()<true>();
+    } else {
+        disptach_prefix_compression.template operator()<false>();
+    }
+}
+
+template <typename Callback>
+inline void dispatch_common_args(Callback cb, CommonArgs const& args) {
+    dispatch_alltoall_strings<Callback, unsigned char>(cb, args);
+}
+
+template <typename Container>
+inline void count_prefix_lengths(Container& container, dss_mehnert::Communicator const& comm) {
+    using namespace kamping;
+
+    using Char = Container::Char;
+    std::vector<Char> const last_string =
+        container.empty() ? std::vector<Char>{0} : container.get_raw_string(container.size() - 1);
+    auto const pred_string = dss_mehnert::get_predecessor(last_string, container.empty(), comm);
+
+    size_t first_lcp = 0;
+    if (pred_string && !container.empty()) {
+        auto const first_string = container.get_raw_string(0);
+        first_lcp = dss_schimek::calc_lcp(pred_string->data(), first_string.data());
     }
 
-    // the number of PEs the input is generated for: the simulated count when a run is being
-    // reproduced on a single PE, the actual one otherwise
-    size_t generating_pes(dss_mehnert::Communicator const& comm) const {
-        return simulate_num_pes != 0 ? simulate_num_pes : comm.size();
+    size_t const last_lcp = container.empty() ? 0 : container.lcps().back();
+    auto const pred_lcp = container.size() == 1
+                              ? first_lcp
+                              : dss_mehnert::get_predecessor(last_lcp, container.empty(), comm);
+
+    auto const begin = container.lcps().begin(), end = container.lcps().end();
+    auto const local_lcp = first_lcp + std::accumulate(begin, end, size_t{0});
+
+    auto const dist = [](auto const lcp1, auto const lcp2) { return std::max(lcp1, lcp2) + 1; };
+
+    auto local_dist = container.empty() || !pred_lcp ? 0 : dist(*pred_lcp, first_lcp);
+    if (!container.empty()) {
+        local_dist =
+            std::transform_reduce(std::next(begin), end, begin, size_t{0}, std::plus<>{}, dist);
     }
 
-    size_t scaled_strings(dss_mehnert::Communicator const& comm) const {
-        return (strong_scaling ? 1 : generating_pes(comm)) * num_strings;
+    using dss_mehnert::measurement::MeasuringTool;
+    auto& measuring_tool = MeasuringTool::measuringTool();
+
+    measuring_tool.add(local_lcp, "global_lcp_sum");
+    measuring_tool.add(local_dist, "global_dist_prefix");
+}
+
+template <typename SorterArgs, typename GenerateStrings>
+void run_shared_memory(
+    SorterArgs args, dss_mehnert::Communicator const& comm, GenerateStrings generate_strings
+) {
+    tlx_die_unequal(comm.size_signed(), 1);
+
+    auto input_container = generate_strings(args, comm);
+    auto input_strings = input_container.get_strings();
+
+    for (size_t i = 0; i != args.num_iterations; ++i) {
+        args.iteration = i;
+        auto const prefix = args.get_prefix(comm);
+
+        // restore original order of input strings
+        input_container.set(std::vector{input_strings});
+
+        auto const before = std::chrono::high_resolution_clock::now();
+        tlx::sort_strings_detail::parallel_sample_sort(input_container.make_string_ptr(), 0, 0);
+        auto const after = std::chrono::high_resolution_clock::now();
+        auto const delta = std::chrono::duration_cast<std::chrono::nanoseconds>(after - before);
+        size_t const elapsed = delta.count();
+
+        std::cout << prefix << " key=sorting_overall max_time=" << elapsed << std::endl;
+
+        if (args.check_sorted) {
+            auto const is_sorted = input_container.make_string_set().check_order();
+            die_verbose_unless(is_sorted, "output is not sorted");
+        }
     }
-};
+}
+
+template <typename StringSet, typename SorterArgs, typename GenerateStrings>
+void run_rquick(
+    SorterArgs const& args,
+    std::string prefix,
+    dss_mehnert::Communicator const& comm,
+    GenerateStrings generate_strings
+) {
+    using dss_mehnert::measurement::MeasuringTool;
+    auto& measuring_tool = MeasuringTool::measuringTool();
+    measuring_tool.setPrefix(prefix);
+    measuring_tool.setVerbose(args.verbose);
+
+    measuring_tool.disableCommVolume();
+    auto input_container = generate_strings(args, comm);
+
+    dss_mehnert::MergeSortChecker<StringSet> checker;
+    if (args.check_sorted || args.check_complete) {
+        checker.store_container(input_container);
+    }
+    measuring_tool.enableCommVolume();
+
+    comm.barrier();
+
+    std::random_device rd;
+    std::mt19937_64 gen{rd()};
+
+    auto const tag = comm.default_tag();
+    auto const& mpi_comm = comm.mpi_communicator();
+
+    if (args.rquick_lcp) {
+        using StringPtr = tlx::sort_strings_detail::StringLcpPtr<StringSet, size_t>;
+        measuring_tool.start("none", "sorting_overall");
+        RQuick2::Data<StringPtr> data{input_container.release_raw_strings()};
+        auto sorted_container =
+            RQuick2::sort(std::move(data), tag, gen, mpi_comm, args.get_local_sorter());
+        measuring_tool.stop("none", "sorting_overall", comm);
+
+        measuring_tool.disable();
+        measuring_tool.disableCommVolume();
+
+        if (args.check_sorted) {
+            auto const is_sorted = checker.is_sorted(sorted_container.make_string_set(), comm);
+            die_verbose_unless(is_sorted, "output is not sorted");
+            auto const is_complete = checker.is_complete(sorted_container, comm);
+            die_verbose_unless(is_complete, "output is missing chars or strings");
+        }
+        if (args.check_complete) {
+            auto const is_exact = checker.check_exhaustive(sorted_container, comm);
+            die_verbose_unless(is_exact, "output is not a permutation of the input");
+        }
+        if (args.print_sorted) {
+            dss_mehnert::gather_and_print_strings(sorted_container, comm);
+        }
+    } else {
+        using StringPtr = tlx::sort_strings_detail::StringPtr<StringSet>;
+        measuring_tool.start("none", "sorting_overall");
+        RQuick2::Data<StringPtr> data{input_container.release_raw_strings()};
+        auto sorted_container =
+            RQuick2::sort(std::move(data), tag, gen, mpi_comm, args.get_local_sorter());
+        measuring_tool.stop("none", "sorting_overall", comm);
+
+        if (args.print_sorted) {
+            dss_mehnert::gather_and_print_strings(sorted_container, comm);
+        }
+    }
+
+    measuring_tool.write_on_root(*args.measurement_output, comm);
+    measuring_tool.reset();
+}
+
+inline size_t mpi_warmup(size_t const bytes_per_PE, dss_mehnert::Communicator const& comm) {
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<unsigned char> dist{'A', 'Z'};
+
+    std::vector<unsigned char> random_data(bytes_per_PE * comm.size());
+    std::generate(random_data.begin(), random_data.end(), [&] { return dist(gen); });
+
+    auto recv_data = comm.alltoall(kamping::send_buf(random_data));
+
+    auto volatile sum = std::accumulate(recv_data.begin(), recv_data.end(), size_t{0});
+    return sum;
+}
+
+// Irregular counterpart to mpi_warmup: every PE sends a different, random number of bytes to every
+// other PE, drawn uniformly from [min_bytes, max_bytes).
+inline size_t mpi_irregular_warmup(
+    size_t const min_bytes, size_t const max_bytes, dss_mehnert::Communicator const& comm
+) {
+    tlx_die_unless(min_bytes < max_bytes);
+
+    std::mt19937_64 gen{comm.rank()};
+    // uniform_int_distribution is inclusive on both ends, so draw from [min_bytes, max_bytes - 1]
+    std::uniform_int_distribution<size_t> count_dist{min_bytes, max_bytes - 1};
+    std::uniform_int_distribution<unsigned char> byte_dist{'A', 'Z'};
+
+    std::vector<int> send_counts(comm.size());
+    std::generate(send_counts.begin(), send_counts.end(), [&] {
+        return static_cast<int>(count_dist(gen));
+    });
+
+    size_t const send_total = std::accumulate(send_counts.begin(), send_counts.end(), size_t{0});
+    std::vector<unsigned char> send_data(send_total);
+    std::generate(send_data.begin(), send_data.end(), [&] { return byte_dist(gen); });
+
+    // recv_counts are exchanged internally by kamping from the send_counts
+    auto recv_data =
+        comm.alltoallv(kamping::send_buf(send_data), kamping::send_counts(send_counts));
+
+    auto volatile sum = std::accumulate(recv_data.begin(), recv_data.end(), size_t{0});
+    return sum;
+}
+
+namespace dss_mehnert {
+
+template <typename StringSet, typename Callback>
+void dispatch_redistribution(Callback cb, CommonArgs const& args) {
+    using namespace dss_mehnert::redistribution;
+    using dss_mehnert::Communicator;
+
+    auto const redistribution = args.get_redistribution();
+    if constexpr (CliOptions::enable_redistribution) {
+        using PolymorphicPolicy =
+            PolymorphicRedistributionPolicy<StringSet, RowwiseSplit<Communicator>>;
+
+        switch (redistribution) {
+            case Redistribution::none: {
+                // cb(NoRedistribution<Communicator>{});
+                tlx_die("disabled for compile-time");
+                return;
+            }
+            case Redistribution::naive: {
+                cb(PolymorphicPolicy{NaiveRedistribution<Communicator>{}});
+                return;
+            };
+            case Redistribution::simple_strings: {
+                cb(PolymorphicPolicy{SimpleStringRedistribution<Communicator>{}});
+                return;
+            };
+            case Redistribution::simple_chars: {
+                cb(PolymorphicPolicy{SimpleCharRedistribution<Communicator>{}});
+                return;
+            };
+            case Redistribution::det_strings: {
+                cb(PolymorphicPolicy{DeterministicStringRedistribution<Communicator>{}});
+                return;
+            };
+            case Redistribution::det_chars: {
+                cb(PolymorphicPolicy{DeterministicCharRedistribution<Communicator>{}});
+                return;
+            };
+            case Redistribution::grid: {
+                cb(GridwiseRedistribution<Communicator>{});
+                return;
+            }
+            case Redistribution::sentinel: {
+                break;
+            }
+        };
+        tlx_die("unknown redistribution policy");
+    } else {
+        if (redistribution == Redistribution::grid) {
+            cb(GridwiseRedistribution<Communicator>{});
+        } else {
+            dss_mehnert::die_with_feature("CLI_ENABLE_REDISTRIBUTION");
+        }
+    }
+}
+
+} // namespace dss_mehnert
 
 template <typename StringSet>
 auto generate_strings(SorterArgs const& args, dss_mehnert::Communicator const& comm) {
@@ -436,173 +665,6 @@ void dispatch_sorter(SorterArgs const& args) {
     } else {
         run_merge_sort<CharType, Args...>(args, prefix, comm);
     }
-}
-
-// hack to integrate experiment flags in kaval
-void set_experiment(SorterArgs& args, size_t num_levels) {
-    std::vector<std::string> const template_values{"np", "dn"};
-    auto it = std::find(template_values.begin(), template_values.end(), args.experiment);
-    if (it == template_values.end()) {
-        // return if no or custom name is given
-        return;
-    }
-    std::string const prefix = args.experiment;
-    if (CliOptions::use_rquick_sort) {
-        args.experiment = prefix + "_ratio_rquick";
-    } else {
-        switch (num_levels) {
-            case 1:
-                args.experiment = prefix + "_ratio_single";
-                break;
-            case 2:
-                args.experiment = prefix + "_ratio_double";
-                break;
-            case 3:
-                args.experiment = prefix + "_ratio_triple_optimal";
-                break;
-            default:
-                break;
-        }
-    }
-}
-
-
-// CLI11 counterpart to the tlx parsing in main(), kept in parallel so it can be
-// verified before switching over. Registers the shared options via the CLI11
-// add_common_args overload and adds the distributed_sorter-specific options in
-// named groups. To switch main() over: build a CLI::App, call this, then
-// CLI11_PARSE(app, argc, argv) instead of cp.process().
-void add_sorter_args(
-    SorterArgs& args,
-    CLI::App& app,
-    std::string& timer_json_path,
-    std::vector<std::string>& levels_param,
-    size_t& cpus_per_node,
-    size_t& num_levels
-) {
-    add_common_args(args, app);
-
-    // -- Input ----------------------------------------------------------------
-    app.add_option("--input-generator", args.string_generator, "type of string generation to use")
-        ->transform(
-            CLI::CheckedTransformer(string_generator_names, CLI::ignore_case)
-                .description(enum_value_list(string_generator_names))
-        )
-        ->default_str(enum_name(string_generator_names, args.string_generator))
-        ->group("Input");
-    app.add_option("--permutation", args.permutation, "type of permutation to use for PDMS")
-        ->transform(
-            CLI::CheckedTransformer(permutation_names, CLI::ignore_case)
-                .description(enum_value_list(permutation_names))
-        )
-        ->default_str(enum_name(permutation_names, args.permutation))
-        ->group("Input");
-    app.add_option("--input-path", args.path, "path to input file")->group("Input");
-    app.add_option(
-           "--input-max-num-bytes",
-           args.max_num_bytes,
-           "for the file generator, truncate the input to at most this many bytes (0 = whole file)"
-    )
-        ->group("Input");
-    app.add_option("--input-generator-DN-ratio", args.dn_ratio, "D/N ratio of generated strings")
-        ->group("Input");
-    app.add_flag(
-           "--input-dn-encode-padding",
-           args.dn_encode_padding,
-           "for DNGen, fill the padding with repeated blocks encoding (string-id / 3) instead of a "
-           "constant character; keeps the distinguishing prefix but varies the bloom filter hashes"
-    )
-        ->group("Input");
-    app.add_option(
-           "--input-generator-num-strings",
-           args.num_strings,
-           "number of strings to be generated"
-    )
-        ->group("Input");
-    app.add_option(
-           "--input-generator-length-strings",
-           args.len_strings,
-           "length of generated strings"
-    )
-        ->group("Input");
-    app.add_option(
-           "--input-generator-min-length-strings",
-           args.len_strings_min,
-           "minimum length of generated strings"
-    )
-        ->group("Input");
-    app.add_option(
-           "--input-generator-max-length-strings",
-           args.len_strings_max,
-           "maximum length of generated strings"
-    )
-        ->group("Input");
-    app.add_option(
-           "--input-generator-skew-fraction",
-           args.skew_fraction,
-           "for skewedDNLenGen, the fraction of the smallest strings that are stretched; their "
-           "length is drawn from [min-len-strings, skew-factor * max-len-strings]"
-    )
-        ->group("Input");
-    app.add_option(
-           "--input-generator-skew-factor",
-           args.skew_factor,
-           "for skewedDNLenGen, the factor by which the stretched strings may be longer"
-    )
-        ->group("Input");
-    app.add_flag(
-           "--input-generator-use-uniform-prefix",
-           args.use_uniform_prefix,
-           "for skewedDNLenGen, pad the distinguishing prefix with a single constant character "
-           "instead of the tiled per-group encoding"
-    )
-        ->group("Input");
-    app.add_option(
-           "--input-generator-placement",
-           args.id_placement,
-           "for skewedDNLenGen, which PE a string is generated on; with contiguous placement the "
-           "stretched (smallest) strings all land on the low ranks, so the input itself is "
-           "imbalanced in characters"
-    )
-        ->transform(
-            CLI::CheckedTransformer(dss_mehnert::id_placement_names, CLI::ignore_case)
-                .description(enum_value_list(dss_mehnert::id_placement_names))
-        )
-        ->default_str(enum_name(dss_mehnert::id_placement_names, args.id_placement))
-        ->group("Input");
-    app.add_option(
-           "--input-generator-simulate-num-pes",
-           args.simulate_num_pes,
-           "for skewedDNLenGen, generate on a single PE the input a run with this many PEs would "
-           "produce, PE by PE in rank order (0 = generate normally). Pass the command line of that "
-           "run with this option added to sort the very same input, e.g. as a shared memory "
-           "baseline; requires a single MPI rank"
-    )
-        ->group("Input");
-    app.add_flag("--strong-scaling", args.strong_scaling, "perform a strong scaling experiment")
-        ->group("General");
-    app.add_option(
-           "--mpi-warmup-rounds",
-           args.mpi_warmup_rounds,
-           "number of irregular alltoallv warmup rounds to run before each sort (0 = no warmup)"
-    )
-        ->group("General");
-
-    // -- Multi-level ----------------------------------------------------------
-    app.add_option("--group-size", levels_param, "size of groups for multi-level merge sort")
-        ->group("Multi-level");
-    app.add_option("--cpus-per-node", cpus_per_node, "number of cpus per node (default 48)")
-        ->group("Multi-level");
-    app.add_option("--num-levels", num_levels, "number of levels (default 1)")
-        ->group("Multi-level");
-
-    // -- Output ---------------------------------------------------------------
-    app.add_option(
-           "--timer-json-path",
-           timer_json_path,
-           "path for the kamping timer JSON report (empty = disabled)"
-    )
-        ->group("Output");
 }
 
 int main(int argc, char* argv[]) {
