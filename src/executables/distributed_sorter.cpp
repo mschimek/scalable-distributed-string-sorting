@@ -40,22 +40,16 @@
 #include "util/string_generator.hpp"
 
 enum class StringGenerator {
-    skewed_random = 0,
     dn_ratio,
+    dn_ratio_random,
     file,
-    skewed_dn_ratio,
-    suffix,
-    skewed_dn_length,
     sentinel,
 };
 
 EnumNames<StringGenerator> const string_generator_names{
-    {"skewed-random", StringGenerator::skewed_random},
     {"dn-ratio", StringGenerator::dn_ratio},
+    {"dn-ratio-random", StringGenerator::dn_ratio_random},
     {"file", StringGenerator::file},
-    {"skewed-dn-ratio", StringGenerator::skewed_dn_ratio},
-    {"suffix", StringGenerator::suffix},
-    {"skewed-dn-length", StringGenerator::skewed_dn_length},
 };
 
 template <typename Json>
@@ -138,9 +132,6 @@ auto generate_strings(SorterArgs const& args, dss_mehnert::Communicator const& c
 
     auto input_container = [&]() -> StringLcpContainer<StringSet> {
         switch (args.string_generator) {
-            case StringGenerator::skewed_random: {
-                tlx_die("not implemented");
-            }
             case StringGenerator::dn_ratio: {
                 return DNRatioGenerator<StringSet>{
                     args.scaled_strings(comm),
@@ -150,23 +141,7 @@ auto generate_strings(SorterArgs const& args, dss_mehnert::Communicator const& c
                     args.dn_encode_padding
                 };
             }
-            case StringGenerator::file: {
-                check_path_exists(args.path);
-                return FileDistributer<StringSet>{args.path, comm, args.max_num_bytes};
-            }
-            case StringGenerator::skewed_dn_ratio: {
-                return SkewedDNRatioGenerator<StringSet>{
-                    args.scaled_strings(comm),
-                    args.len_strings,
-                    args.dn_ratio,
-                    comm
-                };
-            }
-            case StringGenerator::suffix: {
-                check_path_exists(args.path);
-                return SuffixGenerator<StringSet>{args.path, comm};
-            }
-            case StringGenerator::skewed_dn_length: {
+            case StringGenerator::dn_ratio_random: {
                 SkewedDNArgs const gen_args{
                     .global_strings = args.scaled_strings(comm),
                     .min_length = args.len_strings_min,
@@ -181,8 +156,9 @@ auto generate_strings(SorterArgs const& args, dss_mehnert::Communicator const& c
                 if (args.simulate_num_pes != 0) {
                     tlx_die_verbose_unless(
                         comm.size() == 1,
-                        "--simulate-num-pes reproduces a distributed run on a single PE, so it has "
-                        "to be run with a single MPI rank"
+                        "--input-simulate-num-pes reproduces a distributed run on a "
+                        "single PE, so "
+                        "it has to be run with a single MPI rank"
                     );
                     return SkewedDNRatioLengthGenerator<StringSet>::simulate(
                         gen_args,
@@ -191,6 +167,11 @@ auto generate_strings(SorterArgs const& args, dss_mehnert::Communicator const& c
                 }
                 return SkewedDNRatioLengthGenerator<StringSet>{gen_args, comm};
             }
+            case StringGenerator::file: {
+                check_path_exists(args.path);
+                return FileDistributer<StringSet>{args.path, comm, args.max_num_bytes};
+            }
+
             case StringGenerator::sentinel: {
                 break;
             }
@@ -255,7 +236,7 @@ void run_merge_sort(
         Subcommunicators comms{first_level, args.levels.end(), comm};
         kamping::measurements::timer().stop_and_append();
         measuring_tool.stop("none", "create_communicators", comm);
-        [[maybe_unused]] volatile std::size_t warmup_sink = 0;
+        [[maybe_unused]] std::size_t volatile warmup_sink = 0;
         for (std::size_t i = 0; i < args.mpi_warmup_rounds; ++i) {
             kamping::measurements::timer().synchronize_and_start("warmup-round");
             warmup_sink += mpi_irregular_warmup(50000, 50500, comms.comm_root());
@@ -504,7 +485,7 @@ void add_sorter_args(
     add_common_args(args, app);
 
     // -- Input ----------------------------------------------------------------
-    app.add_option("--string-generator", args.string_generator, "type of string generation to use")
+    app.add_option("--input-generator", args.string_generator, "type of string generation to use")
         ->transform(
             CLI::CheckedTransformer(string_generator_names, CLI::ignore_case)
                 .description(enum_value_list(string_generator_names))
@@ -518,51 +499,68 @@ void add_sorter_args(
         )
         ->default_str(enum_name(permutation_names, args.permutation))
         ->group("Input");
-    app.add_option("--path", args.path, "path to input file")->group("Input");
+    app.add_option("--input-path", args.path, "path to input file")->group("Input");
     app.add_option(
-           "--max-num-bytes",
+           "--input-max-num-bytes",
            args.max_num_bytes,
            "for the file generator, truncate the input to at most this many bytes (0 = whole file)"
     )
         ->group("Input");
-    app.add_option("--DN-ratio", args.dn_ratio, "D/N ratio of generated strings")->group("Input");
+    app.add_option("--input-generator-DN-ratio", args.dn_ratio, "D/N ratio of generated strings")
+        ->group("Input");
     app.add_flag(
-           "--dn-encode-padding",
+           "--input-dn-encode-padding",
            args.dn_encode_padding,
            "for DNGen, fill the padding with repeated blocks encoding (string-id / 3) instead of a "
            "constant character; keeps the distinguishing prefix but varies the bloom filter hashes"
     )
         ->group("Input");
-    app.add_option("--num-strings", args.num_strings, "number of strings to be generated")
-        ->group("Input");
-    app.add_option("--len-strings", args.len_strings, "length of generated strings")
-        ->group("Input");
-    app.add_option("--min-len-strings", args.len_strings_min, "minimum length of generated strings")
-        ->group("Input");
-    app.add_option("--max-len-strings", args.len_strings_max, "maximum length of generated strings")
+    app.add_option(
+           "--input-generator-num-strings",
+           args.num_strings,
+           "number of strings to be generated"
+    )
         ->group("Input");
     app.add_option(
-           "--skew-fraction",
+           "--input-generator-length-strings",
+           args.len_strings,
+           "length of generated strings"
+    )
+        ->group("Input");
+    app.add_option(
+           "--input-generator-min-length-strings",
+           args.len_strings_min,
+           "minimum length of generated strings"
+    )
+        ->group("Input");
+    app.add_option(
+           "--input-generator-max-length-strings",
+           args.len_strings_max,
+           "maximum length of generated strings"
+    )
+        ->group("Input");
+    app.add_option(
+           "--input-generator-skew-fraction",
            args.skew_fraction,
            "for skewedDNLenGen, the fraction of the smallest strings that are stretched; their "
            "length is drawn from [min-len-strings, skew-factor * max-len-strings]"
     )
         ->group("Input");
     app.add_option(
-           "--skew-factor",
+           "--input-generator-skew-factor",
            args.skew_factor,
            "for skewedDNLenGen, the factor by which the stretched strings may be longer"
     )
         ->group("Input");
     app.add_flag(
-           "--input-use-uniform-prefix",
+           "--input-generator-use-uniform-prefix",
            args.use_uniform_prefix,
            "for skewedDNLenGen, pad the distinguishing prefix with a single constant character "
            "instead of the tiled per-group encoding"
     )
         ->group("Input");
     app.add_option(
-           "--placement",
+           "--input-generator-placement",
            args.id_placement,
            "for skewedDNLenGen, which PE a string is generated on; with contiguous placement the "
            "stretched (smallest) strings all land on the low ranks, so the input itself is "
@@ -575,7 +573,7 @@ void add_sorter_args(
         ->default_str(enum_name(dss_mehnert::id_placement_names, args.id_placement))
         ->group("Input");
     app.add_option(
-           "--simulate-num-pes",
+           "--input-generator-simulate-num-pes",
            args.simulate_num_pes,
            "for skewedDNLenGen, generate on a single PE the input a run with this many PEs would "
            "produce, PE by PE in rank order (0 = generate normally). Pass the command line of that "
@@ -584,13 +582,13 @@ void add_sorter_args(
     )
         ->group("Input");
     app.add_flag("--strong-scaling", args.strong_scaling, "perform a strong scaling experiment")
-        ->group("Input");
+        ->group("General");
     app.add_option(
            "--mpi-warmup-rounds",
            args.mpi_warmup_rounds,
            "number of irregular alltoallv warmup rounds to run before each sort (0 = no warmup)"
     )
-        ->group("Input");
+        ->group("General");
 
     // -- Multi-level ----------------------------------------------------------
     app.add_option("--group-size", levels_param, "size of groups for multi-level merge sort")

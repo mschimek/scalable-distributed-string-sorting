@@ -13,7 +13,7 @@
 // carries over unchanged apart from --num-pes and --output.
 //
 // The strings are written one per line. The generator's alphabet is 'A'-'Z', so no string can
-// contain a newline and the file round-trips through FileDistributer (--string-generator file).
+// contain a newline and the file round-trips through FileDistributer (--input-generator file).
 
 #include "util/string_generator.hpp"
 
@@ -47,7 +47,8 @@ constexpr CharType newline = '\n';
 struct GeneratorArgs {
     // the run being reproduced: how many PEs it had, and how many strings each of them was asked
     // for. The global count is derived exactly as distributed_sorter derives it, so that passing
-    // that run's --num-strings and --strong-scaling here yields the same instance.
+    // that run's --input-num-strings and --strong-scaling here yields the same
+    // instance.
     size_t num_pes = 0;
     size_t num_strings = 100000;
     bool strong_scaling = false;
@@ -76,7 +77,7 @@ void add_generator_args(GeneratorArgs& args, CLI::App& app) {
         ->required()
         ->group("Input");
     app.add_option(
-           "--num-strings",
+           "--input-num-strings",
            args.num_strings,
            "number of strings per PE, or in total with --strong-scaling"
     )
@@ -84,23 +85,32 @@ void add_generator_args(GeneratorArgs& args, CLI::App& app) {
     app.add_flag(
            "--strong-scaling",
            args.strong_scaling,
-           "interpret --num-strings as the global count instead of a per-PE one"
+           "interpret --input-num-strings as the global count instead of a per-PE one"
     )
         ->group("Input");
-    app.add_option("--min-len-strings", args.len_strings_min, "minimum length of generated strings")
-        ->group("Input");
-    app.add_option("--max-len-strings", args.len_strings_max, "maximum length of generated strings")
-        ->group("Input");
-    app.add_option("--DN-ratio", args.dn_ratio, "D/N ratio of generated strings")->group("Input");
     app.add_option(
-           "--skew-fraction",
+           "--input-min-len-strings",
+           args.len_strings_min,
+           "minimum length of generated strings"
+    )
+        ->group("Input");
+    app.add_option(
+           "--input-max-len-strings",
+           args.len_strings_max,
+           "maximum length of generated strings"
+    )
+        ->group("Input");
+    app.add_option("--input-DN-ratio", args.dn_ratio, "D/N ratio of generated strings")
+        ->group("Input");
+    app.add_option(
+           "--input-skew-fraction",
            args.skew_fraction,
            "the fraction of the smallest strings that are stretched; their length is drawn from "
            "[min-len-strings, skew-factor * max-len-strings]"
     )
         ->group("Input");
     app.add_option(
-           "--skew-factor",
+           "--input-skew-factor",
            args.skew_factor,
            "the factor by which the stretched strings may be longer"
     )
@@ -112,7 +122,7 @@ void add_generator_args(GeneratorArgs& args, CLI::App& app) {
            "per-group encoding"
     )
         ->group("Input");
-    app.add_option("--placement", args.id_placement, "which PE a string is generated on")
+    app.add_option("--input-placement", args.id_placement, "which PE a string is generated on")
         ->transform(
             CLI::CheckedTransformer(dss_mehnert::id_placement_names, CLI::ignore_case)
                 .description(enum_value_list(dss_mehnert::id_placement_names))
