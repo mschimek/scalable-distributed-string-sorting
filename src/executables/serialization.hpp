@@ -14,6 +14,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "mpi/alltoallv/params.hpp"
 #include "sorter/local_sorter.hpp"
 #include "util/string_generator.hpp"
 
@@ -50,6 +51,22 @@ template <typename Json>
 void to_json(Json& json, LocalSorter const value) {
     json = enum_name(local_sorter_names, value);
 }
+
+namespace mpi {
+
+inline EnumNames<AlltoallvAlgorithm> const alltoall_names{
+    {"native", AlltoallvAlgorithm::native},
+    {"direct", AlltoallvAlgorithm::direct},
+    {"onefactor", AlltoallvAlgorithm::onefactor},
+    {"pairwise", AlltoallvAlgorithm::pairwise},
+};
+
+template <typename Json>
+void to_json(Json& json, AlltoallvAlgorithm const value) {
+    json = enum_name(alltoall_names, value);
+}
+
+} // namespace mpi
 
 inline EnumNames<IdPlacement> const id_placement_names{
     {"random", IdPlacement::random},

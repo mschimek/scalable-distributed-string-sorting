@@ -786,7 +786,7 @@ int main(int argc, char* argv[]) {
         config["bloomfilter-level-dedup"] = args.bloomfilter_level_dedup;
         config["lcp-compression"] = args.lcp_compression;
         config["prefix-compression"] = args.prefix_compression;
-        config["alltoall"] = enum_name(alltoall_names, args.alltoall_routine);
+        config["alltoall"] = args.alltoall_algorithm;
         config["alltoall_large_counts"] = args.alltoall_large_counts;
         config["alltoall_onefactor_num_slots"] = args.onefactor_num_slots;
         config["alltoall_onefactor_synchronized"] = args.onefactor_synchronized;

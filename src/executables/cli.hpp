@@ -26,15 +26,6 @@
 #include "sorter/local_sorter.hpp"
 #include "util/string_generator.hpp"
 
-enum class MPIRoutineAllToAll { native = 0, direct, onefactor, pairwise, sentinel };
-
-inline EnumNames<MPIRoutineAllToAll> const alltoall_names{
-    {"native", MPIRoutineAllToAll::native},
-    {"direct", MPIRoutineAllToAll::direct},
-    {"onefactor", MPIRoutineAllToAll::onefactor},
-    {"pairwise", MPIRoutineAllToAll::pairwise},
-};
-
 // clang-format off
 enum class Redistribution { none = 0, naive, simple_strings, simple_chars,
                             det_strings, det_chars, grid, sentinel };
@@ -52,7 +43,8 @@ inline EnumNames<Redistribution> const redistribution_names{
 
 struct CommonArgs {
     std::string experiment;
-    MPIRoutineAllToAll alltoall_routine = MPIRoutineAllToAll::native;
+    dss_mehnert::mpi::AlltoallvAlgorithm alltoall_algorithm =
+        dss_mehnert::mpi::AlltoallvAlgorithm::native;
     bool alltoall_large_counts = true;
     size_t onefactor_num_slots = 16;
     bool onefactor_use_issend = false;
@@ -104,7 +96,7 @@ struct CommonArgs {
                + " grid_bloomfilter="   + std::to_string(grid_bloomfilter)
                + " bloomfilter_base_case=" + std::to_string(bloomfilter_base_case)
                + " bloomfilter_level_dedup=" + std::to_string(bloomfilter_level_dedup)
-               + " alltoall="            + enum_name(alltoall_names, alltoall_routine)
+               + " alltoall="            + enum_name(dss_mehnert::mpi::alltoall_names, alltoall_algorithm)
                + " alltoall_large_counts=" + std::to_string(alltoall_large_counts)
                + " onefactor_num_slots=" + std::to_string(onefactor_num_slots)
                + " onefactor_use_issend=" + std::to_string(onefactor_use_issend)
@@ -112,36 +104,17 @@ struct CommonArgs {
         // clang-format on
     }
 
-    dss_mehnert::mpi::AlltoallvAlgorithm get_alltoall_algorithm() const {
-        using dss_mehnert::mpi::AlltoallvAlgorithm;
-
-        switch (alltoall_routine) {
-            case MPIRoutineAllToAll::native:
-                return AlltoallvAlgorithm::native;
-            case MPIRoutineAllToAll::direct:
-                return AlltoallvAlgorithm::direct;
-            case MPIRoutineAllToAll::onefactor:
-                return AlltoallvAlgorithm::onefactor;
-            case MPIRoutineAllToAll::pairwise:
-                return AlltoallvAlgorithm::pairwise;
-            case MPIRoutineAllToAll::sentinel:
-                break;
-        }
-        tlx_die("unknown MPI routine");
-    }
-
     dss_mehnert::mpi::AlltoallvParams alltoallv_params() const {
         using dss_mehnert::mpi::AlltoallvAlgorithm;
         using dss_mehnert::mpi::OneFactorMode;
 
-        auto const algorithm = get_alltoall_algorithm();
         tlx_die_verbose_if(
-            algorithm != AlltoallvAlgorithm::native && !CliOptions::enable_alltoall,
+            alltoall_algorithm != AlltoallvAlgorithm::native && !CliOptions::enable_alltoall,
             "this alltoallv algorithm requires the CLI_ENABLE_ALLTOALL feature"
         );
 
         return {
-            .algorithm = algorithm,
+            .algorithm = alltoall_algorithm,
             .large_counts = alltoall_large_counts,
             .onefactor = {
                 .mode =
@@ -446,14 +419,14 @@ inline void add_common_args(CommonArgs& args, CLI::App& app) {
     // -- All-to-All -----------------------------------------------------------
     app.add_option(
            "--alltoallv",
-           args.alltoall_routine,
+           args.alltoall_algorithm,
            "All-To-All routine to use during string exchange"
     )
         ->transform(
-            CLI::CheckedTransformer(alltoall_names, CLI::ignore_case)
-                .description(enum_value_list(alltoall_names))
+            CLI::CheckedTransformer(dss_mehnert::mpi::alltoall_names, CLI::ignore_case)
+                .description(enum_value_list(dss_mehnert::mpi::alltoall_names))
         )
-        ->default_str(enum_name(alltoall_names, args.alltoall_routine))
+        ->default_str(enum_name(dss_mehnert::mpi::alltoall_names, args.alltoall_algorithm))
         ->group("All-to-All");
     app.add_flag(
            "--enable-large-counts-handling,!--disable-large-counts-handling",
