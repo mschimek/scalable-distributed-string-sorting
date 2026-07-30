@@ -4,6 +4,7 @@
 
 #include "bench/algorithms/rquick.hpp"
 
+#include <iostream>
 #include <memory>
 #include <optional>
 #include <random>
@@ -72,20 +73,24 @@ public:
     void verify() override {
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
-        if constexpr (use_lcps) {
-            measuring_tool.disable();
-            measuring_tool.disableCommVolume();
+        measuring_tool.disable();
+        measuring_tool.disableCommVolume();
 
-            if (args_.check_sorted) {
-                auto const is_sorted =
-                    checker_.is_sorted(sorted_container_->make_string_set(), comm_);
-                die_verbose_unless(is_sorted, "output is not sorted");
-                auto const is_complete = checker_.is_complete(*sorted_container_, comm_);
-                die_verbose_unless(is_complete, "output is missing chars or strings");
-            }
-            if (args_.check_complete) {
+        // is_sorted/is_complete only compare char/string counts, so they work regardless of
+        // whether RQuick tracked LCP values
+        if (args_.check_sorted) {
+            auto const is_sorted = checker_.is_sorted(sorted_container_->make_string_set(), comm_);
+            die_verbose_unless(is_sorted, "output is not sorted");
+            auto const is_complete = checker_.is_complete(*sorted_container_, comm_);
+            die_verbose_unless(is_complete, "output is missing chars or strings");
+        }
+        if (args_.check_complete) {
+            // check_exhaustive cross-checks LCP values, which only exist with --rquick-lcp
+            if constexpr (use_lcps) {
                 auto const is_exact = checker_.check_exhaustive(*sorted_container_, comm_);
                 die_verbose_unless(is_exact, "output is not a permutation of the input");
+            } else if (comm_.is_root()) {
+                std::cout << "--check-complete requires --rquick-lcp (no LCP array without it)\n";
             }
         }
         if (args_.print_sorted) {

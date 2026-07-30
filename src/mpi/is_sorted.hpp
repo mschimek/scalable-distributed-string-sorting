@@ -268,7 +268,11 @@ public:
         return comm.allreduce_single(send_buf(is_sorted), op(ops::logical_and<>{}));
     }
 
-    bool is_complete(StringContainer const& sorted_container, Communicator const& comm) {
+    // takes the LCP-less base class so it also accepts containers from LCP-less sorters (e.g.
+    // plain RQuick); only char/string counts are compared, which never need LCP values
+    bool is_complete(
+        dss_schimek::StringContainer<StringSet> const& sorted_container, Communicator const& comm
+    ) {
         auto const allreduce_sum = [&comm](size_t const x) {
             return comm.allreduce_single(kamping::send_buf(x), kamping::op(std::plus<>{}));
         };
