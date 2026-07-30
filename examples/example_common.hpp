@@ -18,7 +18,7 @@
 #include <kamping/collectives/gather.hpp>
 #include <kamping/named_parameters.hpp>
 
-#include "mpi/communicator.hpp"
+#include "dss/mpi/communicator.hpp"
 
 namespace dss::examples {
 

@@ -1,35 +1,35 @@
 add_executable(sort_strings_example sort_strings.cpp)
 
-target_compile_options(sort_strings_example PRIVATE ${DSS_MEHNERT_WARNING_FLAGS})
 target_link_libraries(sort_strings_example
   PRIVATE
+    dss_cxx_flags
     dss::dss
     kamping::kamping
     MPI::MPI_CXX)
 
 add_executable(sort_strings_rquick_splitter_example sort_strings_rquick_splitter.cpp)
 
-target_compile_options(sort_strings_rquick_splitter_example PRIVATE ${DSS_MEHNERT_WARNING_FLAGS})
 target_link_libraries(sort_strings_rquick_splitter_example
   PRIVATE
+    dss_cxx_flags
     dss::dss
     kamping::kamping
     MPI::MPI_CXX)
 
 add_executable(sort_strings_rquick_example sort_strings_rquick.cpp)
 
-target_compile_options(sort_strings_rquick_example PRIVATE ${DSS_MEHNERT_WARNING_FLAGS})
 target_link_libraries(sort_strings_rquick_example
   PRIVATE
+    dss_cxx_flags
     dss::dss
     kamping::kamping
     MPI::MPI_CXX)
 
 add_executable(sort_strings_rquick_indexed_example sort_strings_rquick_indexed.cpp)
 
-target_compile_options(sort_strings_rquick_indexed_example PRIVATE ${DSS_MEHNERT_WARNING_FLAGS})
 target_link_libraries(sort_strings_rquick_indexed_example
   PRIVATE
+    dss_cxx_flags
     dss::dss
     kamping::kamping
     MPI::MPI_CXX
@@ -38,9 +38,9 @@ target_link_libraries(sort_strings_rquick_indexed_example
 
 add_executable(test_long_filter_equivalence test_long_filter_equivalence.cpp)
 
-target_compile_options(test_long_filter_equivalence PRIVATE ${DSS_MEHNERT_WARNING_FLAGS})
 target_link_libraries(test_long_filter_equivalence
   PRIVATE
+    dss_cxx_flags
     dss::dss
     kamping::kamping
     MPI::MPI_CXX)

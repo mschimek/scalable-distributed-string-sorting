@@ -1,0 +1,22 @@
+target_sources(
+  dss_base
+  PUBLIC FILE_SET
+         HEADERS
+         BASE_DIRS
+         ${DSS_LIB_BASE_DIR}
+         FILES
+         bloomfilter2.hpp
+         bloomfilter.hpp
+         duplicate_sorting.hpp
+         merge_sort.hpp
+         merging.hpp
+         misc.hpp
+         multi_level.hpp
+         partition.hpp
+         partition_long_filter.hpp
+         partition_policy_factory.hpp
+         permutation.hpp
+         prefix_doubling.hpp
+         redistribution.hpp
+         sample.hpp
+         sample_redistribution.hpp)

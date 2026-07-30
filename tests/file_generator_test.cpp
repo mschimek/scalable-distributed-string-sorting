@@ -15,11 +15,11 @@
 #include <gtest/gtest.h>
 #include <kamping/collectives/barrier.hpp>
 
-#include "mpi/communicator.hpp"
-#include "strings/stringcontainer.hpp"
-#include "strings/stringset.hpp"
+#include "dss/mpi/communicator.hpp"
+#include "dss/strings/stringcontainer.hpp"
+#include "dss/strings/stringset.hpp"
+#include "input/string_generator.hpp"
 #include "test_util.hpp"
-#include "util/string_generator.hpp"
 
 namespace {
 

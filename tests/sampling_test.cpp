@@ -17,10 +17,10 @@
 
 #include <gtest/gtest.h>
 
-#include "mpi/communicator.hpp"
-#include "sorter/distributed/sample.hpp"
-#include "strings/stringcontainer.hpp"
-#include "strings/stringset.hpp"
+#include "dss/mpi/communicator.hpp"
+#include "dss/sorter/distributed/sample.hpp"
+#include "dss/strings/stringcontainer.hpp"
+#include "dss/strings/stringset.hpp"
 #include "test_util.hpp"
 
 namespace {

@@ -13,8 +13,8 @@
 #include <spdlog/fmt/ranges.h>
 
 #include "dss/dss.hpp"
+#include "dss/mpi/communicator.hpp"
 #include "example_common.hpp"
-#include "mpi/communicator.hpp"
 
 int main(int argc, char** argv) {
     kamping::Environment env{argc, argv};

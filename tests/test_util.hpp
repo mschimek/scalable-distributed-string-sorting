@@ -15,8 +15,8 @@
 #include <kamping/collectives/allgather.hpp>
 #include <kamping/named_parameters.hpp>
 
-#include "mpi/communicator.hpp"
-#include "util/measuringTool.hpp"
+#include "dss/mpi/communicator.hpp"
+#include "dss/util/measuringTool.hpp"
 
 namespace dss_test {
 

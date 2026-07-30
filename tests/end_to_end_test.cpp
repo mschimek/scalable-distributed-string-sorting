@@ -15,13 +15,13 @@
 #include <gtest/gtest.h>
 
 #include "dss/dss.hpp"
-#include "mpi/communicator.hpp"
-#include "sorter/distributed/merge_sort.hpp"
-#include "sorter/distributed/partition_policy_factory.hpp"
-#include "sorter/distributed/redistribution.hpp"
-#include "sorter/local_sorter.hpp"
-#include "strings/stringcontainer.hpp"
-#include "strings/stringset.hpp"
+#include "dss/mpi/communicator.hpp"
+#include "dss/sorter/distributed/merge_sort.hpp"
+#include "dss/sorter/distributed/partition_policy_factory.hpp"
+#include "dss/sorter/distributed/redistribution.hpp"
+#include "dss/sorter/local_sorter.hpp"
+#include "dss/strings/stringcontainer.hpp"
+#include "dss/strings/stringset.hpp"
 #include "test_util.hpp"
 
 namespace {

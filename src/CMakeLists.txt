@@ -1,6 +1,0 @@
-add_subdirectory(encoding)
-add_subdirectory(hash)
-add_subdirectory(mpi)
-add_subdirectory(sorter)
-add_subdirectory(strings)
-add_subdirectory(util)

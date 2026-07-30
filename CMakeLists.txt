@@ -62,6 +62,9 @@ FetchContent_Declare(
   GIT_TAG v1.0.0
   SYSTEM EXCLUDE_FROM_ALL)
 
+
+
+
 FetchContent_Declare(
   nlohmann_json
   GIT_REPOSITORY https://github.com/nlohmann/json
@@ -69,21 +72,7 @@ FetchContent_Declare(
   GIT_SHALLOW ON
   SYSTEM)
 
-FetchContent_Declare(
-  cli11
-  GIT_REPOSITORY https://github.com/CLIUtils/CLI11
-  GIT_TAG v2.5.0
-  GIT_SHALLOW ON
-  SYSTEM)
-
-FetchContent_Declare(
-  kamping-nlohmann-json-adapter
-  GIT_REPOSITORY https://github.com/kamping-site/kamping-nlohmann-json-adaptor
-  GIT_TAG main
-  GIT_SHALLOW ON)
-
-FetchContent_MakeAvailable(fmt spdlog kamping-spdlog-adapter nlohmann_json
-                           kamping-nlohmann-json-adapter cli11 kassert)
+FetchContent_MakeAvailable(fmt spdlog kamping-spdlog-adapter kassert nlohmann_json)
 
 FetchContent_Declare(
   kaval
@@ -127,6 +116,9 @@ message(STATUS "All-To-All Routines Enabled: ${CLI_ENABLE_ALLTOALL}")
 message(STATUS "RQuick Version 1 Enabled: ${CLI_ENABLE_RQUICK_V1}")
 message(STATUS "RQuick With LCP Enabled: ${CLI_ENABLE_RQUICK_LCP}")
 message(STATUS "RQuick Long Filter Enabled: ${CLI_ENABLE_RQUICK_LONG_FILTER}")
+
+option(DSS_BUILD_BENCHMARKS "build the benchmark harness in bench/" ${PROJECT_IS_TOP_LEVEL})
+message(STATUS "Benchmarks Enabled: ${DSS_BUILD_BENCHMARKS}")
 
 option(DSS_BUILD_EXAMPLES "build example programs in examples/" Off)
 message(STATUS "Examples Enabled: ${DSS_BUILD_EXAMPLES}")
@@ -175,86 +167,18 @@ message(STATUS "Build Flags: ${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_
 find_package(MPI REQUIRED)
 message(STATUS "Run: ${MPIEXEC} ${MPIEXEC_NUMPROC_FLAG} ${MPIEXEC_MAX_NUMPROCS} ${MPIEXEC_PREFLAGS} EXECUTABLE ${MPIEXEC_POSTFLAGS} ARGS")
 
-configure_file("options.hpp.in" "include/options.hpp")
+# Warning flags as a target, so every compiled target picks them up by linking it.
+add_library(dss_cxx_flags INTERFACE)
+target_compile_options(dss_cxx_flags INTERFACE ${DSS_MEHNERT_WARNING_FLAGS})
 
-# Create a library containing all implementation, to be linked against by executables
-add_library(dss_base)
-set_target_properties(dss_base PROPERTIES LINKER_LANGUAGE CXX)
-target_compile_options(dss_base PRIVATE ${DSS_MEHNERT_WARNING_FLAGS})
+add_subdirectory(lib)
 
-target_include_directories(dss_base PUBLIC
-  "${CMAKE_CURRENT_BINARY_DIR}/include")
-
-target_include_directories(dss_base PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(dss_base PRIVATE kamping::kamping)
-target_link_libraries(dss_base PUBLIC tlx)
-target_link_libraries(dss_base PRIVATE MPI::MPI_CXX)
-target_link_libraries(dss_base PUBLIC ips4o)
-target_link_libraries(dss_base PUBLIC rbc)
-# PUBLIC: headers under src/ use KASSERT and SPDLOG_*, so every consumer needs them
-target_link_libraries(dss_base PUBLIC kassert::kassert)
-target_link_libraries(dss_base PUBLIC spdlog::spdlog kamping::spdlog-adapter)
-
-add_subdirectory(src)
-
-add_library(dss_lib STATIC src/dss/dss.cpp)
-add_library(dss::dss ALIAS dss_lib)
-
-target_include_directories(dss_lib
-  PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/src
-  PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/include)
-
-target_compile_options(dss_lib PRIVATE ${DSS_MEHNERT_WARNING_FLAGS})
-
-target_link_libraries(dss_lib
-  PUBLIC  dss_base
-  PRIVATE kamping::kamping MPI::MPI_CXX)
-
-# One translation unit per algorithm: the AbstractAlgorithm interface keeps each algorithm's
-# template tree local to its own TU, so they compile in parallel and an edit to one of them
-# does not rebuild the others.
-add_executable(distributed_sorter
-  src/executables/distributed_sorter.cpp
-  src/executables/args.hpp
-  src/executables/cli.hpp
-  src/bench/algorithm.hpp
-  src/bench/algorithm_factory.cpp
-  src/bench/config_json.cpp
-  src/bench/dispatch.hpp
-  src/bench/input.hpp
-  src/bench/algorithms/merge_sort.cpp
-  src/bench/algorithms/prefix_doubling_simple.cpp
-  src/bench/algorithms/prefix_doubling_multi_level.cpp
-  src/bench/algorithms/rquick.cpp
-  src/bench/algorithms/shared_memory.cpp)
-
-target_include_directories(distributed_sorter PRIVATE
-  "${CMAKE_CURRENT_BINARY_DIR}/include")
-
-target_compile_options(distributed_sorter PRIVATE ${DSS_MEHNERT_WARNING_FLAGS})
-target_link_libraries(distributed_sorter kamping::kamping)
-target_link_libraries(distributed_sorter dss_base)
-target_link_libraries(distributed_sorter tlx)
-target_link_libraries(distributed_sorter nlohmann_json::nlohmann_json)
-target_link_libraries(distributed_sorter kamping::nlohmann-json-adapter)
-target_link_libraries(distributed_sorter CLI11::CLI11)
-target_link_libraries(distributed_sorter kassert::kassert)
-target_link_libraries(distributed_sorter spdlog::spdlog kamping::spdlog-adapter)
-
-add_executable(string_generator
-  src/executables/string_generator.cpp)
-
-target_include_directories(string_generator PRIVATE
-  "${CMAKE_CURRENT_BINARY_DIR}/include")
-
-target_compile_options(string_generator PRIVATE ${DSS_MEHNERT_WARNING_FLAGS})
-target_link_libraries(string_generator kamping::kamping)
-target_link_libraries(string_generator dss_base)
-target_link_libraries(string_generator tlx)
-target_link_libraries(string_generator nlohmann_json::nlohmann_json)
-target_link_libraries(string_generator CLI11::CLI11)
-target_link_libraries(string_generator kassert::kassert)
-target_link_libraries(string_generator spdlog::spdlog kamping::spdlog-adapter)
+if(DSS_BUILD_BENCHMARKS)
+  add_subdirectory(bench)
+elseif(DSS_BUILD_TESTS)
+  # the generator tests exercise the input generators, which live under bench/
+  add_subdirectory(bench/input)
+endif()
 
 if(DSS_BUILD_EXAMPLES)
   add_subdirectory(examples)

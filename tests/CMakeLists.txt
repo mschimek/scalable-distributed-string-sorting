@@ -11,11 +11,12 @@ FetchContent_MakeAvailable(KaTestrophe)
 function(dss_add_mpi_test DSS_TEST_TARGET)
   cmake_parse_arguments(DSS "" "" "FILES;CORES" ${ARGN})
   add_executable(${DSS_TEST_TARGET} ${DSS_FILES})
-  target_compile_options(${DSS_TEST_TARGET} PRIVATE ${DSS_MEHNERT_WARNING_FLAGS})
   target_include_directories(${DSS_TEST_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
   target_link_libraries(${DSS_TEST_TARGET}
     PRIVATE
+      dss_cxx_flags
       dss::dss
+      dss_input_generation
       kamping::kamping
       MPI::MPI_CXX
       KaTestrophe::main_thread_single)

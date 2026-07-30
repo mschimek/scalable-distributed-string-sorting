@@ -15,8 +15,8 @@
 #include <gtest/gtest.h>
 
 #include "dss/dss.hpp"
-#include "mpi/alltoallv/dispatch.hpp"
-#include "mpi/communicator.hpp"
+#include "dss/mpi/alltoallv/dispatch.hpp"
+#include "dss/mpi/communicator.hpp"
 #include "test_util.hpp"
 
 namespace {

@@ -22,13 +22,13 @@
 #include <kamping/mpi_ops.hpp>
 #include <kamping/named_parameters.hpp>
 
-#include "mpi/communicator.hpp"
-#include "sorter/distributed/partition.hpp"
-#include "sorter/distributed/partition_long_filter.hpp"
-#include "sorter/distributed/sample.hpp"
-#include "strings/stringcontainer.hpp"
-#include "strings/stringset.hpp"
-#include "util/measuringTool.hpp"
+#include "dss/mpi/communicator.hpp"
+#include "dss/sorter/distributed/partition.hpp"
+#include "dss/sorter/distributed/partition_long_filter.hpp"
+#include "dss/sorter/distributed/sample.hpp"
+#include "dss/strings/stringcontainer.hpp"
+#include "dss/strings/stringset.hpp"
+#include "dss/util/measuringTool.hpp"
 
 namespace {
 
