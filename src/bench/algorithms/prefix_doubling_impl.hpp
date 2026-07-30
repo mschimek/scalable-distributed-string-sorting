@@ -24,7 +24,7 @@
 #include "bench/algorithms/prefix_doubling.hpp"
 #include "bench/dispatch.hpp"
 #include "bench/input.hpp"
-#include "executables/args.hpp"
+#include "bench/args.hpp"
 #include "mpi/communicator.hpp"
 #include "mpi/is_sorted.hpp"
 #include "mpi/print_strings.hpp"

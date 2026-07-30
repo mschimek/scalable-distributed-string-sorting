@@ -18,8 +18,8 @@
 #include <kamping/communicator.hpp>
 #include <tlx/die/core.hpp>
 
-#include "executables/args.hpp"
-#include "executables/serialization.hpp"
+#include "bench/args.hpp"
+#include "util/enum_names.hpp"
 
 inline void parse_level_arg(std::vector<std::string> const& param, std::vector<size_t>& levels) {
     std::transform(param.begin(), param.end(), std::back_inserter(levels), [](auto& str) {

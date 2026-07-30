@@ -11,7 +11,7 @@
 #include <memory>
 
 #include "bench/algorithm.hpp"
-#include "executables/args.hpp"
+#include "bench/args.hpp"
 #include "mpi/communicator.hpp"
 
 namespace dss_mehnert {

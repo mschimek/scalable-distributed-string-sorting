@@ -15,7 +15,7 @@
 #include <tlx/die/core.hpp>
 
 #include "bench/algorithm.hpp"
-#include "executables/args.hpp"
+#include "bench/args.hpp"
 #include "hash/xxhash.hpp"
 #include "mpi/alltoall_strings.hpp"
 #include "mpi/communicator.hpp"

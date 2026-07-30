@@ -22,7 +22,7 @@
 #include <kamping/measurements/counter.hpp>
 #include <tlx/die/core.hpp>
 
-#include "executables/args.hpp"
+#include "bench/args.hpp"
 #include "mpi/communicator.hpp"
 #include "mpi/is_sorted.hpp"
 #include "strings/stringcontainer.hpp"

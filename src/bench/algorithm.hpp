@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include "executables/args.hpp"
+#include "bench/args.hpp"
 #include "mpi/communicator.hpp"
 #include "util/measuringTool.hpp"
 

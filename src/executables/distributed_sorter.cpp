@@ -15,9 +15,9 @@
 #include <tlx/die/core.hpp>
 
 #include "bench/algorithm_factory.hpp"
+#include "bench/cli.hpp"
 #include "bench/config_json.hpp"
 #include "bench/reporting.hpp"
-#include "executables/cli.hpp"
 #include "mpi/communicator.hpp"
 #include "util/measuringTool.hpp"
 

@@ -2,9 +2,9 @@
 // (c) 2026 Matthias Schimek
 // This code is licensed under BSD 2-Clause License (see LICENSE for details)
 //
-// The arguments distributed_sorter's command line parses into. Kept free of CLI11 so that
-// the benchmark harness under bench/ can see the arguments without paying for the parser;
-// the CLI11 options that fill these structs live in cli.hpp.
+// The arguments distributed_sorter's command line parses into. Kept free of CLI11 so that the
+// rest of the benchmark harness can see the arguments without paying for the parser; the CLI11
+// options that fill these structs live in cli.hpp, which only the executable includes.
 
 #pragma once
 
@@ -14,12 +14,12 @@
 
 #include <tlx/die/core.hpp>
 
-#include "executables/serialization.hpp"
 #include "mpi/alltoallv/params.hpp"
 #include "mpi/communicator.hpp"
 #include "options.hpp"
 #include "sorter/distributed/partition_policy_factory.hpp"
 #include "sorter/local_sorter.hpp"
+#include "util/enum_names.hpp"
 #include "util/string_generator.hpp"
 
 // clang-format off

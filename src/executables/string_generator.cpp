@@ -32,9 +32,9 @@
 #include <spdlog/spdlog.h>
 #include <tlx/die/core.hpp>
 
-#include "executables/serialization.hpp"
 #include "mpi/communicator.hpp"
 #include "strings/stringset.hpp"
+#include "util/enum_names.hpp"
 
 namespace {
 
