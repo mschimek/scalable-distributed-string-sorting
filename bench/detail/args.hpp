@@ -165,24 +165,6 @@ struct CommonArgs {
     }
 };
 
-enum class StringGenerator {
-    dn_ratio,
-    dn_ratio_random,
-    file,
-    sentinel,
-};
-
-EnumNames<StringGenerator> const string_generator_names{
-    {"dn-ratio", StringGenerator::dn_ratio},
-    {"dn-ratio-random", StringGenerator::dn_ratio_random},
-    {"file", StringGenerator::file},
-};
-
-template <typename Json>
-void to_json(Json& json, StringGenerator const value) {
-    json = enum_name(string_generator_names, value);
-}
-
 enum class Permutation { simple = 0, multi_level, sentinel };
 
 EnumNames<Permutation> const permutation_names{
@@ -196,7 +178,8 @@ void to_json(Json& json, Permutation const value) {
 }
 
 struct SorterArgs : public CommonArgs {
-    StringGenerator string_generator = StringGenerator::dn_ratio;
+    dss_mehnert::bench::input::StringGenerator string_generator =
+        dss_mehnert::bench::input::StringGenerator::dn_ratio;
     Permutation permutation = Permutation::simple;
     size_t num_strings = 100000;
     size_t len_strings = 100;
@@ -244,5 +227,27 @@ struct SorterArgs : public CommonArgs {
 
     size_t scaled_strings(dss_mehnert::Communicator const& comm) const {
         return (strong_scaling ? 1 : generating_pes(comm)) * num_strings;
+    }
+
+    // the parsed command line as bench/input/ wants to see it: everything the generators need and
+    // nothing about how the sort itself is configured
+    dss_mehnert::bench::input::Config input_config(dss_mehnert::Communicator const& comm) const {
+        return {
+            .generator = string_generator,
+            .num_strings = scaled_strings(comm),
+            .len_strings = len_strings,
+            .len_strings_min = len_strings_min,
+            .len_strings_max = len_strings_max,
+            .dn_ratio = dn_ratio,
+            .dn_encode_padding = dn_encode_padding,
+            .skew_fraction = skew_fraction,
+            .skew_factor = skew_factor,
+            .use_uniform_prefix = use_uniform_prefix,
+            .id_placement = id_placement,
+            .simulate_num_pes = simulate_num_pes,
+            .seed = seed,
+            .path = path,
+            .max_num_bytes = max_num_bytes,
+        };
     }
 };

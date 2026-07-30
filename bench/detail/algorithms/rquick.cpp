@@ -21,7 +21,7 @@
 #include "dss/strings/stringcontainer.hpp"
 #include "dss/strings/stringset.hpp"
 #include "dss/util/measuringTool.hpp"
-#include "input/input.hpp"
+#include "input/generation.hpp"
 
 namespace dss_mehnert {
 namespace bench {
@@ -43,7 +43,7 @@ public:
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
         measuring_tool.disableCommVolume();
-        input_container_ = generate_strings<StringSet>(args_, comm_);
+        input_container_ = input::generate_strings<StringSet>(args_.input_config(comm_), comm_);
 
         if (args_.check_sorted || args_.check_complete) {
             checker_.store_container(input_container_);

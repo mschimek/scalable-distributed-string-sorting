@@ -16,6 +16,7 @@
 
 #include "dss/mpi/alltoallv/params.hpp"
 #include "dss/sorter/local_sorter.hpp"
+#include "input/generation.hpp"
 #include "input/string_generator.hpp"
 
 // a vector rather than a map, so that --help lists the values in the order they are declared
@@ -77,5 +78,22 @@ template <typename Json>
 void to_json(Json& json, IdPlacement const value) {
     json = enum_name(id_placement_names, value);
 }
+
+namespace bench {
+namespace input {
+
+inline EnumNames<StringGenerator> const string_generator_names{
+    {"dn-ratio", StringGenerator::dn_ratio},
+    {"dn-ratio-random", StringGenerator::dn_ratio_random},
+    {"file", StringGenerator::file},
+};
+
+template <typename Json>
+void to_json(Json& json, StringGenerator const value) {
+    json = enum_name(string_generator_names, value);
+}
+
+} // namespace input
+} // namespace bench
 
 } // namespace dss_mehnert

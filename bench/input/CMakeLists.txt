@@ -10,16 +10,13 @@ target_sources(
             BASE_DIRS
             ${CMAKE_CURRENT_LIST_DIR}/..
             FILES
-            input.hpp
+            generation.hpp
             string_generator.hpp)
 
-# nlohmann_json is pulled in transitively: input.hpp takes the parsed SorterArgs, which carries
-# the JSON name tables from detail/enum_names.hpp.
 target_link_libraries(dss_input_generation
   INTERFACE dss_base
             kamping::kamping
             tlx
             kassert::kassert
-            nlohmann_json::nlohmann_json
             spdlog::spdlog
             kamping::spdlog-adapter)

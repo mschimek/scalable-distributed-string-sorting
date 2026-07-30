@@ -274,10 +274,10 @@ inline void add_sorter_args(
     // -- Input ----------------------------------------------------------------
     app.add_option("--input-generator", args.string_generator, "type of string generation to use")
         ->transform(
-            CLI::CheckedTransformer(string_generator_names, CLI::ignore_case)
-                .description(enum_value_list(string_generator_names))
+            CLI::CheckedTransformer(dss_mehnert::bench::input::string_generator_names, CLI::ignore_case)
+                .description(enum_value_list(dss_mehnert::bench::input::string_generator_names))
         )
-        ->default_str(enum_name(string_generator_names, args.string_generator))
+        ->default_str(enum_name(dss_mehnert::bench::input::string_generator_names, args.string_generator))
         ->group("Input");
     app.add_option("--permutation", args.permutation, "type of permutation to use for PDMS")
         ->transform(

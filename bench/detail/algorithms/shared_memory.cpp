@@ -15,7 +15,7 @@
 
 #include "dss/strings/stringcontainer.hpp"
 #include "dss/strings/stringset.hpp"
-#include "input/input.hpp"
+#include "input/generation.hpp"
 
 namespace dss_mehnert {
 namespace bench {
@@ -29,7 +29,7 @@ class SharedMemoryAlgorithm : public AlgorithmBase {
 public:
     SharedMemoryAlgorithm(SorterArgs const& args, Communicator const& comm)
         : AlgorithmBase{args, comm},
-          input_container_{generate_strings<StringSet>(args, comm)},
+          input_container_{input::generate_strings<StringSet>(args.input_config(comm), comm)},
           input_strings_{input_container_.get_strings()} {}
 
     // restore the original order of the input strings

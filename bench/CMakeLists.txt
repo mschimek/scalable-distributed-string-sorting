@@ -44,6 +44,9 @@ target_sources(
           detail/config_json.hpp
           detail/dispatch.hpp
           detail/enum_names.hpp
+          detail/levels.hpp
+          detail/stats.hpp
+          detail/warmup.hpp
           detail/reporting.hpp
           detail/algorithms/merge_sort.hpp
           detail/algorithms/prefix_doubling.hpp
