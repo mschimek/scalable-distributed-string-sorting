@@ -128,12 +128,6 @@ message(STATUS "RQuick Version 1 Enabled: ${CLI_ENABLE_RQUICK_V1}")
 message(STATUS "RQuick With LCP Enabled: ${CLI_ENABLE_RQUICK_LCP}")
 message(STATUS "RQuick Long Filter Enabled: ${CLI_ENABLE_RQUICK_LONG_FILTER}")
 
-option(USE_SHARED_MEMORY_SORT "sort using a shared memory string sorting algorithm" Off)
-message(STATUS "Shared Memory Enabled: ${USE_SHARED_MEMORY_SORT}")
-
-option(USE_RQUICK_SORT "sort using RQuick alogrithm" Off)
-message(STATUS "RQuick Sort Enabled: ${USE_RQUICK_SORT}")
-
 option(DSS_BUILD_EXAMPLES "build example programs in examples/" Off)
 message(STATUS "Examples Enabled: ${DSS_BUILD_EXAMPLES}")
 
@@ -216,9 +210,23 @@ target_link_libraries(dss_lib
   PUBLIC  dss_base
   PRIVATE kamping::kamping MPI::MPI_CXX)
 
+# One translation unit per algorithm: the AbstractAlgorithm interface keeps each algorithm's
+# template tree local to its own TU, so they compile in parallel and an edit to one of them
+# does not rebuild the others.
 add_executable(distributed_sorter
   src/executables/distributed_sorter.cpp
-  src/executables/cli.hpp)
+  src/executables/args.hpp
+  src/executables/cli.hpp
+  src/bench/algorithm.hpp
+  src/bench/algorithm_factory.cpp
+  src/bench/config_json.cpp
+  src/bench/dispatch.hpp
+  src/bench/input.hpp
+  src/bench/algorithms/merge_sort.cpp
+  src/bench/algorithms/prefix_doubling_simple.cpp
+  src/bench/algorithms/prefix_doubling_multi_level.cpp
+  src/bench/algorithms/rquick.cpp
+  src/bench/algorithms/shared_memory.cpp)
 
 target_include_directories(distributed_sorter PRIVATE
   "${CMAKE_CURRENT_BINARY_DIR}/include")

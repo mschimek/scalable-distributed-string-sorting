@@ -1,0 +1,100 @@
+// (c) 2019 Matthias Schimek
+// (c) 2023 Pascal Mehnert
+// This code is licensed under BSD 2-Clause License (see LICENSE for details)
+
+#include "bench/config_json.hpp"
+
+#include <cstdlib>
+#include <string>
+
+namespace dss_mehnert {
+namespace bench {
+
+nlohmann::ordered_json make_config_json(
+    SorterArgs const& args,
+    Communicator const& comm,
+    std::size_t num_levels,
+    std::size_t cpus_per_node
+) {
+    nlohmann::ordered_json config;
+    config["p"] = comm.size();
+    config["experiment"] = args.experiment;
+    config["i_mpi_adjust_alltoallv"] = [] {
+        char* val = std::getenv("I_MPI_ADJUST_ALLTOALLV");
+        if (val == nullptr) {
+            return std::string{};
+        }
+        return std::string{val};
+    }();
+    config["i_mpi_adjust_allgatherv"] = [] {
+        char* val = std::getenv("I_MPI_ADJUST_ALLGATHERV");
+        if (val == nullptr) {
+            return std::string{};
+        }
+        return std::string{val};
+    }();
+
+    config["input"]["string-generator"] = args.string_generator;
+    config["input"]["path"] = args.path;
+    config["input"]["max-num-bytes"] = args.max_num_bytes;
+    config["input"]["num-strings"] = args.num_strings;
+    config["input"]["length-strings"] = args.len_strings;
+    config["input"]["min-len-strings"] = args.len_strings_min;
+    config["input"]["max-len-strings"] = args.len_strings_max;
+    config["input"]["DN-ratio"] = args.dn_ratio;
+    config["input"]["dn-encode-padding"] = args.dn_encode_padding;
+    config["input"]["use-uniform-prefix"] = args.use_uniform_prefix;
+    config["input"]["skew-fraction"] = args.skew_fraction;
+    config["input"]["skew-factor"] = args.skew_factor;
+    config["input"]["placement"] = args.id_placement;
+    // the run being reproduced; `p` above is 1 for a simulated run, so record it separately
+    config["input"]["simulate-num-pes"] = args.simulate_num_pes;
+
+    config["num-iterations"] = args.num_iterations;
+    config["mpi-warmup-rounds"] = args.mpi_warmup_rounds;
+    config["algorithm"] = args.algorithm;
+    config["permutation"] = args.permutation;
+    config["num-levels"] = num_levels;
+    config["cpus-per-node"] = cpus_per_node;
+    config["group-size"] = args.levels;
+
+    config["sample-chars"] = args.sampler.sample_chars;
+    config["sample-indexed"] = args.sampler.sample_indexed;
+    config["sample-random"] = args.sampler.sample_random;
+    config["sampling-factor"] = args.sampler.sampling_factor;
+    config["splitter-length-factor"] = args.sampler.splitter_length_factor;
+    config["redistribute-sample"] = args.sampler.redistribute_sample;
+    config["level-adjusted-scaling"] = args.sampler.level_adjusted_scaling;
+    config["local-sorter"] = args.local_sorter;
+    config["splitter-sequential"] = args.splitter_sequential;
+
+    config["rquick-v1"] = args.rquick_v1;
+    config["rquick-lcp"] = args.rquick_lcp;
+    config["long-filter"] = args.long_filter;
+    // kept for backwards compatibility with existing result-processing scripts; derived from
+    // `algorithm` now that prefix doubling is one of several `--algorithm` choices
+    config["prefix-doubling"] = args.algorithm == Algorithm::prefix_doubling;
+    config["grid-bloomfilter"] = args.grid_bloomfilter;
+    config["bloomfilter-base-case"] = args.bloomfilter_base_case;
+    config["bloomfilter-level-dedup"] = args.bloomfilter_level_dedup;
+    config["lcp-compression"] = args.lcp_compression;
+    config["prefix-compression"] = args.prefix_compression;
+    config["alltoall"] = args.alltoall_algorithm;
+    config["alltoall_large_counts"] = args.alltoall_large_counts;
+    config["alltoall_onefactor_num_slots"] = args.onefactor_num_slots;
+    config["alltoall_onefactor_synchronized"] = args.onefactor_synchronized;
+    config["alltoall_onefactor_use_issend"] = args.onefactor_use_issend;
+    config["redistribution"] = enum_name(redistribution_names, args.redistribution);
+    config["strong-scaling"] = args.strong_scaling;
+
+    config["check-sorted"] = args.check_sorted;
+    config["check-complete"] = args.check_complete;
+    config["count-prefixes"] = args.count_prefixes;
+    config["print-sorted"] = args.print_sorted;
+    config["verbose"] = args.verbose;
+
+    return config;
+}
+
+} // namespace bench
+} // namespace dss_mehnert

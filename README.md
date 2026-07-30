@@ -26,13 +26,13 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-Note to run the RQuick variants as standalone algorithms you have to set the CMake option `USE_RQUICK_SORT`.
-
 ## Running
 For executing the algorithms, run:
 ```shell
 mpiexec -n <NUM_PEs> ./build/distributed_sorter <arguments> # --help provides an overview
 ```
+Pass `--algorithm {merge-sort,prefix-doubling,rquick,shared-memory}` to pick the top-level
+sorting algorithm (`merge-sort` is the default); `shared-memory` requires a single PE.
 
 For reproducing our experiments run
 ```shell
