@@ -80,9 +80,16 @@ public:
         bool const bloomfilter_base_case,
         bool const bloomfilter_level_dedup = false,
         mpi::AlltoallvParams alltoallv_params = {},
-        LocalSorter local_sorter = LocalSorter::radixsort_CI3
+        LocalSorter local_sorter = LocalSorter::radixsort_CI3,
+        bool gather_counters = false
     )
-        : Base{std::move(partition), std::move(redistribution), alltoallv_params, local_sorter},
+        : Base{
+              std::move(partition),
+              std::move(redistribution),
+              alltoallv_params,
+              local_sorter,
+              gather_counters
+          },
           bloomfilter_base_case_{bloomfilter_base_case},
           bloomfilter_level_dedup_{bloomfilter_level_dedup} {}
 

@@ -76,6 +76,7 @@ struct CommonArgs {
     bool check_sorted = false;
     bool check_complete = false;
     bool verbose = false;
+    bool gather_counters = false;
     bool count_prefixes = false;
     bool print_sorted = false;
     // base seed for input generation; the same seed reproduces the same input

@@ -392,6 +392,13 @@ inline void add_sorter_args(
            "path for the kamping timer JSON report (empty = disabled)"
     )
         ->group("Output");
+    app.add_flag(
+           "--gather-counters",
+           args.gather_counters,
+           "record the per-level load counters for every PE, not just min/max/sum; this "
+           "dominates the report size on large PE counts"
+    )
+        ->group("Output");
 }
 
 // hack to integrate experiment flags in kaval

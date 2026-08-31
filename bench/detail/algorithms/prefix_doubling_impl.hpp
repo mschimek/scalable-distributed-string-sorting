@@ -76,7 +76,8 @@ public:
               args.bloomfilter_base_case,
               args.bloomfilter_level_dedup,
               args.alltoallv_params(),
-              args.local_sorter
+              args.local_sorter,
+              args.gather_counters
           } {}
 
     void prepare() override {

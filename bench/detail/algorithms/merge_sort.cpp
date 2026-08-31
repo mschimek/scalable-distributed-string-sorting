@@ -55,7 +55,8 @@ public:
               ),
               std::move(redistribution),
               args.alltoallv_params(),
-              args.local_sorter
+              args.local_sorter,
+              args.gather_counters
           } {}
 
     void prepare() override {

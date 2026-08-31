@@ -47,12 +47,14 @@ public:
         PartitionPolicy partition,
         RedistributionPolicy redistribution,
         mpi::AlltoallvParams alltoallv_params = {},
-        LocalSorter local_sorter = LocalSorter::radixsort_CI3
+        LocalSorter local_sorter = LocalSorter::radixsort_CI3,
+        bool gather_counters = false
     )
         : PartitionPolicy{std::move(partition)},
           RedistributionPolicy{std::move(redistribution)},
           alltoallv_params_{alltoallv_params},
-          local_sorter_{local_sorter} {}
+          local_sorter_{local_sorter},
+          gather_counters_{gather_counters} {}
 
 protected:
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
@@ -66,6 +68,11 @@ protected:
 
     // the sequential sorter used for the local base case
     LocalSorter local_sorter_;
+
+    // additionally record one value per PE for the per-level load counters. The gathered arrays
+    // dominate the report on large configurations, so this is opt-in; min/max/sum are always
+    // recorded and are enough to derive the load imbalance.
+    bool gather_counters_ = false;
 
     template <typename StringSet, typename PermutationBuilder>
         requires(StringSet::has_length)
@@ -263,12 +270,14 @@ protected:
 
         {
             using kamping::measurements::GlobalAggregationMode;
-            std::vector<GlobalAggregationMode> const agg{
+            std::vector<GlobalAggregationMode> agg{
                 GlobalAggregationMode::min,
                 GlobalAggregationMode::max,
                 GlobalAggregationMode::sum,
-                GlobalAggregationMode::gather,
             };
+            if (gather_counters_) {
+                agg.push_back(GlobalAggregationMode::gather);
+            }
             kamping::measurements::counter()
                 .append("local_num_strings", static_cast<std::int64_t>(container.size()), agg);
             kamping::measurements::counter().append(

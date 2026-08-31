@@ -91,6 +91,7 @@ nlohmann::ordered_json make_config_json(
     config["check-complete"] = args.check_complete;
     config["count-prefixes"] = args.count_prefixes;
     config["print-sorted"] = args.print_sorted;
+    config["gather-counters"] = args.gather_counters;
     config["verbose"] = args.verbose;
 
     return config;
