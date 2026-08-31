@@ -10,7 +10,7 @@ include(FetchContent)
 FetchContent_Declare(
   kamping
   GIT_REPOSITORY https://github.com/kamping-site/kamping.git
-  GIT_TAG v0.2.1
+  GIT_TAG e403f9e #v0.2.1
   SYSTEM EXCLUDE_FROM_ALL)
 
 FetchContent_Declare(tlx
