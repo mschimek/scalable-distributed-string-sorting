@@ -84,6 +84,9 @@ public:
 
         measuring_tool.disableCommVolume();
 
+        input_container_.delete_all();
+        input_copy_.delete_all();
+        permutation_.reset();
         input_container_ = input::generate_strings<StringSet>(args_.input_config(comm_), comm_);
 
         if (args_.check_sorted || args_.check_complete) {

@@ -43,6 +43,8 @@ public:
         auto& measuring_tool = measurement::MeasuringTool::measuringTool();
 
         measuring_tool.disableCommVolume();
+        input_container_.delete_all();
+        sorted_container_.reset();
         input_container_ = input::generate_strings<StringSet>(args_.input_config(comm_), comm_);
 
         if (args_.check_sorted || args_.check_complete) {
