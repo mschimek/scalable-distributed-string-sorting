@@ -11,6 +11,7 @@
 #include <utility>
 
 #include <kamping/collectives/barrier.hpp>
+#include <kamping/measurements/timer.hpp>
 #include <tlx/die.hpp>
 #include <tlx/sort/strings/string_ptr.hpp>
 
@@ -65,10 +66,12 @@ public:
         auto const& mpi_comm = comm_.mpi_communicator();
 
         measuring_tool.start("none", "sorting_overall");
+        kamping::measurements::timer().synchronize_and_start("sorting_overall");
         RQuick2::Data<StringPtr> data{input_container_.release_raw_strings()};
         sorted_container_.emplace(
             RQuick2::sort(std::move(data), tag, gen, mpi_comm, args_.local_sorter)
         );
+        kamping::measurements::timer().stop_and_append();
         measuring_tool.stop("none", "sorting_overall", comm_);
     }
 

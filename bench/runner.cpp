@@ -73,24 +73,38 @@ int main(int argc, char* argv[]) {
         measuring_tool.setPrefix(args.get_prefix(comm));
         measuring_tool.setVerbose(args.verbose);
 
+        spdlog::stopwatch iteration_stopwatch;
+        spdlog::stopwatch prepare_stopwatch;
         kamping::measurements::timer().synchronize_and_start("prepare");
         algo->prepare();
         kamping::measurements::timer().stop_and_append();
+        SPDLOG_LOGGER_INFO(spdlog::get("root"), "Prepared run in {} secs.", prepare_stopwatch);
         kamping::comm_world().barrier();
         spdlog::stopwatch stopwatch;
         kamping::measurements::timer().synchronize_and_start("run");
         algo->run();
         kamping::measurements::timer().stop_and_append();
         SPDLOG_LOGGER_INFO(spdlog::get("root"), "Finished run in {} secs.", stopwatch);
+        spdlog::stopwatch verify_stopwatch;
         kamping::measurements::timer().synchronize_and_start("verify");
         algo->verify();
         kamping::measurements::timer().stop_and_append();
+        SPDLOG_LOGGER_INFO(spdlog::get("root"), "Checked run in {} secs.", verify_stopwatch);
+        spdlog::stopwatch report_stopwatch;
         kamping::measurements::timer().synchronize_and_start("report");
         algo->report();
         kamping::measurements::timer().stop_and_append();
+        SPDLOG_LOGGER_INFO(spdlog::get("root"), "Reported run in {} secs.", report_stopwatch);
 
         // aggregate this iteration's kamping timer tree and reset it
         report.step_iteration();
+
+        SPDLOG_LOGGER_INFO(
+            spdlog::get("root"),
+            "Finished iteration {} in {} secs.",
+            i,
+            iteration_stopwatch
+        );
     }
 
     if (!timer_json_path.empty() && comm.is_root()) {

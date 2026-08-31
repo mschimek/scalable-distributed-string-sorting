@@ -14,6 +14,8 @@
 
 #include <kamping/collectives/barrier.hpp>
 #include <kamping/measurements/counter.hpp>
+#include <kamping/spdlog_adapter/logging.hpp>
+#include <spdlog/stopwatch.h>
 #include <tlx/die/core.hpp>
 
 #include "dss/mpi/communicator.hpp"
@@ -69,6 +71,7 @@ auto generate_strings(Config const& config, Communicator const& comm) {
 
     comm.barrier();
     measuring_tool.start("generate_strings");
+    spdlog::stopwatch stopwatch;
 
     auto input_container = [&]() -> StringLcpContainer<StringSet> {
         switch (config.generator) {
@@ -119,6 +122,7 @@ auto generate_strings(Config const& config, Communicator const& comm) {
         tlx_die("invalid string generator");
     }();
     measuring_tool.stop("generate_strings");
+    SPDLOG_LOGGER_INFO(spdlog::get("root"), "Finished string generation in {} secs.", stopwatch);
 
     comm.barrier();
 
