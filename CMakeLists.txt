@@ -16,6 +16,9 @@ FetchContent_Declare(
 FetchContent_Declare(tlx
   GIT_REPOSITORY  https://github.com/tlx/tlx.git
   GIT_TAG         cf83363
+  PATCH_COMMAND   git apply --ignore-whitespace
+                  ${CMAKE_SOURCE_DIR}/cmake/patches/tlx-ps5-bigsortstep-uaf.patch
+  UPDATE_DISCONNECTED TRUE
   SYSTEM EXCLUDE_FROM_ALL
 )
 

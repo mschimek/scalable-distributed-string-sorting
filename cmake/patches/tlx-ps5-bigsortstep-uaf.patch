@@ -1,0 +1,19 @@
+diff --git a/tlx/sort/strings/parallel_sample_sort.hpp b/tlx/sort/strings/parallel_sample_sort.hpp
+index e6e7799..defb896 100644
+--- a/tlx/sort/strings/parallel_sample_sort.hpp
++++ b/tlx/sort/strings/parallel_sample_sort.hpp
+@@ -1480,10 +1480,12 @@ public:
+             ctx_.enqueue(this, strptr_.flip(bkt[i], bktsize), depth_);
+         }
+ 
+-        this->substep_notify_done(); // release anonymous subjob handle
+-
+         if (!strptr_.with_lcp)
+             bkt_[0].destroy();
++
++        // must be last: substep_notify_done() can call substep_all_done(),
++        // which deletes `this` (see PS5BigSortStep::substep_all_done()).
++        this->substep_notify_done(); // release anonymous subjob handle
+     }
+ 
+     /*------------------------------------------------------------------------*/
