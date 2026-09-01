@@ -91,6 +91,9 @@ struct MaxLength {
 
 struct DistPrefixes {
     std::span<size_t const> prefixes;
+    // upper bound on the length of a splitter drawn from this input; only the sample is
+    // truncated, the string exchange still uses the full distinguishing prefixes
+    size_t max_length = std::numeric_limits<size_t>::max();
 };
 
 template <typename StringSet>
@@ -120,7 +123,7 @@ size_t get_string_len(
     size_t const index,
     DistPrefixes const arg
 ) {
-    return arg.prefixes[index];
+    return std::min(arg.max_length, arg.prefixes[index]);
 }
 
 template <typename StringSet, typename ExtraArg>

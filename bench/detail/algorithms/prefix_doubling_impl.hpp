@@ -116,7 +116,11 @@ public:
 
         measuring_tool.start("none", "sorting_overall");
         kamping::measurements::timer().synchronize_and_start("sorting_overall");
-        permutation_.emplace(merge_sort_.sort(std::move(input_container_), *comms_));
+        permutation_.emplace(merge_sort_.sort(
+            std::move(input_container_),
+            *comms_,
+            args_.sampler.splitter_length_factor
+        ));
         kamping::measurements::timer().stop_and_append();
         measuring_tool.stop("none", "sorting_overall", comm_);
     }

@@ -21,6 +21,7 @@
 #include "dss/mpi/communicator.hpp"
 #include "dss/sorter/distributed/bloomfilter2.hpp"
 #include "dss/sorter/distributed/merge_sort.hpp"
+#include "dss/sorter/distributed/misc.hpp"
 #include "dss/sorter/distributed/permutation.hpp"
 #include "dss/sorter/distributed/sample.hpp"
 #include "dss/sorter/local_sorter.hpp"
@@ -140,7 +141,8 @@ protected:
         StringLcpContainer<StringSet>& container,
         Subcommunicators const& comms,
         std::span<size_t const> dist_prefixes,
-        PermutationBuilder& builder
+        PermutationBuilder& builder,
+        size_t const splitter_max_length
     ) {
         auto const& comm_root = comms.comm_root();
 
@@ -148,7 +150,7 @@ protected:
             // special case for single-level sort; consider distinguishing prefixes
             this->measuring_tool_.start("sort_globally", "final_sorting");
             kamping::measurements::timer().synchronize_and_start("final_sorting");
-            sample::DistPrefixes const arg{dist_prefixes};
+            sample::DistPrefixes const arg{dist_prefixes, splitter_max_length};
             auto const& comm = comms.comm_final();
             auto const strptr = container.make_string_lcp_ptr();
             auto const send_counts = Base::compute_sorted_send_counts(strptr, arg, comm);
@@ -166,7 +168,7 @@ protected:
                 // first level of multi-level sort; consider distinguishing prefixes
                 this->measuring_tool_.start("sort_globally", "partial_sorting");
                 kamping::measurements::timer().synchronize_and_start("partial_sorting");
-                sample::DistPrefixes const arg{dist_prefixes};
+                sample::DistPrefixes const arg{dist_prefixes, splitter_max_length};
                 auto const level = *level_it++;
                 auto const& comm = level.comm_exchange;
                 auto const strptr = container.make_string_lcp_ptr();
@@ -178,10 +180,11 @@ protected:
             }
 
             for (; level_it != comms.end(); ++level_it) {
-                // intermediate level of multi-level sort; don't consider distinguishing prefixes
+                // intermediate level of multi-level sort; the distinguishing prefixes only
+                // apply to the first level, splitters are capped by length from here on
                 this->measuring_tool_.start("sort_globally", "partial_sorting");
                 kamping::measurements::timer().synchronize_and_start("partial_sorting");
-                sample::NoExtraArg const arg;
+                sample::MaxLength const arg{splitter_max_length};
                 auto const level = *level_it;
                 auto const& comm = level.comm_exchange;
                 auto const strptr = container.make_string_lcp_ptr();
@@ -196,7 +199,7 @@ protected:
                 this->measuring_tool_.start("sort_globally", "final_sorting");
                 kamping::measurements::timer().synchronize_and_start("final_sorting");
                 // final level of multi-level sort; don't consider distinguishing prefixes
-                sample::NoExtraArg const arg;
+                sample::MaxLength const arg{splitter_max_length};
                 auto const& comm = comms.comm_final();
                 auto const strptr = container.make_string_lcp_ptr();
                 auto const send_counts = Base::compute_sorted_send_counts(strptr, arg, comm);
@@ -285,7 +288,11 @@ public:
     using Subcommunicators = RedistributionPolicy::Subcommunicators;
 
     template <typename StringSet>
-    Permutation sort(StringLcpContainer<StringSet>&& container, Subcommunicators const& comms)
+    Permutation sort(
+        StringLcpContainer<StringSet>&& container,
+        Subcommunicators const& comms,
+        size_t const splitter_length_factor = 100
+    )
         requires(!has_permutation_members<StringSet>)
     {
         this->measuring_tool_.start("augment_container");
@@ -294,11 +301,15 @@ public:
             augment_string_container<Permutation>(std::move(container), rank);
         this->measuring_tool_.stop("augment_container");
 
-        return sort(std::move(augmented_container), comms);
+        return sort(std::move(augmented_container), comms, splitter_length_factor);
     }
 
     template <PermutationStringSet StringSet>
-    Permutation sort(StringLcpContainer<StringSet>&& container, Subcommunicators const& comms) {
+    Permutation sort(
+        StringLcpContainer<StringSet>&& container,
+        Subcommunicators const& comms,
+        size_t const splitter_length_factor = 100
+    ) {
         this->measuring_tool_.setPhase("local_sorting");
 
         auto const strptr = container.make_string_lcp_ptr();
@@ -313,8 +324,12 @@ public:
         PermutationBuilder<Permutation> builder{strptr.active()};
 
         if (comms.comm_root().size() != 1) {
+            this->measuring_tool_.start("avg_lcp");
+            auto const avg_lcp = compute_global_lcp_average(container.lcps(), comms.comm_root());
+            this->measuring_tool_.stop("avg_lcp");
+
             auto const prefixes = Base::run_bloom_filter(strptr, comms, start_depth);
-            Base::sort(container, comms, prefixes, builder);
+            Base::sort(container, comms, prefixes, builder, splitter_length_factor * (avg_lcp + 5));
             this->measuring_tool_.setRound(0);
         }
 

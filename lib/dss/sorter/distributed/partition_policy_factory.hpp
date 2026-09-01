@@ -185,7 +185,7 @@ using MergeSortPartitionPolicy =
 template <typename Char, typename LengthType, typename Permutation>
 using PrefixDoublingPartitionPolicy = PolymorphicPartitionPolicy<
     sorter::AugmentedStringSet<StringSet<Char, LengthType>, Permutation>,
-    sample::NoExtraArg,
+    sample::MaxLength,
     sample::DistPrefixes>;
 
 template <typename Char, typename PolymorphicPolicy>
