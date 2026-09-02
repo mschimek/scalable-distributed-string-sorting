@@ -39,15 +39,16 @@ class PartitionPolicy : private SamplePolicy, private SplitterPolicy {
 public:
     PartitionPolicy() = default;
 
-    explicit PartitionPolicy(size_t const sampling_factor) : SamplePolicy{sampling_factor} {}
+    explicit PartitionPolicy(sample::SamplingConfig const sampling_config)
+        : SamplePolicy{sampling_config} {}
 
     PartitionPolicy(
-        size_t const sampling_factor,
+        sample::SamplingConfig const sampling_config,
         bool const redistribute_sample,
         LocalSorter const local_sorter,
         mpi::AlltoallvParams const& alltoallv_params
     )
-        : SamplePolicy{sampling_factor},
+        : SamplePolicy{sampling_config},
           redistribute_sample_{redistribute_sample},
           local_sorter_{local_sorter},
           alltoallv_params_{alltoallv_params} {}

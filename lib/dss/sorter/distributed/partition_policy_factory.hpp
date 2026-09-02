@@ -26,6 +26,8 @@ enum class SplitterSorter { RQuickV1, RQuickV2, RQuickLcp, RQuickLongFilter, Seq
 
 struct SamplerArgs {
     bool sample_chars = false;
+    // Character-based sampling only, see sample::SamplingConfig::shift_to_neighbor.
+    bool shift_sample_to_neighbor = false;
     bool sample_indexed = false;
     bool sample_random = false;
     size_t sampling_factor = 2;
@@ -197,7 +199,7 @@ PolymorphicPolicy init_partition_policy(
 ) {
     auto dispatch_policy = [&]<typename PartitionPolicy> {
         return PolymorphicPolicy{PartitionPolicy{
-            sampler.sampling_factor,
+            sample::SamplingConfig{sampler.sampling_factor, sampler.shift_sample_to_neighbor},
             sampler.redistribute_sample,
             local_sorter,
             alltoallv_params

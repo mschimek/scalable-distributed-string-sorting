@@ -37,6 +37,26 @@ struct SampleParams {
     size_t seed;             // PE-dependent seed, used by the randomized samplers
 };
 
+// Configuration of the samplers below; implicitly convertible from a plain sampling factor,
+// which is all the string-based sampler needs.
+struct SamplingConfig {
+    size_t sampling_factor = 2;
+    // Character-based sampling only: replace each sampled string by one of its two neighbors
+    // (fair coin flip). The sampler picks the string that a sampled character position falls
+    // into, which is biased towards the longest strings and makes sorting the sample expensive.
+    // A neighbor covers about as many characters of the input but is picked by position rather
+    // than by length, so it tends to be shorter. Purely a heuristic; nothing guarantees it.
+    bool shift_to_neighbor = false;
+
+    SamplingConfig() = default;
+
+    SamplingConfig(size_t const sampling_factor) : sampling_factor{sampling_factor} {}
+
+    SamplingConfig(size_t const sampling_factor, bool const shift_to_neighbor)
+        : sampling_factor{sampling_factor},
+          shift_to_neighbor{shift_to_neighbor} {}
+};
+
 // Deterministic sampling: on a balanced input this amounts to the sampling_factor *
 // (num_partitions - 1) samples per PE that regular sampling classically draws.
 inline size_t get_total_num_samples(
@@ -188,6 +208,25 @@ get_sample_position(size_t const index, size_t const local_size, double const sa
     return std::min(local_size - 1, static_cast<size_t>(position));
 }
 
+// Picks one of the two neighbors of a string, see SamplingConfig::shift_to_neighbor.
+class NeighborShift {
+public:
+    explicit NeighborShift(size_t const seed) : gen_{seed} {}
+
+    // a local string index adjacent to `index`, clamped to the local input
+    size_t operator()(size_t const index, size_t const local_size) {
+        if (local_size < 2) {
+            return index;
+        }
+        bool const forward = index == 0 || (index + 1 < local_size && coin_(gen_));
+        return forward ? index + 1 : index - 1;
+    }
+
+private:
+    std::mt19937_64 gen_;
+    std::bernoulli_distribution coin_{0.5};
+};
+
 template <bool is_random>
 class StringIndexSampler;
 
@@ -305,8 +344,7 @@ public:
 
     StringBasedSampling() = default;
 
-    explicit StringBasedSampling(size_t const sampling_factor)
-        : sampling_factor_{sampling_factor} {}
+    explicit StringBasedSampling(SamplingConfig const config) : config_{config} {}
 
     template <typename StringSet, typename ExtraArg>
     Result<StringSet> sample_splitters(
@@ -319,8 +357,8 @@ public:
         size_t const global_strings =
             comm.allreduce_single(kamping::send_buf(ss.size()), kamping::op(std::plus<>{}));
         size_t const total_num_samples =
-            is_random ? get_total_num_random_samples(sampling_factor_, comm.size())
-                      : get_total_num_samples(num_partitions, sampling_factor_, comm.size());
+            is_random ? get_total_num_random_samples(config_.sampling_factor, comm.size())
+                      : get_total_num_samples(num_partitions, config_.sampling_factor, comm.size());
 
         SampleParams const params{
             .local_size = ss.size(),
@@ -357,7 +395,7 @@ public:
     }
 
 private:
-    size_t sampling_factor_;
+    SamplingConfig config_;
 };
 
 template <bool is_indexed_, bool is_random_>
@@ -371,7 +409,7 @@ public:
 
     CharBasedSampling() = default;
 
-    explicit CharBasedSampling(size_t const sampling_factor) : sampling_factor_{sampling_factor} {}
+    explicit CharBasedSampling(SamplingConfig const config) : config_{config} {}
 
     template <typename StringSet, typename ExtraArg>
     Result<StringSet> sample_splitters(
@@ -385,8 +423,8 @@ public:
         size_t const global_chars =
             comm.allreduce_single(kamping::send_buf(num_chars), kamping::op(std::plus<>{}));
         size_t const total_num_samples =
-            is_random ? get_total_num_random_samples(sampling_factor_, comm.size())
-                      : get_total_num_samples(num_partitions, sampling_factor_, comm.size());
+            is_random ? get_total_num_random_samples(config_.sampling_factor, comm.size())
+                      : get_total_num_samples(num_partitions, config_.sampling_factor, comm.size());
 
         SampleParams const params{
             .local_size = num_chars,
@@ -405,6 +443,10 @@ public:
             result.indices.reserve(sample_size);
         }
 
+        // seeded independently of the position sampler above, so that the two draws do not
+        // share a random sequence
+        _internal::NeighborShift neighbor_shift{params.seed + 0x9e3779b97f4a7c15};
+
         auto string = ss.begin();
         size_t current_chars = 0, index = 0;
         for (size_t i = 0; i < sample_size && string != ss.end(); ++i) {
@@ -415,8 +457,10 @@ public:
 
             assert_unequal(string, ss.begin());
 
-            auto const& sample = ss[string - 1];
-            auto const sample_index = index - 1;
+            auto const sample_index = config_.shift_to_neighbor
+                                          ? neighbor_shift(index - 1, ss.size())
+                                          : index - 1;
+            auto const& sample = ss.at(sample_index);
             auto const sample_len = get_string_len(ss, sample, sample_index, arg);
             auto const sample_chars = ss.get_chars(sample, 0);
 
@@ -432,7 +476,7 @@ public:
     }
 
 private:
-    size_t sampling_factor_;
+    SamplingConfig config_;
 };
 
 } // namespace sample

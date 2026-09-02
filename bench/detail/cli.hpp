@@ -105,6 +105,13 @@ inline void add_common_args(CommonArgs& args, CLI::App& app) {
     // -- Sampling -------------------------------------------------------------
     app.add_flag("--sample-chars", args.sampler.sample_chars, "use character based sampling")
         ->group("Sampling");
+    app.add_flag(
+           "--shift-sample-to-neighbor",
+           args.sampler.shift_sample_to_neighbor,
+           "sample a random neighbor of the string a character sample falls into"
+    )
+        ->needs("--sample-chars")
+        ->group("Sampling");
     app.add_flag("--sample-indexed", args.sampler.sample_indexed, "use indexed sampling")
         ->group("Sampling");
     app.add_flag("--sample-random", args.sampler.sample_random, "use random sampling")

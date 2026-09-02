@@ -62,6 +62,7 @@ nlohmann::ordered_json make_config_json(
     config["group-size"] = args.levels;
 
     config["sample-chars"] = args.sampler.sample_chars;
+    config["shift-sample-to-neighbor"] = args.sampler.shift_sample_to_neighbor;
     config["sample-indexed"] = args.sampler.sample_indexed;
     config["sample-random"] = args.sampler.sample_random;
     config["sampling-factor"] = args.sampler.sampling_factor;

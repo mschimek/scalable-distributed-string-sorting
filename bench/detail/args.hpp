@@ -91,6 +91,7 @@ struct CommonArgs {
                + (experiment.empty() ? "" : (" experiment=" + experiment))
                + " num_procs="          + std::to_string(comm.size())
                + " sample_chars="       + std::to_string(sampler.sample_chars)
+               + " shift_sample_to_neighbor=" + std::to_string(sampler.shift_sample_to_neighbor)
                + " sample_indexed="     + std::to_string(sampler.sample_indexed)
                + " sample_random="      + std::to_string(sampler.sample_random)
                + " sampling_factor="    + std::to_string(sampler.sampling_factor)

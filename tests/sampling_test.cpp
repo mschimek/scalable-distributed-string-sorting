@@ -381,6 +381,79 @@ TEST(CharSampling, ImbalancedCharsScaleTheSampleCount) {
     EXPECT_EQ(num_samples_in(sample.sample), expected_num_samples(local_chars, global_chars, total));
 }
 
+TEST(CharSampling, NeighborShiftDrawsTheSameNumberOfSamples) {
+    Communicator comm;
+    size_t const num_partitions = 4, factor = 2;
+
+    auto container = make_container(dss_test::random_strings(200, 1, 30, comm.rank()));
+    auto const sample = CharBasedSampling<true, false>{SamplingConfig{factor, true}}
+                            .sample_splitters(
+                                container.make_string_set(),
+                                num_partitions,
+                                NoExtraArg{},
+                                comm
+                            );
+
+    // shifting only moves a sample by one string, it does not lose or add samples
+    EXPECT_EQ(num_samples_in(sample.sample), factor * (num_partitions - 1));
+    for (auto const index: sample.indices) {
+        EXPECT_GE(index, sample.local_offset);
+        EXPECT_LT(index, sample.local_offset + container.size());
+    }
+}
+
+TEST(CharSampling, NeighborShiftPicksAnAdjacentString) {
+    Communicator comm;
+    size_t const num_partitions = 8, factor = 4;
+    size_t const local_size = 500;
+
+    auto const strings = dss_test::random_strings(local_size, 1, 40, comm.rank());
+    auto container = make_container(strings);
+    auto plain_container = make_container(strings);
+
+    auto const plain = CharBasedSampling<true, false>{factor}.sample_splitters(
+        plain_container.make_string_set(),
+        num_partitions,
+        NoExtraArg{},
+        comm
+    );
+    auto const shifted = CharBasedSampling<true, false>{SamplingConfig{factor, true}}
+                             .sample_splitters(
+                                 container.make_string_set(),
+                                 num_partitions,
+                                 NoExtraArg{},
+                                 comm
+                             );
+
+    // the sampled positions are unchanged; only the string finally taken moves by one
+    ASSERT_EQ(shifted.indices.size(), plain.indices.size());
+    bool any_shifted = false;
+    for (size_t i = 0; i != plain.indices.size(); ++i) {
+        auto const plain_pos = plain.indices[i] - plain.local_offset;
+        auto const shifted_pos = shifted.indices[i] - shifted.local_offset;
+        EXPECT_EQ(std::max(plain_pos, shifted_pos) - std::min(plain_pos, shifted_pos), 1u);
+        any_shifted |= plain_pos != shifted_pos;
+    }
+    EXPECT_TRUE(any_shifted);
+}
+
+TEST(CharSampling, NeighborShiftHandlesASingleString) {
+    Communicator comm;
+
+    // there is no neighbor to shift to; the sampler must not step outside the local input
+    auto container = make_container(fixed_length_strings(1, 10, 'a'));
+    auto const sample = CharBasedSampling<true, false>{SamplingConfig{2, true}}.sample_splitters(
+        container.make_string_set(),
+        /*num_partitions=*/4,
+        NoExtraArg{},
+        comm
+    );
+
+    for (auto const index: sample.indices) {
+        EXPECT_EQ(index, sample.local_offset);
+    }
+}
+
 TEST(CharSampling, EmptyPeDrawsNoSamples) {
     Communicator comm;
     if (comm.size() < 2) {
