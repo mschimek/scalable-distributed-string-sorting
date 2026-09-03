@@ -10,6 +10,7 @@
 #include <memory>
 #include <vector>
 
+#include <kamping/measurements/timer.hpp>
 #include <tlx/die.hpp>
 #include <tlx/sort/strings/parallel_sample_sort.hpp>
 
@@ -36,9 +37,11 @@ public:
     void prepare() override { input_container_.set(std::vector{input_strings_}); }
 
     void run() override {
+        kamping::measurements::timer().synchronize_and_start("sorting_overall");
         auto const before = std::chrono::high_resolution_clock::now();
         tlx::sort_strings_detail::parallel_sample_sort(input_container_.make_string_ptr(), 0, 0);
         auto const after = std::chrono::high_resolution_clock::now();
+        kamping::measurements::timer().stop_and_append();
         auto const delta = std::chrono::duration_cast<std::chrono::nanoseconds>(after - before);
         size_t const elapsed = delta.count();
 
